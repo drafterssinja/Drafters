@@ -3,6 +3,8 @@
 import { useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
+import { traducirErrorAuth } from '@/lib/authErrors';
+import BackButton from '@/components/BackButton';
 
 export default function RegistroPage() {
   const router = useRouter();
@@ -42,7 +44,7 @@ export default function RegistroPage() {
     setCargando(false);
 
     if (signUpError) {
-      setError(signUpError.message);
+      setError(traducirErrorAuth(signUpError.message));
       return;
     }
 
@@ -53,6 +55,7 @@ export default function RegistroPage() {
 
   return (
     <main>
+      <BackButton />
       <h1>Crear cuenta</h1>
       <p className="subtitle">Regístrate en Drafters.</p>
       <form onSubmit={onSubmit}>

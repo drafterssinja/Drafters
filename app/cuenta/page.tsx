@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase, Perfil, Movimiento } from '@/lib/supabaseClient';
+import BackButton from '@/components/BackButton';
 
 const RECARGA_MONTOS = [10, 25, 50, 100];
 
@@ -62,13 +63,13 @@ export default function CuentaPage() {
 
       if (!activo) return;
 
-      if (perfilError) setError(perfilError.message);
+      if (perfilError) setError('No se ha podido cargar tu perfil. Inténtalo de nuevo.');
       else setPerfil(perfilData as Perfil);
 
-      if (historialError) setError(historialError.message);
+      if (historialError) setError('No se ha podido cargar tu historial de partidas.');
       else setHistorial((historialData as unknown as FilaHistorial[]) ?? []);
 
-      if (movimientosError) setError(movimientosError.message);
+      if (movimientosError) setError('No se ha podido cargar tu historial de movimientos.');
       else setMovimientos((movimientosData as Movimiento[]) ?? []);
 
       setCargando(false);
@@ -94,7 +95,7 @@ export default function CuentaPage() {
     });
     setRecargando(false);
     if (rpcError) {
-      setError(rpcError.message);
+      setError('No se ha podido completar la recarga. Inténtalo de nuevo.');
       return;
     }
     setPerfil(data as Perfil);
@@ -107,6 +108,7 @@ export default function CuentaPage() {
   if (cargando) {
     return (
       <main>
+        <BackButton />
         <p className="subtitle">Cargando tu cuenta...</p>
       </main>
     );
@@ -114,6 +116,7 @@ export default function CuentaPage() {
 
   return (
     <main>
+      <BackButton />
       <h1>¡Bienvenido{perfil?.nombre ? `, ${perfil.nombre}` : ''}!</h1>
       {error && <p className="error-msg">{error}</p>}
 

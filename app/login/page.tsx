@@ -3,6 +3,8 @@
 import { useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
+import { traducirErrorAuth } from '@/lib/authErrors';
+import BackButton from '@/components/BackButton';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -24,7 +26,7 @@ export default function LoginPage() {
     setCargando(false);
 
     if (signInError) {
-      setError(signInError.message);
+      setError(traducirErrorAuth(signInError.message));
       return;
     }
 
@@ -33,6 +35,7 @@ export default function LoginPage() {
 
   return (
     <main>
+      <BackButton />
       <h1>Iniciar sesión</h1>
       <form onSubmit={onSubmit}>
         <div className="field">

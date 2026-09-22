@@ -3,6 +3,8 @@
 import { Suspense, useState, FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
+import { traducirErrorAuth } from '@/lib/authErrors';
+import BackButton from '@/components/BackButton';
 
 function VerificarForm() {
   const router = useRouter();
@@ -28,7 +30,7 @@ function VerificarForm() {
     setCargando(false);
 
     if (verifyError) {
-      setError(verifyError.message);
+      setError(traducirErrorAuth(verifyError.message));
       return;
     }
 
@@ -42,7 +44,7 @@ function VerificarForm() {
       email,
     });
     if (resendError) {
-      setError(resendError.message);
+      setError(traducirErrorAuth(resendError.message));
       return;
     }
     setReenviado(true);
@@ -50,6 +52,7 @@ function VerificarForm() {
 
   return (
     <main>
+      <BackButton />
       <h1>Verifica tu email</h1>
       <p className="subtitle">
         Te hemos enviado un código a tu email. Escríbelo aquí para activar tu cuenta.

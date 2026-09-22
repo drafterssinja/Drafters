@@ -3,6 +3,7 @@
 import { useEffect, useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase, Perfil } from '@/lib/supabaseClient';
+import BackButton from '@/components/BackButton';
 
 type Sala = { id: string; codigo: string; nombre: string; deporte: string; tipo: string; estado: string; buy_in: number };
 type Jugador = {
@@ -94,9 +95,9 @@ export default function AdminPage() {
     setSalas((salasData as Sala[]) ?? []);
     setJugadores((jugadoresData as Jugador[]) ?? []);
     setTotalUsuarios(count ?? 0);
-    if (inscripcionesError) setError(inscripcionesError.message);
+    if (inscripcionesError) setError('No se han podido cargar las estadísticas de partidas jugadas.');
     else setInscripciones((inscripcionesData as unknown as InscripcionFila[]) ?? []);
-    if (movimientosError) setError(movimientosError.message);
+    if (movimientosError) setError('No se han podido cargar los movimientos de saldo.');
     else setMovimientos((movimientosData as MovimientoFila[]) ?? []);
   }
 
@@ -155,7 +156,7 @@ export default function AdminPage() {
     setCreandoSala(false);
 
     if (insertError) {
-      setError(insertError.message);
+      setError('No se ha podido crear la mesa. Revisa los datos e inténtalo de nuevo.');
       return;
     }
 
@@ -179,7 +180,7 @@ export default function AdminPage() {
     setCreandoJugador(false);
 
     if (insertError) {
-      setError(insertError.message);
+      setError('No se ha podido añadir el jugador. Revisa los datos e inténtalo de nuevo.');
       return;
     }
 
@@ -203,6 +204,7 @@ export default function AdminPage() {
   if (autorizado === null) {
     return (
       <main>
+        <BackButton />
         <p className="subtitle">Comprobando acceso...</p>
       </main>
     );
@@ -243,6 +245,7 @@ export default function AdminPage() {
 
   return (
     <main style={{ maxWidth: 560 }}>
+      <BackButton />
       <h1>Panel de administración</h1>
       <p className="subtitle">Solo visible para el superadministrador.</p>
       {error && <p className="error-msg">{error}</p>}
