@@ -3,7 +3,14 @@
 import { useEffect, useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase, Perfil } from '@/lib/supabaseClient';
-import BackButton from '@/components/BackButton';
+import DraftersHeader from '@/components/DraftersHeader';
+import * as S from '@/lib/mockupStyles';
+import { parseListaJugadores, JugadorParseado } from '@/lib/parsePlayerList';
+import { precioPorRanking } from '@/lib/pricing';
+import { TIPOS_DE_SALA, SALAS_POR_TIPO_AL_CREAR } from '@/lib/tiposDeSala';
+import { calcularGrupoPorra, UMBRAL_MINIMO_ESPANOLES } from '@/lib/porraGrupos';
+
+type PreviewJugador = JugadorParseado & { esEspanol: boolean };
 
 type Sala = { id: string; codigo: string; nombre: string; deporte: string; tipo: string; estado: string; buy_in: number };
 type Jugador = {
@@ -29,9 +36,10 @@ const TIPO_SALA_LABELS: Record<string, string> = {
   doble_o_nada: 'Doble o Nada',
   triple_o_nada: 'Triple o Nada',
 };
+const BUYIN_LABELS: Record<string, string> = { bajo: 'Hasta 25 €', medio: '25–100 €', alto: '+100 €' };
 
-// Mismos umbrales de buy-in que usa el resto de la app (pantalla de Salas del
-// prototipo): bajo ≤25€, medio 25-100€, alto >100€.
+// Mismos umbrales de buy-in que usa el resto de la app (pantalla de Salas
+// del prototipo): bajo ≤25€, medio 25-100€, alto >100€.
 function nivelBuyIn(buyIn: number): 'bajo' | 'medio' | 'alto' {
   if (buyIn <= 25) return 'bajo';
   if (buyIn <= 100) return 'medio';
@@ -47,6 +55,7 @@ const FECHA_OPCIONES: { key: string; label: string; dias: number | null }[] = [
 
 export default function AdminPage() {
   const router = useRouter();
+  const [perfil, setPerfil] = useState<Perfil | null>(null);
   const [autorizado, setAutorizado] = useState<boolean | null>(null);
   const [salas, setSalas] = useState<Sala[]>([]);
   const [jugadores, setJugadores] = useState<Jugador[]>([]);
@@ -55,15 +64,11 @@ export default function AdminPage() {
   const [movimientos, setMovimientos] = useState<MovimientoFila[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  // Filtros del resumen financiero/actividad — mismas cuatro dimensiones que
-  // en la maqueta visual del panel de superadmin (deporte, tipo de sala,
-  // buy-in, periodo).
   const [filtroDeporte, setFiltroDeporte] = useState<string>('todos');
   const [filtroTipoSala, setFiltroTipoSala] = useState<string>('todos');
   const [filtroBuyIn, setFiltroBuyIn] = useState<string>('todos');
   const [filtroFecha, setFiltroFecha] = useState<string>('todo');
 
-  // Formulario "crear sala"
   const [nombreSala, setNombreSala] = useState('');
   const [deporteSala, setDeporteSala] = useState<(typeof DEPORTES)[number]>('futbol');
   const [competicionSala, setCompeticionSala] = useState('');
@@ -72,12 +77,28 @@ export default function AdminPage() {
   const [buyInSala, setBuyInSala] = useState(10);
   const [creandoSala, setCreandoSala] = useState(false);
 
-  // Formulario "crear jugador"
   const [nombreJugador, setNombreJugador] = useState('');
   const [deporteJugador, setDeporteJugador] = useState<(typeof DEPORTES)[number]>('futbol');
   const [competicionJugador, setCompeticionJugador] = useState('');
   const [precioJugador, setPrecioJugador] = useState(10000);
   const [creandoJugador, setCreandoJugador] = useState(false);
+
+  // Automatización: jornada de fútbol (football-data.org, vía ruta de servidor)
+  const [sincronizandoFutbol, setSincronizandoFutbol] = useState(false);
+  const [resultadoFutbol, setResultadoFutbol] = useState<
+    { competicion: string; jornada: number | null; jugadoresSincronizados: number; salasCreadas: number; fechaLimite: string | null; aviso?: string }[] | null
+  >(null);
+  const [errorFutbol, setErrorFutbol] = useState<string | null>(null);
+
+  // Automatización: torneo de golf/tenis pegado a mano (sin API disponible)
+  const [torneoNombre, setTorneoNombre] = useState('');
+  const [torneoDeporte, setTorneoDeporte] = useState<'golf' | 'tenis'>('golf');
+  const [torneoTexto, setTorneoTexto] = useState('');
+  const [torneoFechaLimite, setTorneoFechaLimite] = useState('');
+  const [torneoEsMajor, setTorneoEsMajor] = useState(false);
+  const [previewJugadores, setPreviewJugadores] = useState<PreviewJugador[]>([]);
+  const [importandoTorneo, setImportandoTorneo] = useState(false);
+  const [resultadoTorneo, setResultadoTorneo] = useState<string | null>(null);
 
   async function cargarTodo() {
     const [{ data: salasData }, { data: jugadoresData }, { count }, { data: inscripcionesData, error: inscripcionesError }, { data: movimientosData, error: movimientosError }] =
@@ -85,10 +106,10 @@ export default function AdminPage() {
         supabase.from('salas').select('id, codigo, nombre, deporte, tipo, estado, buy_in').order('created_at', { ascending: false }),
         supabase.from('jugadores').select('id, nombre, deporte, competicion, precio, lesionado').order('created_at', { ascending: false }),
         supabase.from('perfiles').select('id', { count: 'exact', head: true }),
-        // Cada inscripción arrastra el modo y, si es de una sala (no de una
-        // porra), el deporte/tipo/buy-in de esa sala — para poder filtrar el
-        // dinero jugado exactamente igual que en la maqueta visual.
-        supabase.from('inscripciones').select('importe, fecha, equipos!inner(modo, salas(deporte, tipo, buy_in))'),
+        // Las inscripciones 'reembolsada' son dinero devuelto íntegro (la sala no se
+        // llenó a tiempo y no había con quién juntarla) — no cuentan como partida
+        // jugada ni deben sumar a la facturación real.
+        supabase.from('inscripciones').select('importe, fecha, equipos!inner(modo, salas(deporte, tipo, buy_in))').neq('estado', 'reembolsada'),
         supabase.from('movimientos').select('tipo, importe, creado_en'),
       ]);
 
@@ -122,12 +143,13 @@ export default function AdminPage() {
 
       if (!activo) return;
 
-      const perfil = perfilData as Perfil | null;
-      if (!perfil || perfil.rol !== 'admin') {
+      const p = perfilData as Perfil | null;
+      if (!p || p.rol !== 'admin') {
         router.push('/cuenta');
         return;
       }
 
+      setPerfil(p);
       setAutorizado(true);
       await cargarTodo();
     }
@@ -189,23 +211,160 @@ export default function AdminPage() {
     await cargarTodo();
   }
 
+  async function sincronizarJornadaFutbol() {
+    setErrorFutbol(null);
+    setResultadoFutbol(null);
+    setSincronizandoFutbol(true);
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session) {
+      setSincronizandoFutbol(false);
+      setErrorFutbol('Tu sesión ha caducado. Vuelve a iniciar sesión.');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/admin/sync-jornada-futbol', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setErrorFutbol(body.error ?? 'No se ha podido sincronizar la jornada.');
+      } else {
+        setResultadoFutbol(body.resultados);
+        await cargarTodo();
+      }
+    } catch {
+      setErrorFutbol('No se ha podido conectar con el servidor. Inténtalo de nuevo.');
+    }
+    setSincronizandoFutbol(false);
+  }
+
+  function previsualizarTorneo() {
+    setResultadoTorneo(null);
+    setPreviewJugadores(parseListaJugadores(torneoTexto).map((j) => ({ ...j, esEspanol: false })));
+  }
+
+  function quitarDeVistaPrevia(index: number) {
+    setPreviewJugadores((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function editarNombreVistaPrevia(index: number, nombre: string) {
+    setPreviewJugadores((prev) => prev.map((j, i) => (i === index ? { ...j, nombre } : j)));
+  }
+
+  function toggleEspanolVistaPrevia(index: number) {
+    setPreviewJugadores((prev) => prev.map((j, i) => (i === index ? { ...j, esEspanol: !j.esEspanol } : j)));
+  }
+
+  async function confirmarImportacionTorneo() {
+    const nombreTorneo = torneoNombre.trim();
+    if (!nombreTorneo || previewJugadores.length === 0) return;
+
+    setImportandoTorneo(true);
+    setError(null);
+    setResultadoTorneo(null);
+
+    const total = previewJugadores.length;
+    const esGolf = torneoDeporte === 'golf';
+    const numEspanoles = esGolf ? previewJugadores.filter((j) => j.esEspanol).length : 0;
+    const filas = previewJugadores.map((j) => ({
+      nombre: j.nombre,
+      deporte: torneoDeporte,
+      competicion: nombreTorneo,
+      precio: precioPorRanking(j.rank, total),
+      // El grupo de la porra clásica (listas por color) solo aplica a golf
+      // por ahora — ver lib/porraGrupos.ts para la regla completa.
+      grupo_porra: esGolf ? calcularGrupoPorra(j.rank, j.esEspanol, numEspanoles, torneoEsMajor) : null,
+      es_espanol: esGolf ? j.esEspanol : false,
+    }));
+
+    const { error: insertError } = await supabase.from('jugadores').insert(filas);
+    if (insertError) {
+      setImportandoTorneo(false);
+      setError('No se han podido importar los jugadores. Revisa el listado e inténtalo de nuevo.');
+      return;
+    }
+
+    const fechaLimiteIso = torneoFechaLimite ? new Date(torneoFechaLimite).toISOString() : null;
+
+    const { count: salasExistentes } = await supabase
+      .from('salas')
+      .select('id', { count: 'exact', head: true })
+      .eq('competicion', nombreTorneo);
+
+    let salasCreadas = 0;
+    if (!salasExistentes) {
+      const nuevasSalas = TIPOS_DE_SALA.flatMap((tipoConfig) =>
+        Array.from({ length: SALAS_POR_TIPO_AL_CREAR }).map(() => ({
+          nombre: `${nombreTorneo} · ${tipoConfig.label}`,
+          deporte: torneoDeporte,
+          competicion: nombreTorneo,
+          tipo: tipoConfig.tipo,
+          aforo: tipoConfig.aforo,
+          buy_in: tipoConfig.buyIn,
+          fecha_limite_inscripcion: fechaLimiteIso,
+        }))
+      );
+      const { error: salasError } = await supabase.from('salas').insert(nuevasSalas);
+      if (!salasError) salasCreadas = nuevasSalas.length;
+    }
+
+    // Porra clásica: por ahora solo para golf, una por torneo, usando el
+    // mismo listado de jugadores (ya repartido en sus listas por color).
+    let porraCreada = false;
+    if (esGolf) {
+      const { count: porraExistente } = await supabase
+        .from('porras')
+        .select('id', { count: 'exact', head: true })
+        .eq('competicion', nombreTorneo);
+      if (!porraExistente) {
+        const { error: porraError } = await supabase.from('porras').insert({
+          major: nombreTorneo,
+          competicion: nombreTorneo,
+          fecha_limite_inscripcion: fechaLimiteIso,
+          estado: 'disponible',
+        });
+        if (!porraError) porraCreada = true;
+      }
+    }
+
+    setImportandoTorneo(false);
+    setResultadoTorneo(
+      `Importados ${filas.length} jugadores de "${nombreTorneo}". ${salasCreadas} salas nuevas creadas.` +
+        (esGolf ? ` ${porraCreada ? 'Porra clásica creada.' : 'Porra clásica ya existía.'}` : '')
+    );
+    setPreviewJugadores([]);
+    setTorneoTexto('');
+    setTorneoNombre('');
+    setTorneoFechaLimite('');
+    setTorneoEsMajor(false);
+    await cargarTodo();
+  }
+
   async function toggleLesionado(jugador: Jugador) {
     await supabase.from('jugadores').update({ lesionado: !jugador.lesionado }).eq('id', jugador.id);
     await cargarTodo();
   }
 
   async function cerrarSala(sala: Sala) {
-    // Al marcarla 'finalizada', el trigger trg_salas_mantener_disponibles se
-    // encarga solo de crear mesas nuevas del mismo tipo si hiciera falta.
     await supabase.from('salas').update({ estado: 'finalizada' }).eq('id', sala.id);
     await cargarTodo();
   }
 
-  if (autorizado === null) {
+  if (autorizado === null || !perfil) {
     return (
-      <main>
-        <BackButton />
-        <p className="subtitle">Comprobando acceso...</p>
+      <main style={S.mainReset}>
+        <div style={S.pageFrame}>
+          <DraftersHeader />
+          <div style={S.accountSection}>
+            <p style={{ fontSize: 14, color: S.MUTED }}>Comprobando acceso...</p>
+          </div>
+        </div>
       </main>
     );
   }
@@ -222,9 +381,6 @@ export default function AdminPage() {
     return dias <= maxDias;
   };
 
-  // Solo las inscripciones de SALAS (no porras) tienen deporte/tipo/buy-in
-  // propios, así que son las que se pueden filtrar por esas tres dimensiones
-  // — igual que en la maqueta visual.
   const inscripcionesFiltradas = inscripciones.filter((i) => {
     const sala = i.equipos?.salas;
     if (!sala) return false;
@@ -239,185 +395,367 @@ export default function AdminPage() {
 
   const partidasJugadas = inscripcionesFiltradas.length;
   const dineroJugado = inscripcionesFiltradas.reduce((acc, i) => acc + Number(i.importe), 0);
-  const rakeGanado = dineroJugado * 0.1; // 10% real sobre el dinero jugado ya filtrado, no un dato aparte.
+  const rakeGanado = dineroJugado * 0.1;
   const dineroDepositado = movimientosFiltrados.filter((m) => m.tipo === 'deposito').reduce((acc, m) => acc + Number(m.importe), 0);
   const dineroRetirado = movimientosFiltrados.filter((m) => m.tipo === 'retiro').reduce((acc, m) => acc + Number(m.importe), 0);
 
+  const saldoLabel = `${perfil.saldo_simulado.toFixed(2)} €`;
+  const initials = S.iniciales(perfil.nombre, perfil.apellido);
+
+  const statCards: { value: string; label: string }[] = [
+    { value: `${dineroDepositado.toFixed(2)} €`, label: 'Dinero depositado' },
+    { value: `${dineroRetirado.toFixed(2)} €`, label: 'Dinero retirado' },
+    { value: `${partidasJugadas}`, label: 'Partidas jugadas' },
+    { value: `${dineroJugado.toFixed(2)} €`, label: 'Dinero jugado' },
+    { value: `${rakeGanado.toFixed(2)} €`, label: 'Rake ganado (10%)' },
+    { value: `${totalUsuarios ?? '—'}`, label: 'Usuarios registrados' },
+  ];
+
   return (
-    <main style={{ maxWidth: 560 }}>
-      <BackButton />
-      <h1>Panel de administración</h1>
-      <p className="subtitle">Solo visible para el superadministrador.</p>
-      {error && <p className="error-msg">{error}</p>}
-
-      <div className="stat-grid">
-        {mesasPorDeporte.map((m) => (
-          <div className="stat-card" key={m.deporte}>
-            <div className="value">{m.total}</div>
-            <div className="label">Mesas en juego · {m.deporte}</div>
+    <main style={S.mainReset}>
+      <div style={S.pageFrame}>
+        <DraftersHeader saldoLabel={saldoLabel} accountInitials={initials} />
+        <div style={S.accountSection}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT, fontFamily: "'Barlow Condensed', sans-serif", margin: 0 }}>
+              Panel de administración
+            </h1>
+            <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>Solo visible para el superadministrador.</p>
           </div>
-        ))}
-      </div>
 
-      <h2 style={{ fontSize: 16, margin: '8px 0 0' }}>Filtros del resumen financiero</h2>
-      <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div className="field">
-          <label>Deporte</label>
-          <select value={filtroDeporte} onChange={(e) => setFiltroDeporte(e.target.value)} style={{ width: '100%', padding: 10, borderRadius: 8, background: '#131917', color: '#f5f7f5', border: '1px solid #1e2723' }}>
-            <option value="todos">Todos</option>
-            {DEPORTES.map((d) => <option key={d} value={d}>{d}</option>)}
-          </select>
-        </div>
-        <div className="field">
-          <label>Tipo de sala</label>
-          <select value={filtroTipoSala} onChange={(e) => setFiltroTipoSala(e.target.value)} style={{ width: '100%', padding: 10, borderRadius: 8, background: '#131917', color: '#f5f7f5', border: '1px solid #1e2723' }}>
-            <option value="todos">Todas</option>
-            {TIPOS_SALA.map((t) => <option key={t} value={t}>{TIPO_SALA_LABELS[t]}</option>)}
-          </select>
-        </div>
-        <div className="field">
-          <label>Buy-in</label>
-          <select value={filtroBuyIn} onChange={(e) => setFiltroBuyIn(e.target.value)} style={{ width: '100%', padding: 10, borderRadius: 8, background: '#131917', color: '#f5f7f5', border: '1px solid #1e2723' }}>
-            <option value="todos">Cualquiera</option>
-            <option value="bajo">Hasta 25 €</option>
-            <option value="medio">25–100 €</option>
-            <option value="alto">+100 €</option>
-          </select>
-        </div>
-        <div className="field">
-          <label>Periodo</label>
-          <select value={filtroFecha} onChange={(e) => setFiltroFecha(e.target.value)} style={{ width: '100%', padding: 10, borderRadius: 8, background: '#131917', color: '#f5f7f5', border: '1px solid #1e2723' }}>
-            {FECHA_OPCIONES.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
-          </select>
-        </div>
-      </div>
+          {error && <p style={S.errorText}>{error}</p>}
 
-      <div className="stat-grid">
-        <div className="stat-card">
-          <div className="value">{dineroDepositado.toFixed(2)} €</div>
-          <div className="label">Dinero depositado</div>
-        </div>
-        <div className="stat-card">
-          <div className="value">{dineroRetirado.toFixed(2)} €</div>
-          <div className="label">Dinero retirado</div>
-        </div>
-        <div className="stat-card">
-          <div className="value">{partidasJugadas}</div>
-          <div className="label">Partidas jugadas</div>
-        </div>
-        <div className="stat-card">
-          <div className="value">{dineroJugado.toFixed(2)} €</div>
-          <div className="label">Dinero jugado</div>
-        </div>
-        <div className="stat-card">
-          <div className="value">{rakeGanado.toFixed(2)} €</div>
-          <div className="label">Rake ganado (10%)</div>
-        </div>
-        <div className="stat-card">
-          <div className="value">{totalUsuarios ?? '—'}</div>
-          <div className="label">Usuarios registrados</div>
-        </div>
-      </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <span style={S.sectionLabel}>Automatizar jornada de fútbol</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 14 }}>
+              <p style={{ fontSize: 12.5, color: S.MUTED_2, margin: 0, lineHeight: 1.5 }}>
+                Trae la próxima jornada real de La Liga, Premier League y Champions League (football-data.org), sincroniza
+                los jugadores de los equipos que juegan, fija la fecha límite de inscripción al inicio del primer
+                partido y abre {SALAS_POR_TIPO_AL_CREAR} salas de cada tipo si esa jornada no las tenía ya.
+              </p>
+              <button
+                type="button"
+                onClick={sincronizarJornadaFutbol}
+                disabled={sincronizandoFutbol}
+                style={{ ...S.primaryButton, marginTop: 0, opacity: sincronizandoFutbol ? 0.7 : 1 }}
+              >
+                {sincronizandoFutbol ? 'Sincronizando (puede tardar hasta un minuto)...' : 'Sincronizar próxima jornada'}
+              </button>
+              {errorFutbol && <p style={S.errorText}>{errorFutbol}</p>}
+              {resultadoFutbol && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {resultadoFutbol.map((r) => (
+                    <div key={r.competicion} style={{ fontSize: 12, color: r.aviso ? S.ERROR : S.MUTED_2 }}>
+                      <strong style={{ color: S.TEXT }}>{r.competicion}</strong>
+                      {r.aviso
+                        ? ` — ${r.aviso}`
+                        : ` — Jornada ${r.jornada}: ${r.jugadoresSincronizados} jugadores, ${r.salasCreadas} salas nuevas.`}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
 
-      <h2 style={{ fontSize: 16 }}>Crear mesa</h2>
-      <form onSubmit={crearSala} className="card">
-        <div className="field">
-          <label htmlFor="nombreSala">Nombre</label>
-          <input id="nombreSala" required value={nombreSala} onChange={(e) => setNombreSala(e.target.value)} />
-        </div>
-        <div className="field">
-          <label htmlFor="deporteSala">Deporte</label>
-          <select id="deporteSala" value={deporteSala} onChange={(e) => setDeporteSala(e.target.value as typeof deporteSala)} style={{ width: '100%', padding: 10, borderRadius: 8, background: '#131917', color: '#f5f7f5', border: '1px solid #1e2723' }}>
-            {DEPORTES.map((d) => <option key={d} value={d}>{d}</option>)}
-          </select>
-        </div>
-        <div className="field">
-          <label htmlFor="competicionSala">Competición</label>
-          <input id="competicionSala" required value={competicionSala} onChange={(e) => setCompeticionSala(e.target.value)} placeholder="La Liga, PGA Tour..." />
-        </div>
-        <div className="field">
-          <label htmlFor="tipoSala">Tipo</label>
-          <select id="tipoSala" value={tipoSala} onChange={(e) => setTipoSala(e.target.value as typeof tipoSala)} style={{ width: '100%', padding: 10, borderRadius: 8, background: '#131917', color: '#f5f7f5', border: '1px solid #1e2723' }}>
-            {TIPOS_SALA.map((t) => <option key={t} value={t}>{TIPO_SALA_LABELS[t]}</option>)}
-          </select>
-        </div>
-        <div className="field">
-          <label htmlFor="aforoSala">Aforo</label>
-          <input id="aforoSala" type="number" min={2} required value={aforoSala} onChange={(e) => setAforoSala(Number(e.target.value))} />
-        </div>
-        <div className="field">
-          <label htmlFor="buyInSala">Buy-in (€ simulados)</label>
-          <input id="buyInSala" type="number" min={0} required value={buyInSala} onChange={(e) => setBuyInSala(Number(e.target.value))} />
-        </div>
-        <button type="submit" disabled={creandoSala}>{creandoSala ? 'Creando...' : 'Crear mesa'}</button>
-      </form>
-      <p className="subtitle" style={{ marginTop: -4 }}>
-        Recuerda crear al menos 2 mesas de cada tipo/deporte/competición — cuando una se cierre desde
-        el botón &quot;Cerrar&quot; de abajo, el sistema repone automáticamente hasta llegar a ese mínimo.
-      </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <span style={S.sectionLabel}>Nuevo torneo de golf o tenis</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 14 }}>
+              <p style={{ fontSize: 12.5, color: S.MUTED_2, margin: 0, lineHeight: 1.5 }}>
+                No hay ninguna API gratuita (ni forma fiable/legal de hacer scraping) de las webs de PGA Tour, DP World
+                Tour, ATP o WTA. Pega aquí el listado de inscritos o el ranking copiado directamente de la web del
+                circuito — una línea por jugador, en el orden en que salga — y se interpreta automáticamente. El precio
+                de cada jugador se calcula según su posición en ese listado.
+              </p>
+              <div style={S.field}>
+                <span style={S.label}>Nombre del torneo</span>
+                <input value={torneoNombre} onChange={(e) => setTorneoNombre(e.target.value)} placeholder="PGA Tour · The Open, ATP 500 Hamburgo..." style={S.input} />
+              </div>
+              <div style={S.field}>
+                <span style={S.label}>Deporte</span>
+                <select value={torneoDeporte} onChange={(e) => setTorneoDeporte(e.target.value as typeof torneoDeporte)} style={S.selectInput}>
+                  <option value="golf">Golf</option>
+                  <option value="tenis">Tenis</option>
+                </select>
+              </div>
+              <div style={S.field}>
+                <span style={S.label}>Fecha y hora límite de inscripción</span>
+                <input type="datetime-local" value={torneoFechaLimite} onChange={(e) => setTorneoFechaLimite(e.target.value)} style={S.input} />
+              </div>
+              {torneoDeporte === 'golf' && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: S.MUTED, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={torneoEsMajor} onChange={(e) => setTorneoEsMajor(e.target.checked)} />
+                  Es un major (Masters de Augusta, Open Championship, US Open o PGA Championship)
+                </label>
+              )}
+              <div style={S.field}>
+                <span style={S.label}>Listado pegado de la web del circuito</span>
+                <textarea
+                  value={torneoTexto}
+                  onChange={(e) => setTorneoTexto(e.target.value)}
+                  placeholder={'1  Scottie Scheffler\n2  Rory McIlroy\n3  Jon Rahm\n...'}
+                  rows={6}
+                  style={{ ...S.input, fontFamily: 'monospace', fontSize: 13, resize: 'vertical' }}
+                />
+              </div>
+              <button type="button" onClick={previsualizarTorneo} disabled={!torneoTexto.trim()} style={{ ...S.secondaryLinkButton, opacity: torneoTexto.trim() ? 1 : 0.5 }}>
+                Previsualizar listado
+              </button>
 
-      <table>
-        <thead>
-          <tr><th>Código</th><th>Nombre</th><th>Deporte</th><th>Estado</th><th></th></tr>
-        </thead>
-        <tbody>
-          {salas.map((s) => (
-            <tr key={s.id}>
-              <td>{s.codigo}</td><td>{s.nombre}</td><td>{s.deporte}</td><td>{s.estado}</td>
-              <td>
-                {s.estado !== 'finalizada' && (
-                  <button className="secondary" style={{ width: 'auto', padding: '4px 8px', fontSize: 12 }} onClick={() => cerrarSala(s)}>
-                    Cerrar
+              {previewJugadores.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <span style={{ fontSize: 11, color: S.MUTED_3 }}>
+                    {previewJugadores.length} jugadores detectados — revisa y corrige antes de confirmar.
+                    {torneoDeporte === 'golf' &&
+                      ` Marca "ES" en los jugadores españoles — con ${UMBRAL_MINIMO_ESPANOLES} o más marcados se les crea una lista aparte.`}
+                  </span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 260, overflowY: 'auto' }}>
+                    {previewJugadores.map((j, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ width: 28, flexShrink: 0, fontSize: 11, color: S.MUTED_3, textAlign: 'right' }}>#{j.rank}</span>
+                        <input
+                          value={j.nombre}
+                          onChange={(e) => editarNombreVistaPrevia(i, e.target.value)}
+                          style={{ ...S.input, padding: '8px 10px', fontSize: 13 }}
+                        />
+                        {torneoDeporte === 'golf' && (
+                          <label
+                            title="Jugador español"
+                            style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, fontSize: 11, color: S.MUTED_2, cursor: 'pointer' }}
+                          >
+                            <input type="checkbox" checked={j.esEspanol} onChange={() => toggleEspanolVistaPrevia(i)} />
+                            ES
+                          </label>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => quitarDeVistaPrevia(i)}
+                          aria-label="Quitar"
+                          style={{ flexShrink: 0, background: 'transparent', border: `1px solid ${S.BORDER}`, borderRadius: 8, color: S.ERROR, width: 32, height: 32, cursor: 'pointer' }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={confirmarImportacionTorneo}
+                    disabled={importandoTorneo || !torneoNombre.trim()}
+                    style={{ ...S.primaryButton, marginTop: 0, opacity: importandoTorneo || !torneoNombre.trim() ? 0.7 : 1 }}
+                  >
+                    {importandoTorneo ? 'Importando...' : `Confirmar e importar ${previewJugadores.length} jugadores`}
                   </button>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+                </div>
+              )}
+              {resultadoTorneo && <p style={S.infoText}>{resultadoTorneo}</p>}
+            </div>
+          </div>
 
-      <h2 style={{ fontSize: 16 }}>Jugadores</h2>
-      <form onSubmit={crearJugador} className="card">
-        <div className="field">
-          <label htmlFor="nombreJugador">Nombre</label>
-          <input id="nombreJugador" required value={nombreJugador} onChange={(e) => setNombreJugador(e.target.value)} />
-        </div>
-        <div className="field">
-          <label htmlFor="deporteJugador">Deporte</label>
-          <select id="deporteJugador" value={deporteJugador} onChange={(e) => setDeporteJugador(e.target.value as typeof deporteJugador)} style={{ width: '100%', padding: 10, borderRadius: 8, background: '#131917', color: '#f5f7f5', border: '1px solid #1e2723' }}>
-            {DEPORTES.map((d) => <option key={d} value={d}>{d}</option>)}
-          </select>
-        </div>
-        <div className="field">
-          <label htmlFor="competicionJugador">Competición / jornada</label>
-          <input id="competicionJugador" required value={competicionJugador} onChange={(e) => setCompeticionJugador(e.target.value)} />
-        </div>
-        <div className="field">
-          <label htmlFor="precioJugador">Precio virtual (€)</label>
-          <input id="precioJugador" type="number" min={0} required value={precioJugador} onChange={(e) => setPrecioJugador(Number(e.target.value))} />
-        </div>
-        <button type="submit" disabled={creandoJugador}>{creandoJugador ? 'Creando...' : 'Añadir jugador'}</button>
-      </form>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <span style={S.sectionLabel}>Mesas en juego ahora</span>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+              {mesasPorDeporte.map((m) => (
+                <div key={m.deporte} style={{ display: 'flex', flexDirection: 'column', gap: 4, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 12 }}>
+                  <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 20, color: S.TEXT }}>{m.total}</span>
+                  <span style={{ fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em', color: S.MUTED_2 }}>{m.deporte}</span>
+                </div>
+              ))}
+            </div>
+          </div>
 
-      <table>
-        <thead>
-          <tr><th>Nombre</th><th>Deporte</th><th>Precio</th><th>Lesionado</th></tr>
-        </thead>
-        <tbody>
-          {jugadores.map((j) => (
-            <tr key={j.id}>
-              <td>{j.nombre}</td>
-              <td>{j.deporte}</td>
-              <td>{j.precio} €</td>
-              <td>
-                <button className="secondary" style={{ width: 'auto', padding: '4px 8px', fontSize: 12 }} onClick={() => toggleLesionado(j)}>
-                  {j.lesionado ? 'Sí — quitar' : 'No — marcar'}
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, background: '#10150F', border: '1px solid #1E2723', borderRadius: 14, padding: 16 }}>
+            <span style={S.sectionLabel}>Filtros del resumen financiero</span>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Deporte</span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                <button type="button" style={S.pill(filtroDeporte === 'todos')} onClick={() => setFiltroDeporte('todos')}>Todos</button>
+                {DEPORTES.map((d) => (
+                  <button key={d} type="button" style={S.pill(filtroDeporte === d)} onClick={() => setFiltroDeporte(d)}>{d}</button>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Tipo de sala</span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                <button type="button" style={S.pill(filtroTipoSala === 'todos')} onClick={() => setFiltroTipoSala('todos')}>Todas</button>
+                {TIPOS_SALA.map((t) => (
+                  <button key={t} type="button" style={S.pill(filtroTipoSala === t)} onClick={() => setFiltroTipoSala(t)}>{TIPO_SALA_LABELS[t]}</button>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Buy-in</span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                <button type="button" style={S.pill(filtroBuyIn === 'todos')} onClick={() => setFiltroBuyIn('todos')}>Cualquiera</button>
+                {(['bajo', 'medio', 'alto'] as const).map((b) => (
+                  <button key={b} type="button" style={S.pill(filtroBuyIn === b)} onClick={() => setFiltroBuyIn(b)}>{BUYIN_LABELS[b]}</button>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Periodo</span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {FECHA_OPCIONES.map((f) => (
+                  <button key={f.key} type="button" style={S.pill(filtroFecha === f.key)} onClick={() => setFiltroFecha(f.key)}>{f.label}</button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            {statCards.map((c) => (
+              <div key={c.label} style={{ display: 'flex', flexDirection: 'column', gap: 4, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 14 }}>
+                <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 22, color: S.TEXT }}>{c.value}</span>
+                <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: S.MUTED_2 }}>{c.label}</span>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <span style={S.sectionLabel}>Crear mesa</span>
+            <form onSubmit={crearSala} style={{ display: 'flex', flexDirection: 'column', gap: 10, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 14 }}>
+              <div style={S.field}>
+                <span style={S.label}>Nombre</span>
+                <input required value={nombreSala} onChange={(e) => setNombreSala(e.target.value)} style={S.input} />
+              </div>
+              <div style={S.field}>
+                <span style={S.label}>Deporte</span>
+                <select value={deporteSala} onChange={(e) => setDeporteSala(e.target.value as typeof deporteSala)} style={S.selectInput}>
+                  {DEPORTES.map((d) => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </div>
+              <div style={S.field}>
+                <span style={S.label}>Competición</span>
+                <input required value={competicionSala} onChange={(e) => setCompeticionSala(e.target.value)} placeholder="La Liga, PGA Tour..." style={S.input} />
+              </div>
+              <div style={S.field}>
+                <span style={S.label}>Tipo</span>
+                <select value={tipoSala} onChange={(e) => setTipoSala(e.target.value as typeof tipoSala)} style={S.selectInput}>
+                  {TIPOS_SALA.map((t) => <option key={t} value={t}>{TIPO_SALA_LABELS[t]}</option>)}
+                </select>
+              </div>
+              <div style={S.field}>
+                <span style={S.label}>Aforo</span>
+                <input type="number" min={2} required value={aforoSala} onChange={(e) => setAforoSala(Number(e.target.value))} style={S.input} />
+              </div>
+              <div style={S.field}>
+                <span style={S.label}>Buy-in (€ simulados)</span>
+                <input type="number" min={0} required value={buyInSala} onChange={(e) => setBuyInSala(Number(e.target.value))} style={S.input} />
+              </div>
+              <button type="submit" disabled={creandoSala} style={{ ...S.primaryButton, marginTop: 0, opacity: creandoSala ? 0.7 : 1 }}>
+                {creandoSala ? 'Creando...' : 'Crear mesa'}
+              </button>
+            </form>
+            <p style={{ fontSize: 11, color: S.MUTED_3, margin: 0 }}>
+              Recuerda crear al menos 2 mesas de cada tipo/deporte/competición — cuando una se cierre, el sistema repone
+              automáticamente hasta llegar a ese mínimo.
+            </p>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <span style={S.sectionLabel}>Mesas recientes</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {salas.map((s) => (
+                <div key={s.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: '12px 14px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                    <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 13.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {s.nombre}
+                    </span>
+                    <span style={{ fontSize: 11, color: S.FAINT }}>{s.codigo} · {s.deporte}</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                    <span
+                      style={{
+                        fontFamily: "'Manrope', sans-serif",
+                        fontWeight: 700,
+                        fontSize: 10.5,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.04em',
+                        color: s.estado === 'finalizada' ? S.MUTED_2 : S.ACCENT,
+                        background: s.estado === 'finalizada' ? 'rgba(139,149,143,0.12)' : 'rgba(61,220,132,0.12)',
+                        borderRadius: 999,
+                        padding: '5px 10px',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {s.estado}
+                    </span>
+                    {s.estado !== 'finalizada' && (
+                      <button
+                        type="button"
+                        onClick={() => cerrarSala(s)}
+                        style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11.5, color: '#C9D2CC', background: 'transparent', border: `1px solid ${S.BORDER}`, borderRadius: 8, padding: '6px 11px', cursor: 'pointer' }}
+                      >
+                        Cerrar
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <span style={S.sectionLabel}>Jugadores</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {jugadores.map((j) => (
+                <div key={j.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: '12px 14px' }}>
+                  <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <span style={{ minWidth: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 13.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {j.nombre}
+                    </span>
+                    {j.lesionado && (
+                      <span style={{ flexShrink: 0, width: 13, height: 13, borderRadius: '50%', background: S.ERROR, display: 'inline-block' }} title="Lesionado" />
+                    )}
+                    <span style={{ flexShrink: 0, fontSize: 10.5, color: S.FAINT }}>· {j.deporte}</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                    <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 12.5, color: '#F0B94D' }}>{j.precio} €</span>
+                    <button
+                      type="button"
+                      onClick={() => toggleLesionado(j)}
+                      style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: '#C9D2CC', background: 'transparent', border: `1px solid ${S.BORDER}`, borderRadius: 8, padding: '5px 9px', cursor: 'pointer' }}
+                    >
+                      {j.lesionado ? 'Quitar lesión' : 'Marcar lesión'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <span style={S.sectionLabel}>Añadir jugador</span>
+            <form onSubmit={crearJugador} style={{ display: 'flex', flexDirection: 'column', gap: 10, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 14 }}>
+              <div style={S.field}>
+                <span style={S.label}>Nombre</span>
+                <input required value={nombreJugador} onChange={(e) => setNombreJugador(e.target.value)} style={S.input} />
+              </div>
+              <div style={S.field}>
+                <span style={S.label}>Deporte</span>
+                <select value={deporteJugador} onChange={(e) => setDeporteJugador(e.target.value as typeof deporteJugador)} style={S.selectInput}>
+                  {DEPORTES.map((d) => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </div>
+              <div style={S.field}>
+                <span style={S.label}>Competición / jornada</span>
+                <input required value={competicionJugador} onChange={(e) => setCompeticionJugador(e.target.value)} style={S.input} />
+              </div>
+              <div style={S.field}>
+                <span style={S.label}>Precio virtual (€)</span>
+                <input type="number" min={0} required value={precioJugador} onChange={(e) => setPrecioJugador(Number(e.target.value))} style={S.input} />
+              </div>
+              <button type="submit" disabled={creandoJugador} style={{ ...S.primaryButton, marginTop: 0, opacity: creandoJugador ? 0.7 : 1 }}>
+                {creandoJugador ? 'Creando...' : 'Añadir jugador'}
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
     </main>
   );
 }

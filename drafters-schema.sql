@@ -111,8 +111,19 @@ create table if not exists public.salas (
   aforo int not null,
   buy_in numeric(10, 2) not null,
   estado text not null default 'abierta' check (estado in ('abierta', 'casi_llena', 'completa', 'finalizada')),
+  -- Fecha y hora límite para inscribirse o cambiar de equipo en esta mesa
+  -- (pedido por Iñi: cada torneo/jornada la fija el admin al crearlo). Nula
+  -- mientras no se fije — la pantalla no muestra cuenta atrás en ese caso.
+  fecha_limite_inscripcion timestamptz,
   created_at timestamptz not null default now()
 );
+
+alter table public.salas add column if not exists fecha_limite_inscripcion timestamptz;
+
+-- Marca cuándo se procesó el cierre de inscripción de esta sala (ver
+-- consolidar_salas_incompletas() más abajo) — evita que la misma sala se
+-- vuelva a procesar en cada pasada del job programado.
+alter table public.salas add column if not exists procesada_cierre_en timestamptz;
 
 -- ----------------------------------------------------------------------------
 -- 3. PORRAS (Porras clásicas de golf)
@@ -121,10 +132,20 @@ create table if not exists public.porras (
   id uuid primary key default gen_random_uuid(),
   codigo text not null unique default public.generar_codigo_mesa(),
   major text not null,
+  fecha_limite_inscripcion timestamptz,
   estado text not null default 'proximamente' check (estado in ('disponible', 'proximamente', 'finalizada')),
   precio numeric(10, 2) not null default 20.00,
+  -- Igual que salas.competicion: enlaza la porra con la remesa de
+  -- `jugadores` correspondiente (mismo valor exacto que se usa al importar
+  -- el torneo desde /admin). No hay FK porque jugadores no referencia una
+  -- porra concreta (son la ficha maestra del torneo, compartida por las
+  -- salas y la porra de esa misma competición).
+  competicion text,
   created_at timestamptz not null default now()
 );
+
+alter table public.porras add column if not exists fecha_limite_inscripcion timestamptz;
+alter table public.porras add column if not exists competicion text;
 
 -- ----------------------------------------------------------------------------
 -- 4. JUGADORES (ficha maestra, editable solo por el superadministrador)
@@ -137,7 +158,18 @@ create table if not exists public.jugadores (
   equipo_real text, -- club (fútbol) o circuito
   posicion text, -- solo fútbol: portero / defensa / centrocampista / delantero
   precio numeric(10, 2) not null default 0,
-  grupo_porra text check (grupo_porra in ('amarillo', 'verde', 'azul', 'liv') or grupo_porra is null),
+  -- Lista por color de la porra clásica (solo golf, de momento — ver
+  -- lib/porraGrupos.ts para cómo se calcula automáticamente al importar un
+  -- torneo desde /admin): 'amarillo' 1-15, 'verde' 16-35, 'azul' 36+ (o
+  -- 36-70 si no es major), 'morado' 71+ (solo si no es major), y
+  -- 'espanoles' para los jugadores marcados como españoles cuando hay 3 o
+  -- más jugando ese torneo (se sacan de su lista por ranking).
+  grupo_porra text check (grupo_porra in ('amarillo', 'verde', 'azul', 'morado', 'espanoles') or grupo_porra is null),
+  -- Marcado a mano por el admin al importar el listado (la web del circuito
+  -- no siempre indica la nacionalidad de forma fiable para poder
+  -- interpretarla automáticamente). Determina si el jugador entra en la
+  -- lista de 'espanoles' de grupo_porra en vez de su tramo de ranking.
+  es_espanol boolean not null default false,
   lesionado boolean not null default false,
   metadata jsonb not null default '{}'::jsonb,
   -- De dónde viene esta ficha si no la creó el admin a mano: 'football-data.org'
@@ -156,6 +188,11 @@ create table if not exists public.jugadores (
 create unique index if not exists jugadores_fuente_externa_unica
   on public.jugadores (fuente_externa, fuente_externa_id)
   where fuente_externa_id is not null;
+
+alter table public.jugadores add column if not exists es_espanol boolean not null default false;
+alter table public.jugadores drop constraint if exists jugadores_grupo_porra_check;
+alter table public.jugadores add constraint jugadores_grupo_porra_check
+  check (grupo_porra in ('amarillo', 'verde', 'azul', 'morado', 'espanoles') or grupo_porra is null);
 
 -- ----------------------------------------------------------------------------
 -- 5. EQUIPOS
@@ -229,8 +266,19 @@ create table if not exists public.inscripciones (
   id uuid primary key default gen_random_uuid(),
   equipo_id uuid not null references public.equipos (id) on delete cascade,
   importe numeric(10, 2) not null,
-  fecha timestamptz not null default now()
+  fecha timestamptz not null default now(),
+  -- 'activa': en juego con normalidad. 'trasladada': su sala no se llenó a
+  -- tiempo y se la juntó con otra sala idéntica (ver
+  -- consolidar_salas_incompletas() más abajo) — sigue jugando y su dinero
+  -- sigue en juego. 'reembolsada': su sala no se llenó y no había sitio en
+  -- ninguna sala idéntica con la que juntarla — se le devolvió el dinero
+  -- íntegro y no cuenta como partida jugada.
+  estado text not null default 'activa' check (estado in ('activa', 'trasladada', 'reembolsada'))
 );
+
+alter table public.inscripciones add column if not exists estado text not null default 'activa';
+alter table public.inscripciones drop constraint if exists inscripciones_estado_check;
+alter table public.inscripciones add constraint inscripciones_estado_check check (estado in ('activa', 'trasladada', 'reembolsada'));
 
 -- ----------------------------------------------------------------------------
 -- 7. RESULTADOS_EVENTO
@@ -267,6 +315,24 @@ create table if not exists public.movimientos (
 );
 
 comment on table public.movimientos is 'Historial de ingresos y retiradas de saldo simulado (€) de cada usuario.';
+
+-- ----------------------------------------------------------------------------
+-- NOTIFICACIONES
+-- ----------------------------------------------------------------------------
+-- Avisos para el usuario cuando pasa algo con su inscripción sin que él haga
+-- nada — hoy solo los genera consolidar_salas_incompletas() (ver más abajo):
+-- "te hemos trasladado de sala" o "te hemos reembolsado, sentimos las
+-- molestias". Pensado para mostrarse en "Mi cuenta" cuando se construya esa
+-- pantalla.
+create table if not exists public.notificaciones (
+  id uuid primary key default gen_random_uuid(),
+  usuario_id uuid not null references public.perfiles (id) on delete cascade,
+  tipo text not null check (tipo in ('trasladado', 'reembolsado')),
+  titulo text not null,
+  mensaje text not null,
+  leido boolean not null default false,
+  created_at timestamptz not null default now()
+);
 
 -- Registra un ingreso o retirada de saldo simulado de forma atómica: inserta
 -- la fila en `movimientos` Y actualiza `perfiles.saldo_simulado` en la misma
@@ -360,6 +426,187 @@ as $$
 $$;
 
 -- ============================================================================
+-- DISPONIBILIDAD DEL NOMBRE DE USUARIO (comprobación antes de registrarse)
+-- ============================================================================
+-- Permite que la pantalla de registro compruebe si un nombre de usuario ya
+-- está en uso ANTES de intentar crear la cuenta, para avisar al momento en
+-- vez de que el usuario se entere solo al fallar el registro entero.
+-- security definer: así se puede llamar sin estar todavía autenticado (en
+-- pleno registro) sin dar acceso de lectura al resto de la tabla `perfiles`.
+create or replace function public.nombre_usuario_disponible(p_nombre_usuario text)
+returns boolean
+language sql
+stable
+security definer set search_path = public
+as $$
+  select not exists (
+    select 1 from public.perfiles where lower(nombre_usuario) = lower(p_nombre_usuario)
+  );
+$$;
+
+grant execute on function public.nombre_usuario_disponible(text) to anon, authenticated;
+
+-- ============================================================================
+-- CONSOLIDACIÓN DE SALAS INCOMPLETAS AL CERRAR LA INSCRIPCIÓN
+-- ============================================================================
+-- Pedido explícito de Iñi (22/09): cuando el plazo de inscripción de una
+-- sala (fecha_limite_inscripcion) se cumple y esa sala no se ha llenado,
+-- solo pasa algo si existe OTRA sala EXACTAMENTE igual (mismo
+-- deporte + competición + tipo — p.ej. "La Liga - Jornada 8" + "Doble o
+-- Nada") que también esté incompleta en ese momento:
+--   - La sala con MÁS jugadores inscritos se completa con jugadores de la
+--     otra (o de las otras, si hay más de dos) — por orden de inscripción,
+--     el que se apuntó antes tiene prioridad para conservar su sitio.
+--   - A quien SÍ se traslada: sigue inscrito con normalidad, se le avisa
+--     con una notificación (pensada para verse en verde en "Mi cuenta").
+--   - A quien NO cabe en ningún sitio: se le reembolsa el importe ÍNTEGRO
+--     (incluida nuestra comisión — como el trato no llega a jugarse, no se
+--     cobra nada) y se le avisa con una notificación de disculpa.
+-- Si una sala incompleta se queda SIN ninguna otra sala idéntica también
+-- incompleta, no se toca — sigue abierta tal cual hasta la siguiente pasada.
+--
+-- IMPORTANTE — falta todavía la pantalla real de "unirse a una sala", así
+-- que esta función no tiene aún ningún caso de uso real que probar de
+-- principio a fin; está lista y probada con datos sintéticos para cuando
+-- se construya esa pantalla (ver README/documento de arquitectura).
+--
+-- Para que esto se compruebe solo, sin que nadie tenga que pulsar nada:
+-- activa la extensión "pg_cron" desde el panel de Supabase (Database →
+-- Extensions → busca "pg_cron" → Enable) y ejecuta UNA VEZ en el SQL Editor:
+--
+--   select cron.schedule(
+--     'consolidar-salas-incompletas',
+--     '*/5 * * * *',
+--     $$select public.consolidar_salas_incompletas();$$
+--   );
+create or replace function public.consolidar_salas_incompletas()
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  grupo record;
+  destino_id uuid;
+  destino_aforo int;
+  destino_inscritos int;
+  huecos int;
+  candidato record;
+  movidos int;
+begin
+  for grupo in
+    select distinct deporte, competicion, tipo
+    from public.salas
+    where fecha_limite_inscripcion is not null
+      and fecha_limite_inscripcion <= now()
+      and procesada_cierre_en is null
+  loop
+    -- Sala con más jugadores entre las incompletas de este grupo exacto.
+    select s.id, s.aforo, count(e.id)
+      into destino_id, destino_aforo, destino_inscritos
+      from public.salas s
+      join public.equipos e on e.sala_id = s.id
+      where s.deporte = grupo.deporte and s.competicion = grupo.competicion and s.tipo = grupo.tipo
+        and s.fecha_limite_inscripcion <= now() and s.procesada_cierre_en is null
+      group by s.id, s.aforo
+      having count(e.id) < s.aforo
+      order by count(e.id) desc, s.created_at asc
+      limit 1;
+
+    if not found then
+      -- Ninguna sala del grupo está incompleta con al menos un jugador — no
+      -- hay nada que consolidar; se marcan procesadas para no revisarlas.
+      update public.salas
+        set procesada_cierre_en = now()
+        where deporte = grupo.deporte and competicion = grupo.competicion and tipo = grupo.tipo
+          and fecha_limite_inscripcion <= now() and procesada_cierre_en is null;
+      continue;
+    end if;
+
+    -- ¿Hay una segunda sala incompleta con la que consolidar? Si no, se deja
+    -- tal cual (sin tocar a sus jugadores ni marcarla procesada), por si el
+    -- admin abre otra sala idéntica más adelante.
+    if not exists (
+      select 1
+      from public.salas s
+      join public.equipos e on e.sala_id = s.id
+      where s.deporte = grupo.deporte and s.competicion = grupo.competicion and s.tipo = grupo.tipo
+        and s.id <> destino_id
+        and s.fecha_limite_inscripcion <= now() and s.procesada_cierre_en is null
+      group by s.id, s.aforo
+      having count(e.id) < s.aforo
+    ) then
+      continue;
+    end if;
+
+    huecos := destino_aforo - destino_inscritos;
+    movidos := 0;
+
+    for candidato in
+      select e.id as equipo_id, e.usuario_id, i.id as inscripcion_id, i.importe
+      from public.equipos e
+      join public.inscripciones i on i.equipo_id = e.id and i.estado = 'activa'
+      join public.salas s on s.id = e.sala_id
+      where s.deporte = grupo.deporte and s.competicion = grupo.competicion and s.tipo = grupo.tipo
+        and s.id <> destino_id
+        and s.fecha_limite_inscripcion <= now() and s.procesada_cierre_en is null
+      order by i.fecha asc
+    loop
+      if movidos < huecos then
+        update public.equipos set sala_id = destino_id, updated_at = now() where id = candidato.equipo_id;
+        update public.inscripciones set estado = 'trasladada' where id = candidato.inscripcion_id;
+        insert into public.notificaciones (usuario_id, tipo, titulo, mensaje) values (
+          candidato.usuario_id,
+          'trasladado',
+          'Te hemos trasladado de sala',
+          'Tu sala no llegó a completarse a tiempo, así que te hemos trasladado a otra sala idéntica que sí se ha llenado. Sigues inscrito con normalidad — no tienes que hacer nada más.'
+        );
+        movidos := movidos + 1;
+      else
+        update public.inscripciones set estado = 'reembolsada' where id = candidato.inscripcion_id;
+        update public.perfiles set saldo_simulado = saldo_simulado + candidato.importe where id = candidato.usuario_id;
+        insert into public.movimientos (usuario_id, tipo, importe) values (candidato.usuario_id, 'deposito', candidato.importe);
+        insert into public.notificaciones (usuario_id, tipo, titulo, mensaje) values (
+          candidato.usuario_id,
+          'reembolsado',
+          'Sentimos las molestias: te hemos reembolsado tu inscripción',
+          'Tu sala no llegó a completarse a tiempo y no quedaba sitio en la sala con la que se ha juntado. Te hemos devuelto tu inscripción íntegra, sin ningún descuento. Sentimos las molestias.'
+        );
+      end if;
+    end loop;
+
+    -- Todas las salas de origen se han quedado sin ningún equipo (cada uno
+    -- se ha trasladado o se ha reembolsado) — se cierran.
+    update public.salas s
+      set estado = 'finalizada', procesada_cierre_en = now()
+      where s.deporte = grupo.deporte and s.competicion = grupo.competicion and s.tipo = grupo.tipo
+        and s.id <> destino_id
+        and s.fecha_limite_inscripcion <= now() and s.procesada_cierre_en is null;
+
+    update public.salas
+      set estado = case when movidos >= huecos then 'completa' else estado end,
+          procesada_cierre_en = now()
+      where id = destino_id;
+  end loop;
+end;
+$$;
+
+revoke all on function public.consolidar_salas_incompletas() from public, anon, authenticated;
+
+-- NOTA IMPORTANTE para cualquier pantalla o consulta futura que muestre
+-- "cuántos inscritos tiene esta sala" (listado de salas, detalle de sala,
+-- estadísticas de admin, etc.): al reembolsar a un jugador,
+-- consolidar_salas_incompletas() NO borra ni desvincula su fila de
+-- `equipos` de la sala original (la clave equipo_referencia_valida exige
+-- sala_id en equipos de modo 'sala'/'mtt', y además queremos conservar el
+-- rastro histórico). Su `equipos.sala_id` se queda apuntando a esa sala
+-- aunque ya no cuenta como plaza real. Por eso, NUNCA se debe contar
+-- "inscritos" haciendo un simple count(equipos) por sala_id: hay que
+-- contarlos siempre a través de `inscripciones` filtrando
+-- `estado <> 'reembolsada'` (un jugador 'trasladado' si cuenta, porque su
+-- equipo.sala_id ya se actualizó a la sala destino real). Esto ya se
+-- respeta en el conteo de estadísticas del admin (ver app/admin/page.tsx).
+
+-- ============================================================================
 -- DISPONIBILIDAD DE MESAS: al cerrarse una sala, se regeneran del mismo tipo
 -- ============================================================================
 -- Pedido por Iñi: nunca puede haber un único formato de mesa disponible —
@@ -418,6 +665,7 @@ alter table public.equipos enable row level security;
 alter table public.inscripciones enable row level security;
 alter table public.resultados_evento enable row level security;
 alter table public.movimientos enable row level security;
+alter table public.notificaciones enable row level security;
 
 -- Perfiles: cada usuario lee/actualiza su propia fila; el admin puede leer
 -- y actualizar todas (p.ej. para gestionar la plataforma).
@@ -508,6 +756,19 @@ create policy "movimientos_select_propio" on public.movimientos
 drop policy if exists "movimientos_insert_propio" on public.movimientos;
 create policy "movimientos_insert_propio" on public.movimientos
   for insert with check (auth.uid() = usuario_id);
+
+-- Notificaciones: cada usuario ve y marca como leídas solo las suyas; nadie
+-- (ni siquiera el admin, salvo que sea la suya propia) puede crearlas a
+-- mano desde el cliente — solo las crea consolidar_salas_incompletas(), que
+-- al ser security definer se salta RLS.
+drop policy if exists "notificaciones_select_propio" on public.notificaciones;
+create policy "notificaciones_select_propio" on public.notificaciones
+  for select using (auth.uid() = usuario_id);
+
+drop policy if exists "notificaciones_update_propio" on public.notificaciones;
+create policy "notificaciones_update_propio" on public.notificaciones
+  for update using (auth.uid() = usuario_id)
+  with check (auth.uid() = usuario_id);
 
 -- Resultados de eventos: lectura pública (hace falta para pintar la
 -- clasificación de todo el mundo, no solo la propia); solo el admin puede

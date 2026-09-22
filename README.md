@@ -17,6 +17,10 @@ Esto incluye, entre otras cosas:
 - La tabla `movimientos` y la función `registrar_movimiento()` que llevan el
   historial de ingresos/retiradas de saldo simulado sin que se pueda
   desincronizar del saldo real de cada usuario.
+- `nombre_usuario_disponible()`, que la pantalla de registro usa para avisar
+  al momento si un nombre de usuario ya está en uso. **Si ya tenías el
+  esquema anterior instalado, vuelve a pegar y ejecutar el archivo entero —
+  es seguro, no borra nada — para que esta función se añada.**
 
 ## 2. Configurar el email de verificación por código
 
@@ -35,6 +39,21 @@ un CÓDIGO (como pide el flujo de Drafters), hay que cambiar la plantilla:
 
 Sin este cambio, la app seguirá funcionando, pero el usuario recibirá un
 enlace en vez de un código de 6 dígitos.
+
+## 2.5. Activar el botón "Sincronizar próxima jornada" (fútbol) en la web ya desplegada
+
+Este botón vive en el servidor, no en tu navegador, así que además de tenerlo
+en tu `.env.local`/`.env` para probarlo en tu ordenador, hace falta añadir
+estas dos variables también en Vercel para que funcione en
+`drafters-rho.vercel.app`:
+
+1. Ve a tu proyecto en vercel.com → **Settings → Environment Variables**.
+2. Añade `SUPABASE_SERVICE_ROLE_KEY` (Supabase → Project Settings → API →
+   "service_role") y `FOOTBALL_DATA_API_KEY` (la misma que ya tengas de
+   football-data.org).
+3. **No marques la casilla de "exponer al navegador"** en ninguna de las
+   dos — son secretas, solo las usa el servidor.
+4. Vuelve a desplegar (Deployments → "..." → Redeploy) para que se apliquen.
 
 ## 3. Instalar y arrancar en local
 
@@ -133,13 +152,27 @@ dos deportes más adelante.
 
 ## Qué incluye esta versión
 
+- Todas las pantallas reales (portada, login, recuperar contraseña, registro,
+  verificación, mi cuenta, recargar saldo, panel de administración) están
+  reconstruidas para que coincidan visualmente con la maqueta de Claude
+  Design (`Main.dc.html`) — mismos colores, tipografías, textos y estructura,
+  con la cabecera (flecha de volver + "DRAFTERS") igual en todas menos la
+  portada.
 - Registro (email + contraseña + nombre + apellido + nombre de usuario único
   + fecha de nacimiento + términos). El nombre de usuario es el que verán
-  los demás jugadores cuando participes en una sala/MTT.
-- Verificación por código. Login persistente.
-- Página "Mi cuenta": saldo simulado (€), botón de recarga (saldo simulado,
-  sin pasarela de pago real), historial de partidas jugadas e historial de
-  ingresos/retiradas.
+  los demás jugadores cuando participes en una sala/MTT. Al escribirlo se
+  comprueba al momento si ya está en uso (antes de intentar crear la
+  cuenta), y si el email ya tiene una cuenta creada se avisa claramente en
+  vez de dejar el formulario sin respuesta.
+- Verificación por código, con aviso claro si hay que esperar antes de poder
+  reenviarlo. Si intentas iniciar sesión sin haber verificado el email
+  todavía, se avisa y se ofrece un enlace directo a la pantalla de
+  verificación. Login persistente.
+- Página "Mi cuenta": datos editables (nombre, apellido, email, fecha de
+  nacimiento, contraseña) que se guardan de verdad en la base de datos,
+  saldo simulado (€), historial de partidas jugadas e historial de
+  ingresos/retiradas. La recarga de saldo vive ahora en su propia pantalla
+  (`/recargar`), igual que en la maqueta.
 - Panel de administración (`/admin`, solo visible para `rol = 'admin'`):
   - Estadísticas reales y filtrables por deporte, tipo de sala, buy-in y
     periodo: dinero depositado, dinero retirado, partidas jugadas, dinero
@@ -152,11 +185,42 @@ dos deportes más adelante.
 - Sincronización de jugadores reales de fútbol desde football-data.org
   (La Liga, Premier League, Champions League — plan gratuito).
 
+## Novedades de esta versión (automatización de torneos)
+
+- **Botón "Sincronizar próxima jornada"** en `/admin`: trae la próxima
+  jornada real de La Liga, Premier League y Champions League desde
+  football-data.org, sincroniza los jugadores de los equipos que juegan,
+  les pone un precio automático por posición, fija la fecha límite de
+  inscripción al inicio del primer partido y abre 2 salas de cada tipo si
+  esa jornada no las tenía ya. **Necesita dos variables de entorno nuevas en
+  Vercel** (no solo en local) — ver el aviso al final de este documento.
+- **Importador de golf y tenis**: no existe ninguna API gratuita (ni forma
+  fiable/legal de hacer scraping) de PGA Tour/DP World Tour/ATP/WTA, así que
+  en su lugar hay una caja en `/admin` para pegar el listado copiado
+  directamente de la web del circuito — se interpreta solo, se puede corregir
+  antes de confirmar, y el precio de cada jugador sale de su posición en ese
+  listado.
+- Cada sala y porra puede tener ya una **fecha límite de inscripción/cambios**
+  (se rellena sola con la automatización de fútbol, o a mano en el
+  importador de golf/tenis).
+- Nueva pantalla **"Crea tu nueva contraseña"** (`/restablecer`), a la que
+  llega el usuario tras pulsar el enlace del correo de recuperación — con
+  campo de confirmar contraseña, igual que en el registro.
+
 ## Qué falta todavía (siguientes pasos)
 
-- Reconstruir las pantallas visuales completas del prototipo (draft con
-  presupuesto virtual, campo de fútbol, clasificación en directo animada,
-  Porras clásicas) conectadas a esta misma base de datos.
+- Construir las pantallas de navegación real tras iniciar sesión: inicio con
+  "elige tu deporte", listado de salas con filtros, detalle de una sala con
+  cuenta atrás, y el draft (elegir jugadores dentro de un presupuesto,
+  confirmar equipo, clasificación) — de momento el historial de "Mi cuenta"
+  no enlaza a "Ver mesa" ni "Clasificación" porque esas pantallas todavía no
+  existen, y las salas/jugadores que ya se crean (a mano o con las
+  automatizaciones de arriba) no tienen aún dónde verse ni un flujo real
+  para unirse a ellas.
+- Porras clásicas: mismo flujo que las salas, pendiente de construir.
+- Los **tipos de sala** (aforo y buy-in) que usan las dos automatizaciones
+  nuevas son de ejemplo, en `lib/tiposDeSala.ts` — en cuanto tengas el
+  listado definitivo, se actualiza ese único archivo y ya se propaga a todo.
 - Flujo de inscripción de un usuario normal en una mesa (de momento solo el
   admin crea mesas; falta la pantalla para que un usuario normal elija
   jugadores, confirme su equipo y quede descontado el saldo).
