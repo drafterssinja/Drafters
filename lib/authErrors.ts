@@ -17,6 +17,10 @@ export function traducirErrorAuth(mensaje: string | null | undefined): string {
     'Signups not allowed for this instance': 'El registro de nuevas cuentas no está disponible ahora mismo.',
     'User already exists': 'Ya existe una cuenta registrada con este email.',
     'New password should be different from the old password.': 'La nueva contraseña debe ser distinta de la anterior.',
+    // Mensaje genérico que da Supabase cuando el disparador que crea el
+    // perfil falla (por ejemplo, por el nombre de usuario duplicado) — no da
+    // más detalle, así que avisamos de la causa más probable.
+    'Database error saving new user': 'No se ha podido crear la cuenta. Es posible que el nombre de usuario ya esté en uso — prueba con otro.',
   };
 
   if (mapaExacto[m]) return mapaExacto[m];

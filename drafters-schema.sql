@@ -7,8 +7,8 @@
 -- exists" / "or replace" / "drop ... if exists" en todas partes).
 --
 -- Qué crea:
---   1. `perfiles` — datos de cada usuario registrado (incluye el rol:
---      'usuario' o 'admin').
+--   1. `perfiles` — datos de cada usuario registrado (nombre, apellido,
+--      nombre de usuario único, y el rol: 'usuario' o 'admin').
 --   2. `salas` — Duelo/Trío/Doble o Nada/Triple o Nada, con código único
 --      correlativo (ver más abajo).
 --   3. `porras` — Porras clásicas de golf, con el mismo sistema de código.
@@ -59,6 +59,8 @@ create extension if not exists pgcrypto;
 create table if not exists public.perfiles (
   id uuid primary key references auth.users (id) on delete cascade,
   nombre text not null,
+  apellido text,
+  nombre_usuario text,
   fecha_nacimiento date,
   saldo_simulado numeric(10, 2) not null default 150.00, -- € simulados, sin valor monetario real
   terminos_aceptados boolean not null default false,
@@ -68,6 +70,21 @@ create table if not exists public.perfiles (
 );
 
 comment on table public.perfiles is 'Datos de producto de cada usuario registrado. El saldo es siempre simulado (€), sin conexión a ningún sistema de pago real. rol=''admin'' identifica al superadministrador (solo Iñi).';
+
+-- Si la tabla ya existía de una ejecución anterior del esquema (el "create
+-- table if not exists" de arriba no la toca en ese caso), estas dos columnas
+-- se añaden igualmente aquí.
+alter table public.perfiles add column if not exists apellido text;
+alter table public.perfiles add column if not exists nombre_usuario text;
+
+comment on column public.perfiles.nombre_usuario is 'Nombre público del usuario: es el que se muestra cuando participa en una sala/MTT. En las porras clásicas el usuario pone en su lugar un nombre de equipo (ver equipos.nombre_equipo).';
+
+-- El nombre de usuario tiene que ser único (sin distinguir mayúsculas de
+-- minúsculas), pero se permite null mientras algún perfil antiguo no lo
+-- tenga todavía relleno.
+create unique index if not exists perfiles_nombre_usuario_unico
+  on public.perfiles (lower(nombre_usuario))
+  where nombre_usuario is not null;
 
 -- ----------------------------------------------------------------------------
 -- CÓDIGO CORRELATIVO ÚNICO DE MESA (compartido por salas y porras)
@@ -168,6 +185,19 @@ create table if not exists public.equipos (
     (modo = 'porra' and porra_id is not null and sala_id is null)
   )
 );
+
+-- En salas/MTT el participante se identifica con su nombre_usuario (no hace
+-- falta nombre de equipo). En las porras clásicas, en cambio, el nombre de
+-- equipo es obligatorio (no se puede avanzar sin ponerlo) y no se puede
+-- repetir dentro de la misma porra.
+alter table public.equipos drop constraint if exists equipo_porra_nombre_obligatorio;
+alter table public.equipos add constraint equipo_porra_nombre_obligatorio check (
+  modo <> 'porra' or (nombre_equipo is not null and length(trim(nombre_equipo)) > 0)
+);
+
+create unique index if not exists equipos_porra_nombre_equipo_unico
+  on public.equipos (porra_id, lower(nombre_equipo))
+  where modo = 'porra';
 
 -- Mantiene updated_at al día cada vez que se modifica una fila (reutilizada
 -- por equipos y jugadores).
@@ -281,20 +311,23 @@ $$;
 -- REGISTRO AUTOMÁTICO DEL PERFIL AL CREAR LA CUENTA
 -- ============================================================================
 -- Cuando alguien completa el registro (auth.users), este disparador crea
--- automáticamente su fila en `perfiles`, tomando el nombre y la fecha de
--- nacimiento que se le pasaron a supabase.auth.signUp() en `options.data`.
--- El rol siempre se crea como 'usuario' — el ascenso a 'admin' se hace a
--- mano, una sola vez, desde el SQL Editor (ver instrucciones aparte).
+-- automáticamente su fila en `perfiles`, tomando el nombre, apellido, nombre
+-- de usuario y fecha de nacimiento que se le pasaron a supabase.auth.signUp()
+-- en `options.data`. El rol siempre se crea como 'usuario' — el ascenso a
+-- 'admin' se hace a mano, una sola vez, desde el SQL Editor (ver
+-- instrucciones aparte).
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
 security definer set search_path = public
 as $$
 begin
-  insert into public.perfiles (id, nombre, fecha_nacimiento, terminos_aceptados, terminos_aceptados_en)
+  insert into public.perfiles (id, nombre, apellido, nombre_usuario, fecha_nacimiento, terminos_aceptados, terminos_aceptados_en)
   values (
     new.id,
     coalesce(new.raw_user_meta_data ->> 'nombre', ''),
+    nullif(new.raw_user_meta_data ->> 'apellido', ''),
+    nullif(new.raw_user_meta_data ->> 'nombre_usuario', ''),
     nullif(new.raw_user_meta_data ->> 'fecha_nacimiento', '')::date,
     coalesce((new.raw_user_meta_data ->> 'terminos_aceptados')::boolean, false),
     case when (new.raw_user_meta_data ->> 'terminos_aceptados')::boolean then now() else null end

@@ -133,7 +133,9 @@ dos deportes más adelante.
 
 ## Qué incluye esta versión
 
-- Registro (email + contraseña + nombre + fecha de nacimiento + términos).
+- Registro (email + contraseña + nombre + apellido + nombre de usuario único
+  + fecha de nacimiento + términos). El nombre de usuario es el que verán
+  los demás jugadores cuando participes en una sala/MTT.
 - Verificación por código. Login persistente.
 - Página "Mi cuenta": saldo simulado (€), botón de recarga (saldo simulado,
   sin pasarela de pago real), historial de partidas jugadas e historial de
