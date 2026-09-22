@@ -36,3 +36,16 @@ export const GRUPO_PORRA_LABELS: Record<GrupoPorra, string> = {
   morado: 'Morado (71+)',
   espanoles: 'Españoles',
 };
+
+// Orden y color visual de los grupos — compartido por la pantalla de
+// detalle de porra (pestaña "Grupos") y la de crear equipo (slots), para
+// que ambas se vean y se ordenen igual.
+export const ORDEN_GRUPOS: GrupoPorra[] = ['espanoles', 'amarillo', 'verde', 'azul', 'morado'];
+
+export const COLOR_GRUPO: Record<GrupoPorra, string> = {
+  espanoles: '#FF5C5C',
+  amarillo: '#F0D94D',
+  verde: '#3DDC84',
+  azul: '#4DA3FF',
+  morado: '#B07AFF',
+};

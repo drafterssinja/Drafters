@@ -1,3 +1,16 @@
+/* Animaciones del draft (elegir jugadores) — mismos keyframes exactos de
+   Main.dc.html: slotPop cuando un hueco del equipo se rellena, rowFlash
+   cuando se toca una fila de jugador para seleccionarla. */
+@keyframes slotPop {
+  0% { opacity: 0; transform: scale(0.6) translateY(8px); }
+  65% { opacity: 1; transform: scale(1.08) translateY(-2px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes rowFlash {
+  0% { background-color: rgba(240, 185, 77, 0.35); }
+  100% { background-color: rgba(240, 185, 77, 0.12); }
+}
+
 :root {
   --bg: #0b0f0e;
   --panel: #131917;

@@ -7,7 +7,7 @@ import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
 import { parseListaJugadores, JugadorParseado } from '@/lib/parsePlayerList';
 import { precioPorRanking } from '@/lib/pricing';
-import { TIPOS_DE_SALA, SALAS_POR_TIPO_AL_CREAR } from '@/lib/tiposDeSala';
+import { generarSalasParaTorneo } from '@/lib/tiposDeSala';
 import { calcularGrupoPorra, UMBRAL_MINIMO_ESPANOLES } from '@/lib/porraGrupos';
 
 type PreviewJugador = JugadorParseado & { esEspanol: boolean };
@@ -29,12 +29,13 @@ type InscripcionFila = {
 type MovimientoFila = { tipo: 'deposito' | 'retiro'; importe: number; creado_en: string };
 
 const DEPORTES = ['futbol', 'golf', 'tenis'] as const;
-const TIPOS_SALA = ['duelo', 'trio', 'doble_o_nada', 'triple_o_nada'] as const;
+const TIPOS_SALA = ['doble_o_nada', 'triple_o_nada', 'oro_y_plata', 'tridente', 'maraton'] as const;
 const TIPO_SALA_LABELS: Record<string, string> = {
-  duelo: 'Duelo',
-  trio: 'Trío',
   doble_o_nada: 'Doble o Nada',
   triple_o_nada: 'Triple o Nada',
+  oro_y_plata: 'Oro y Plata',
+  tridente: 'Tridente',
+  maraton: 'Maratón',
 };
 const BUYIN_LABELS: Record<string, string> = { bajo: 'Hasta 25 €', medio: '25–100 €', alto: '+100 €' };
 
@@ -72,7 +73,7 @@ export default function AdminPage() {
   const [nombreSala, setNombreSala] = useState('');
   const [deporteSala, setDeporteSala] = useState<(typeof DEPORTES)[number]>('futbol');
   const [competicionSala, setCompeticionSala] = useState('');
-  const [tipoSala, setTipoSala] = useState<(typeof TIPOS_SALA)[number]>('duelo');
+  const [tipoSala, setTipoSala] = useState<(typeof TIPOS_SALA)[number]>('doble_o_nada');
   const [aforoSala, setAforoSala] = useState(2);
   const [buyInSala, setBuyInSala] = useState(10);
   const [creandoSala, setCreandoSala] = useState(false);
@@ -171,7 +172,8 @@ export default function AdminPage() {
       deporte: deporteSala,
       competicion: competicionSala,
       tipo: tipoSala,
-      aforo: aforoSala,
+      // Maratón no tiene aforo fijo (inscripción sin límite).
+      aforo: tipoSala === 'maraton' ? null : aforoSala,
       buy_in: buyInSala,
     });
 
@@ -299,17 +301,11 @@ export default function AdminPage() {
 
     let salasCreadas = 0;
     if (!salasExistentes) {
-      const nuevasSalas = TIPOS_DE_SALA.flatMap((tipoConfig) =>
-        Array.from({ length: SALAS_POR_TIPO_AL_CREAR }).map(() => ({
-          nombre: `${nombreTorneo} · ${tipoConfig.label}`,
-          deporte: torneoDeporte,
-          competicion: nombreTorneo,
-          tipo: tipoConfig.tipo,
-          aforo: tipoConfig.aforo,
-          buy_in: tipoConfig.buyIn,
-          fecha_limite_inscripcion: fechaLimiteIso,
-        }))
-      );
+      const nuevasSalas = generarSalasParaTorneo({
+        competicionLabel: nombreTorneo,
+        deporte: torneoDeporte,
+        fechaLimiteIso,
+      });
       const { error: salasError } = await supabase.from('salas').insert(nuevasSalas);
       if (!salasError) salasCreadas = nuevasSalas.length;
     }
@@ -431,7 +427,8 @@ export default function AdminPage() {
               <p style={{ fontSize: 12.5, color: S.MUTED_2, margin: 0, lineHeight: 1.5 }}>
                 Trae la próxima jornada real de La Liga, Premier League y Champions League (football-data.org), sincroniza
                 los jugadores de los equipos que juegan, fija la fecha límite de inscripción al inicio del primer
-                partido y abre {SALAS_POR_TIPO_AL_CREAR} salas de cada tipo si esa jornada no las tenía ya.
+                partido y abre 2 salas de cada variante (Doble o Nada, Triple o Nada, Oro y Plata, Tridente) más el
+                Maratón, si esa jornada no las tenía ya.
               </p>
               <button
                 type="button"
@@ -638,10 +635,15 @@ export default function AdminPage() {
                   {TIPOS_SALA.map((t) => <option key={t} value={t}>{TIPO_SALA_LABELS[t]}</option>)}
                 </select>
               </div>
-              <div style={S.field}>
-                <span style={S.label}>Aforo</span>
-                <input type="number" min={2} required value={aforoSala} onChange={(e) => setAforoSala(Number(e.target.value))} style={S.input} />
-              </div>
+              {tipoSala !== 'maraton' && (
+                <div style={S.field}>
+                  <span style={S.label}>Aforo</span>
+                  <input type="number" min={2} required value={aforoSala} onChange={(e) => setAforoSala(Number(e.target.value))} style={S.input} />
+                </div>
+              )}
+              {tipoSala === 'maraton' && (
+                <p style={{ fontSize: 11.5, color: S.MUTED_2, margin: 0 }}>El Maratón no tiene aforo fijo — inscripción sin límite.</p>
+              )}
               <div style={S.field}>
                 <span style={S.label}>Buy-in (€ simulados)</span>
                 <input type="number" min={0} required value={buyInSala} onChange={(e) => setBuyInSala(Number(e.target.value))} style={S.input} />

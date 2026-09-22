@@ -40,7 +40,7 @@ export default function LoginPage() {
       return;
     }
 
-    router.push('/cuenta');
+    router.push('/inicio');
   }
 
   return (

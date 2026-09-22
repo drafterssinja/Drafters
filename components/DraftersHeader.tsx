@@ -12,14 +12,20 @@ type Props = {
   // (pantallas de login/registro/verificación, antes de tener sesión).
   saldoLabel?: string;
   accountInitials?: string;
+  // A dónde lleva el wordmark "DRAFTERS". Por defecto: a /inicio cuando el
+  // header lleva saldo+avatar (estamos dentro de la cuenta, como en la
+  // maqueta), y a la portada pública "/" si no (login/registro/verificación,
+  // todavía sin sesión).
+  homeHref?: string;
 };
 
 // Cabecera reutilizada en todas las pantallas salvo la portada — misma
 // estructura exacta que la maqueta visual (Main.dc.html): flecha de
 // "volver" (usa el historial del navegador) + wordmark "DRAFTERS" que
 // lleva a la portada.
-export default function DraftersHeader({ saldoLabel, accountInitials }: Props) {
+export default function DraftersHeader({ saldoLabel, accountInitials, homeHref }: Props) {
   const router = useRouter();
+  const destino = homeHref ?? (saldoLabel && accountInitials ? '/inicio' : '/');
 
   return (
     <div
@@ -55,7 +61,7 @@ export default function DraftersHeader({ saldoLabel, accountInitials }: Props) {
           </svg>
         </button>
         <Link
-          href="/"
+          href={destino}
           style={{
             fontFamily: "'Barlow Condensed', sans-serif",
             fontWeight: 800,

@@ -69,7 +69,7 @@ export default function RestablecerPage() {
     }
 
     setGuardadoOk(true);
-    setTimeout(() => router.push('/cuenta'), 1500);
+    setTimeout(() => router.push('/inicio'), 1500);
   }
 
   return (

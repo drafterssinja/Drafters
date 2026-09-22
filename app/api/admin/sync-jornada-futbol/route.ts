@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { crearClienteAdmin } from '@/lib/server/supabaseAdmin';
 import { precioFutbolPorPosicion } from '@/lib/pricing';
-import { TIPOS_DE_SALA, SALAS_POR_TIPO_AL_CREAR } from '@/lib/tiposDeSala';
+import { generarSalasParaTorneo } from '@/lib/tiposDeSala';
 
 // Ruta de servidor: usa la clave "service role" (nunca llega al navegador) y
 // la clave de football-data.org para automatizar la apertura de una jornada
@@ -18,9 +18,9 @@ import { TIPOS_DE_SALA, SALAS_POR_TIPO_AL_CREAR } from '@/lib/tiposDeSala';
 //      API no da estadísticas para un precio más fino).
 //   3. Fija la fecha límite de inscripción al inicio del primer partido de
 //      la jornada.
-//   4. Si esa jornada no tenía salas todavía, crea 2 de cada tipo (ver
-//      lib/tiposDeSala.ts — provisional hasta que Iñi mande el listado
-//      definitivo de tipos de sala).
+//   4. Si esa jornada no tenía salas todavía, crea 2 de cada variante de
+//      sala (Doble o Nada, Triple o Nada, Oro y Plata, Tridente) más 1
+//      Maratón (ver lib/tiposDeSala.ts).
 export const maxDuration = 60;
 
 const FOOTBALL_DATA_API_KEY = process.env.FOOTBALL_DATA_API_KEY;
@@ -177,17 +177,11 @@ export async function POST(req: NextRequest) {
 
       let salasCreadas = 0;
       if (!salasExistentes) {
-        const nuevasSalas = TIPOS_DE_SALA.flatMap((tipoConfig) =>
-          Array.from({ length: SALAS_POR_TIPO_AL_CREAR }).map(() => ({
-            nombre: `${competicionLabel} · ${tipoConfig.label}`,
-            deporte: 'futbol',
-            competicion: competicionLabel,
-            tipo: tipoConfig.tipo,
-            aforo: tipoConfig.aforo,
-            buy_in: tipoConfig.buyIn,
-            fecha_limite_inscripcion: fechaLimite,
-          }))
-        );
+        const nuevasSalas = generarSalasParaTorneo({
+          competicionLabel,
+          deporte: 'futbol',
+          fechaLimiteIso: fechaLimite,
+        });
         const { error: salasError } = await admin.from('salas').insert(nuevasSalas);
         if (salasError) throw new Error(salasError.message);
         salasCreadas = nuevasSalas.length;

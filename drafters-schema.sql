@@ -99,16 +99,22 @@ as $$
 $$;
 
 -- ----------------------------------------------------------------------------
--- 2. SALAS (Duelo / Trío / Doble o Nada / Triple o Nada)
+-- 2. SALAS (Doble o Nada / Triple o Nada / Oro y Plata / Tridente / Maratón)
 -- ----------------------------------------------------------------------------
+-- Tipos definitivos de Iñi (23/09, tabla "DRAFTERS · Tipos de sala") — ver
+-- lib/repartoPremios.ts en la app para el reparto exacto del bote de cada
+-- uno, y lib/tiposDeSala.ts para los aforos válidos de cada tipo (Doble o
+-- Nada: 2/4/6/8/10, Triple o Nada: 3/6/9, Oro y Plata: 5, Tridente: 10).
+-- Maratón no tiene aforo fijo (inscripción sin límite) — de ahí que `aforo`
+-- sea NULLABLE, solo para ese caso.
 create table if not exists public.salas (
   id uuid primary key default gen_random_uuid(),
   codigo text not null unique default public.generar_codigo_mesa(),
   nombre text not null,
   deporte text not null check (deporte in ('futbol', 'golf', 'tenis')),
   competicion text not null,
-  tipo text not null check (tipo in ('duelo', 'trio', 'doble_o_nada', 'triple_o_nada')),
-  aforo int not null,
+  tipo text not null check (tipo in ('doble_o_nada', 'triple_o_nada', 'oro_y_plata', 'tridente', 'maraton')),
+  aforo int,
   buy_in numeric(10, 2) not null,
   estado text not null default 'abierta' check (estado in ('abierta', 'casi_llena', 'completa', 'finalizada')),
   -- Fecha y hora límite para inscribirse o cambiar de equipo en esta mesa
@@ -124,6 +130,20 @@ alter table public.salas add column if not exists fecha_limite_inscripcion times
 -- consolidar_salas_incompletas() más abajo) — evita que la misma sala se
 -- vuelva a procesar en cada pasada del job programado.
 alter table public.salas add column if not exists procesada_cierre_en timestamptz;
+
+-- Migración de los 4 tipos provisionales que había antes de que Iñi mandara
+-- la tabla definitiva (23/09) — 'duelo' y 'trio' no existen ya como tipos
+-- propios: se llevan a la variante de aforo equivalente de 'doble_o_nada' /
+-- 'triple_o_nada' (ambos aceptan ese mismo aforo). Es un update idempotente:
+-- después de la primera vez no queda ninguna fila con el tipo antiguo, así
+-- que en las siguientes ejecuciones no hace nada.
+update public.salas set tipo = 'doble_o_nada' where tipo = 'duelo';
+update public.salas set tipo = 'triple_o_nada' where tipo = 'trio';
+
+alter table public.salas alter column aforo drop not null;
+alter table public.salas drop constraint if exists salas_tipo_check;
+alter table public.salas add constraint salas_tipo_check
+  check (tipo in ('doble_o_nada', 'triple_o_nada', 'oro_y_plata', 'tridente', 'maraton'));
 
 -- ----------------------------------------------------------------------------
 -- 3. PORRAS (Porras clásicas de golf)
@@ -499,6 +519,11 @@ begin
     where fecha_limite_inscripcion is not null
       and fecha_limite_inscripcion <= now()
       and procesada_cierre_en is null
+      -- Maratón no tiene aforo fijo, así que "incompleta" no aplica — con
+      -- aforo null, la comparación count(e.id) < s.aforo ya sale falsa más
+      -- abajo, pero se excluye aquí también de forma explícita para que
+      -- quede claro y no dependa de ese comportamiento de NULL.
+      and tipo <> 'maraton'
   loop
     -- Sala con más jugadores entre las incompletas de este grupo exacto.
     select s.id, s.aforo, count(e.id)
@@ -617,6 +642,11 @@ revoke all on function public.consolidar_salas_incompletas() from public, anon, 
 -- MINIMO_ABIERTAS abiertas (contando las que ya hubiera, sin contar la que
 -- se acaba de cerrar) — cubre tanto "reponer la que se cierra" como
 -- "asegurar que siempre haya más de una a la vez".
+--
+-- Excepción: 'maraton'. Es una sala única de inscripción abierta por
+-- torneo/jornada (igual que una porra clásica, no como el resto de tipos,
+-- que son varias mesas en paralelo) — no tiene sentido clonarla al
+-- cerrarse, así que este disparador la ignora por completo.
 create or replace function public.mantener_mesas_disponibles()
 returns trigger
 language plpgsql
@@ -626,6 +656,10 @@ declare
   abiertas_restantes int;
   faltan int;
 begin
+  if new.tipo = 'maraton' then
+    return new;
+  end if;
+
   if new.estado = 'finalizada' and old.estado is distinct from 'finalizada' then
     select count(*) into abiertas_restantes
     from public.salas
@@ -780,6 +814,281 @@ create policy "resultados_select_publico" on public.resultados_evento
 drop policy if exists "resultados_admin_todo" on public.resultados_evento;
 create policy "resultados_admin_todo" on public.resultados_evento
   for all using (public.es_admin()) with check (public.es_admin());
+
+-- ============================================================================
+-- CONTEOS PÚBLICOS DE INSCRITOS (pantallas reales de inicio/salas/mesas/porras)
+-- ============================================================================
+-- Las políticas de arriba (equipos_select_propio, inscripciones_select_propio)
+-- son correctas y se quedan tal cual: cada usuario solo puede LEER el
+-- contenido de su propio equipo (qué jugadores eligió, cuánto se ha
+-- gastado...) — nadie más debería poder cotillear el equipo de un rival
+-- antes de que la sala cierre. Pero el listado de salas, el detalle de
+-- sala y "grandes torneos" sí necesitan un dato agregado que es público de
+-- verdad: cuántos inscritos tiene cada sala/porra ahora mismo (siempre
+-- contando a través de `inscripciones.estado <> 'reembolsada'`, la misma
+-- convención de la nota junto a consolidar_salas_incompletas() más arriba)
+-- y la pestaña "Jugadores" del detalle de sala necesita el nombre de cada
+-- participante, sin su equipo. De ahí estas tres funciones: son SECURITY
+-- DEFINER precisamente para poder calcular ese agregado sin tener que abrir
+-- RLS de equipos/inscripciones/perfiles a "cualquiera lee cualquier fila"
+-- (que sí filtraría los jugadores elegidos y el gasto de cada rival).
+create or replace function public.inscritos_por_sala()
+returns table (sala_id uuid, inscritos bigint)
+language sql
+security definer set search_path = public
+stable
+as $$
+  select e.sala_id, count(*)::bigint
+  from public.equipos e
+  join public.inscripciones i on i.equipo_id = e.id
+  where e.sala_id is not null and i.estado <> 'reembolsada'
+  group by e.sala_id;
+$$;
+
+revoke all on function public.inscritos_por_sala() from public;
+grant execute on function public.inscritos_por_sala() to authenticated;
+
+create or replace function public.inscritos_por_porra()
+returns table (porra_id uuid, inscritos bigint)
+language sql
+security definer set search_path = public
+stable
+as $$
+  select e.porra_id, count(*)::bigint
+  from public.equipos e
+  join public.inscripciones i on i.equipo_id = e.id
+  where e.porra_id is not null and i.estado <> 'reembolsada'
+  group by e.porra_id;
+$$;
+
+revoke all on function public.inscritos_por_porra() from public;
+grant execute on function public.inscritos_por_porra() to authenticated;
+
+-- Nombres de los participantes de una sala concreta (pestaña "Jugadores"
+-- del detalle) — nunca expone qué jugadores ha elegido cada uno ni cuánto
+-- se ha gastado, solo quién está inscrito y desde cuándo.
+create or replace function public.participantes_sala(p_sala_id uuid)
+returns table (equipo_id uuid, nombre text, created_at timestamptz)
+language sql
+security definer set search_path = public
+stable
+as $$
+  select e.id, coalesce(p.nombre_usuario, p.nombre), e.created_at
+  from public.equipos e
+  join public.inscripciones i on i.equipo_id = e.id
+  join public.perfiles p on p.id = e.usuario_id
+  where e.sala_id = p_sala_id and i.estado <> 'reembolsada'
+  order by e.created_at asc;
+$$;
+
+revoke all on function public.participantes_sala(uuid) from public;
+grant execute on function public.participantes_sala(uuid) to authenticated;
+
+-- ============================================================================
+-- INSCRIBIRSE EN UNA SALA / EN UNA PORRA (draft: elegir equipo y pagar)
+-- ============================================================================
+-- Estas dos funciones hacen, en una sola transacción atómica, todo lo que
+-- antes tocaba hacer a mano desde el cliente en varios pasos (crear el
+-- equipo, crear la inscripción, descontar el saldo): así nunca puede
+-- quedar un equipo a medio crear ni un saldo descontado sin su
+-- inscripción. Son SECURITY DEFINER porque necesitan poder contar cuántos
+-- inscritos tiene la sala/porra ya mismo (dato agregado, ver
+-- inscritos_por_sala() más arriba) sin depender de lo que la RLS del
+-- usuario que llama le deje ver — pero SIEMPRE actúan sobre auth.uid(), es
+-- decir, nunca se puede inscribir a nadie más que a uno mismo.
+--
+-- El presupuesto de fantasía (100.000 €, distinto del saldo real que se
+-- descuenta) y el precio de cada jugador se validan aquí también, del lado
+-- del servidor — nunca fiándose de un total que mande el cliente — por si
+-- alguien manipula la petición saltándose la interfaz. Ver
+-- lib/draftConfig.ts (EQUIPO_PRESUPUESTO) para el mismo valor del lado del
+-- cliente.
+create or replace function public.inscribirse_en_sala(
+  p_sala_id uuid,
+  p_jugadores jsonb,
+  p_alineacion text default null,
+  p_nombre_equipo text default null
+)
+returns public.equipos
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_sala record;
+  v_inscritos int;
+  v_saldo numeric;
+  v_gasto numeric;
+  v_equipo public.equipos;
+begin
+  if auth.uid() is null then
+    raise exception 'No autenticado';
+  end if;
+
+  select * into v_sala from public.salas where id = p_sala_id for update;
+  if not found then
+    raise exception 'Sala no encontrada';
+  end if;
+  if v_sala.estado in ('completa', 'finalizada') then
+    raise exception 'Esta sala ya no admite inscripciones';
+  end if;
+
+  if exists (
+    select 1 from public.equipos e
+    join public.inscripciones i on i.equipo_id = e.id
+    where e.sala_id = p_sala_id and e.usuario_id = auth.uid() and i.estado <> 'reembolsada'
+  ) then
+    raise exception 'Ya tienes un equipo en esta sala';
+  end if;
+
+  select count(*) into v_inscritos
+    from public.equipos e
+    join public.inscripciones i on i.equipo_id = e.id
+    where e.sala_id = p_sala_id and i.estado <> 'reembolsada';
+
+  if v_sala.aforo is not null and v_inscritos >= v_sala.aforo then
+    raise exception 'Esta sala ya está completa';
+  end if;
+
+  if p_jugadores is null or jsonb_array_length(p_jugadores) = 0 then
+    raise exception 'Tienes que elegir al menos un jugador';
+  end if;
+
+  if exists (
+    select 1 from public.jugadores j
+    where j.id in (select (jsonb_array_elements_text(p_jugadores))::uuid)
+      and (j.deporte <> v_sala.deporte or j.competicion <> v_sala.competicion)
+  ) then
+    raise exception 'Alguno de los jugadores elegidos no pertenece a esta competición';
+  end if;
+
+  select coalesce(sum(precio), 0) into v_gasto
+    from public.jugadores
+    where id in (select (jsonb_array_elements_text(p_jugadores))::uuid);
+
+  if v_gasto > 100000 then
+    raise exception 'El equipo supera el presupuesto de 100.000 €';
+  end if;
+
+  select saldo_simulado into v_saldo from public.perfiles where id = auth.uid() for update;
+  if v_saldo < v_sala.buy_in then
+    raise exception 'Saldo insuficiente para unirte a esta sala';
+  end if;
+
+  insert into public.equipos (usuario_id, modo, sala_id, nombre_equipo, jugadores, alineacion, gasto_total)
+  values (auth.uid(), case when v_sala.tipo = 'maraton' then 'mtt' else 'sala' end, p_sala_id, p_nombre_equipo, p_jugadores, p_alineacion, v_gasto)
+  returning * into v_equipo;
+
+  insert into public.inscripciones (equipo_id, importe) values (v_equipo.id, v_sala.buy_in);
+
+  update public.perfiles set saldo_simulado = saldo_simulado - v_sala.buy_in where id = auth.uid();
+
+  -- Mismo criterio que ya usa el panel de admin al crear una sala a mano:
+  -- marcar 'completa' al llenarse y 'casi_llena' cuando queda 1 hueco.
+  if v_sala.tipo <> 'maraton' and v_sala.aforo is not null then
+    if v_inscritos + 1 >= v_sala.aforo then
+      update public.salas set estado = 'completa' where id = p_sala_id;
+    elsif v_inscritos + 1 >= v_sala.aforo - 1 then
+      update public.salas set estado = 'casi_llena' where id = p_sala_id and estado = 'abierta';
+    end if;
+  end if;
+
+  return v_equipo;
+end;
+$$;
+
+revoke all on function public.inscribirse_en_sala(uuid, jsonb, text, text) from public;
+grant execute on function public.inscribirse_en_sala(uuid, jsonb, text, text) to authenticated;
+
+-- Porra clásica: un jugador por cada grupo de color (sección 11), nombre de
+-- equipo obligatorio y único dentro de la porra (ya lo exige el índice
+-- equipos_porra_nombre_equipo_unico) — sin presupuesto de fantasía, es un
+-- precio de entrada fijo (porras.precio), igual que en la maqueta
+-- (isPorraEquipo no tiene barra de presupuesto).
+create or replace function public.inscribirse_en_porra(
+  p_porra_id uuid,
+  p_jugadores jsonb,
+  p_nombre_equipo text
+)
+returns public.equipos
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_porra record;
+  v_saldo numeric;
+  v_equipo public.equipos;
+begin
+  if auth.uid() is null then
+    raise exception 'No autenticado';
+  end if;
+
+  if p_nombre_equipo is null or length(trim(p_nombre_equipo)) = 0 then
+    raise exception 'Ponle un nombre a tu equipo';
+  end if;
+
+  select * into v_porra from public.porras where id = p_porra_id for update;
+  if not found then
+    raise exception 'Porra no encontrada';
+  end if;
+  if v_porra.estado = 'finalizada' then
+    raise exception 'Esta porra ya no admite inscripciones';
+  end if;
+
+  if exists (
+    select 1 from public.equipos e
+    join public.inscripciones i on i.equipo_id = e.id
+    where e.porra_id = p_porra_id and e.usuario_id = auth.uid() and i.estado <> 'reembolsada'
+  ) then
+    raise exception 'Ya tienes un equipo en esta porra';
+  end if;
+
+  if exists (
+    select 1 from public.equipos e
+    where e.porra_id = p_porra_id and lower(e.nombre_equipo) = lower(trim(p_nombre_equipo))
+  ) then
+    raise exception 'Ese nombre de equipo ya está en uso en esta porra';
+  end if;
+
+  if p_jugadores is null or jsonb_array_length(p_jugadores) = 0 then
+    raise exception 'Tienes que elegir al menos un jugador';
+  end if;
+
+  if exists (
+    select 1 from public.jugadores j
+    where j.id in (select (jsonb_array_elements_text(p_jugadores))::uuid)
+      and (j.deporte <> 'golf' or j.competicion is distinct from v_porra.competicion)
+  ) then
+    raise exception 'Alguno de los jugadores elegidos no pertenece a este torneo';
+  end if;
+
+  -- Como mucho un jugador de cada grupo de color.
+  if (
+    select count(distinct j.grupo_porra)
+    from public.jugadores j
+    where j.id in (select (jsonb_array_elements_text(p_jugadores))::uuid)
+  ) < jsonb_array_length(p_jugadores) then
+    raise exception 'Solo puedes elegir un jugador de cada grupo';
+  end if;
+
+  select saldo_simulado into v_saldo from public.perfiles where id = auth.uid() for update;
+  if v_saldo < v_porra.precio then
+    raise exception 'Saldo insuficiente para unirte a esta porra';
+  end if;
+
+  insert into public.equipos (usuario_id, modo, porra_id, nombre_equipo, jugadores, gasto_total)
+  values (auth.uid(), 'porra', p_porra_id, trim(p_nombre_equipo), p_jugadores, 0)
+  returning * into v_equipo;
+
+  insert into public.inscripciones (equipo_id, importe) values (v_equipo.id, v_porra.precio);
+
+  update public.perfiles set saldo_simulado = saldo_simulado - v_porra.precio where id = auth.uid();
+
+  return v_equipo;
+end;
+$$;
+
+revoke all on function public.inscribirse_en_porra(uuid, jsonb, text) from public;
+grant execute on function public.inscribirse_en_porra(uuid, jsonb, text) to authenticated;
 
 -- ============================================================================
 -- CONVERTIR TU CUENTA EN SUPERADMINISTRADOR (ejecútalo aparte, una sola vez,

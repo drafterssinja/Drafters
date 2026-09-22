@@ -36,7 +36,7 @@ function VerificarForm() {
       return;
     }
 
-    router.push('/cuenta');
+    router.push('/inicio');
   }
 
   async function reenviarCodigo() {
