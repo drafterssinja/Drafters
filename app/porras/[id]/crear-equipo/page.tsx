@@ -19,10 +19,16 @@ import { GRUPO_PORRA_LABELS, ORDEN_GRUPOS, COLOR_GRUPO, type GrupoPorra } from '
 // de grupos (Amarillo/Verde/Azul/LIV + libre + reserva); aquí los huecos
 // del panel "Tu equipo" salen de los grupos que de verdad tiene esta porra
 // (lib/porraGrupos.ts, hasta 5: amarillo/verde/azul/morado/españoles) — se
-// pide un jugador de cada uno de los que tenga jugadores.
+// pide un jugador de cada uno de los que tenga jugadores, más un hueco
+// adicional de "comodín" (corrección de Iñi, 23/09): el comodín se puede
+// rellenar con cualquier jugador de cualquiera de esas listas, repitiendo
+// grupo — solo no se permite repetir el mismo jugador físico (eso ya lo
+// impide, además, inscribirse_en_porra() en el esquema SQL).
 
 type PorraRow = { id: string; major: string; precio: number; competicion: string | null; estado: string };
 type JugadorRow = { id: string; nombre: string; grupo_porra: GrupoPorra | null; precio: number };
+
+const COMODIN_COLOR = '#2DD4BF';
 
 export default function CrearEquipoPorraPage() {
   const router = useRouter();
@@ -34,7 +40,8 @@ export default function CrearEquipoPorraPage() {
   const [jugadores, setJugadores] = useState<JugadorRow[]>([]);
   const [nombreEquipo, setNombreEquipo] = useState('');
   const [selected, setSelected] = useState<Map<GrupoPorra, string>>(new Map());
-  const [activeGroup, setActiveGroup] = useState<GrupoPorra | null>(null);
+  const [comodinId, setComodinId] = useState<string | null>(null);
+  const [activeGroup, setActiveGroup] = useState<GrupoPorra | 'comodin' | null>(null);
   const [step, setStep] = useState<'draft' | 'confirm'>('draft');
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -104,9 +111,17 @@ export default function CrearEquipoPorraPage() {
 
   const gruposDisponibles = useMemo(() => ORDEN_GRUPOS.filter((g) => jugadores.some((j) => j.grupo_porra === g)), [jugadores]);
   const jugadoresPorId = useMemo(() => new Map(jugadores.map((j) => [j.id, j])), [jugadores]);
-  const seleccionados = gruposDisponibles.map((g) => (selected.has(g) ? jugadoresPorId.get(selected.get(g)!) : null)).filter((j): j is JugadorRow => !!j);
+  const seleccionados: { jugador: JugadorRow; esComodin: boolean }[] = [
+    ...gruposDisponibles
+      .map((g) => (selected.has(g) ? jugadoresPorId.get(selected.get(g)!) : null))
+      .filter((j): j is JugadorRow => !!j)
+      .map((j) => ({ jugador: j, esComodin: false })),
+    ...(comodinId && jugadoresPorId.has(comodinId) ? [{ jugador: jugadoresPorId.get(comodinId)!, esComodin: true }] : []),
+  ];
 
-  const equipoCompleto = gruposDisponibles.length > 0 && selected.size === gruposDisponibles.length;
+  const totalHuecos = gruposDisponibles.length > 0 ? gruposDisponibles.length + 1 : 0;
+  const huecosRellenos = selected.size + (comodinId ? 1 : 0);
+  const equipoCompleto = totalHuecos > 0 && huecosRellenos === totalHuecos;
   const nombreValido = nombreEquipo.trim().length > 0;
   const puedeConfirmar = equipoCompleto && nombreValido;
 
@@ -122,9 +137,15 @@ export default function CrearEquipoPorraPage() {
       }
       return nuevo;
     });
-    // Tras elegir, salta al siguiente grupo que todavía no tenga jugador.
+    // Tras elegir, salta al siguiente grupo que todavía no tenga jugador; si
+    // ya están todos los grupos de color completos, salta al comodín.
     const siguiente = gruposDisponibles.find((g) => g !== grupo && !selected.has(g));
     if (siguiente) setActiveGroup(siguiente);
+    else if (!comodinId) setActiveGroup('comodin');
+  }
+
+  function toggleComodin(jugador: JugadorRow) {
+    setComodinId((prev) => (prev === jugador.id ? null : jugador.id));
   }
 
   async function confirmarInscripcion() {
@@ -132,7 +153,7 @@ export default function CrearEquipoPorraPage() {
     setErrorEnvio(null);
     const { error: rpcError } = await supabase.rpc('inscribirse_en_porra', {
       p_porra_id: porraId,
-      p_jugadores: Array.from(selected.values()),
+      p_jugadores: [...Array.from(selected.values()), ...(comodinId ? [comodinId] : [])],
       p_nombre_equipo: nombreEquipo.trim(),
     });
     if (rpcError) {
@@ -186,7 +207,7 @@ export default function CrearEquipoPorraPage() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#3DDC84' }}>{porra.major}</span>
                 <h1 style={{ fontSize: 24, fontWeight: 800, color: S.TEXT }}>Crea tu equipo</h1>
-                <p style={{ fontSize: 13, color: S.MUTED_2 }}>Elige un jugador de cada grupo de color.</p>
+                <p style={{ fontSize: 13, color: S.MUTED_2 }}>Elige un jugador de cada grupo de color, más un comodín de cualquier lista.</p>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -201,7 +222,9 @@ export default function CrearEquipoPorraPage() {
                   <div style={{ position: 'sticky', top: 0, zIndex: 5, background: S.BG, paddingTop: 2, paddingBottom: 6, margin: '0 -20px', paddingLeft: 20, paddingRight: 20 }}>
                     <div style={{ background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_2 }}>Grupo activo</span>
-                      <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 16, color: activeGroup ? COLOR_GRUPO[activeGroup] : S.MUTED_3 }}>{activeGroup ? GRUPO_PORRA_LABELS[activeGroup] : '—'}</span>
+                      <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 16, color: activeGroup === 'comodin' ? COMODIN_COLOR : activeGroup ? COLOR_GRUPO[activeGroup] : S.MUTED_3 }}>
+                        {activeGroup === 'comodin' ? 'Comodín (cualquier lista)' : activeGroup ? GRUPO_PORRA_LABELS[activeGroup] : '—'}
+                      </span>
                     </div>
                   </div>
 
@@ -212,16 +235,27 @@ export default function CrearEquipoPorraPage() {
                           .filter((j) => j.grupo_porra === grupo)
                           .sort((a, b) => a.nombre.localeCompare(b.nombre))
                           .map((j) => {
-                            const isSelected = selected.get(grupo) === j.id;
-                            const isActive = grupo === activeGroup;
-                            const disabled = !isSelected && !isActive;
+                            const modoComodin = activeGroup === 'comodin';
+                            const isSelectedPrimario = selected.get(grupo) === j.id;
+                            const isSelectedComodin = comodinId === j.id;
+                            const isSelected = modoComodin ? isSelectedComodin : isSelectedPrimario;
+                            // No se puede usar el mismo jugador físico dos veces: si ya
+                            // está puesto como comodín, no se puede volver a elegir como
+                            // titular de su grupo, y viceversa.
+                            const usadoEnOtroHueco = modoComodin
+                              ? Array.from(selected.values()).includes(j.id) && !isSelectedComodin
+                              : comodinId === j.id && !isSelectedPrimario;
+                            const isActive = modoComodin ? true : grupo === activeGroup;
+                            const disabled = usadoEnOtroHueco || (!isSelected && !isActive);
                             return (
                               <a
                                 key={j.id}
                                 href="#"
                                 onClick={(e) => {
                                   e.preventDefault();
-                                  if (!disabled) toggleJugador(j);
+                                  if (disabled) return;
+                                  if (modoComodin) toggleComodin(j);
+                                  else toggleJugador(j);
                                 }}
                                 style={{
                                   display: 'flex',
@@ -303,17 +337,54 @@ export default function CrearEquipoPorraPage() {
                           </a>
                         );
                       })}
+
+                      {(() => {
+                        const j = comodinId ? jugadoresPorId.get(comodinId) : null;
+                        const isActive = activeGroup === 'comodin';
+                        return (
+                          <a
+                            key="comodin"
+                            href="#"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              setActiveGroup('comodin');
+                            }}
+                            style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              gap: 2,
+                              background: isActive ? 'rgba(61,220,132,0.08)' : 'transparent',
+                              border: `1.5px solid ${isActive ? '#3DDC84' : COMODIN_COLOR + '55'}`,
+                              borderRadius: 9,
+                              padding: '6px 3px',
+                              textDecoration: 'none',
+                              width: '100%',
+                            }}
+                          >
+                            {j ? (
+                              <span key={j.id} style={{ animation: 'slotPop 0.4s cubic-bezier(.34,1.56,.64,1) both', width: 26, height: 26, borderRadius: '50%', background: COMODIN_COLOR, color: '#04140B', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(255,255,255,0.2)' }}>
+                                {inicialesJugador(j.nombre)}
+                              </span>
+                            ) : (
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, borderRadius: '50%', border: `1.5px dashed ${COMODIN_COLOR}` }} />
+                            )}
+                            {j && <span style={{ width: '100%', fontSize: 8.5, fontWeight: 700, color: S.TEXT, textAlign: 'center', lineHeight: 1.15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.nombre}</span>}
+                            <span style={{ fontSize: 7.5, fontWeight: 700, color: COMODIN_COLOR, lineHeight: 1.15, textAlign: 'center' }}>Comodín</span>
+                          </a>
+                        );
+                      })()}
                     </div>
                   </div>
 
-                  <span style={{ fontSize: 11, color: '#4E574F' }}>Toca un hueco de la derecha para elegir su grupo, y luego un jugador de la lista.</span>
+                  <span style={{ fontSize: 11, color: '#4E574F' }}>Toca un hueco de la derecha para elegir su grupo, y luego un jugador de la lista. El hueco "Comodín" acepta un jugador de cualquiera de las listas.</span>
                 </>
               )}
             </div>
 
             <div style={{ position: 'sticky', bottom: 0, padding: '8px 20px 12px', background: 'linear-gradient(180deg, rgba(11,15,14,0) 0%, #0B0F0E 40%)' }}>
               <button type="button" disabled={!puedeConfirmar} onClick={() => setStep('confirm')} style={submitButtonStyle(puedeConfirmar, '#3DDC84')}>
-                {!nombreValido ? 'Ponle nombre a tu equipo' : equipoCompleto ? 'Revisar e inscribirme' : `Faltan ${gruposDisponibles.length - selected.size} grupos`}
+                {!nombreValido ? 'Ponle nombre a tu equipo' : equipoCompleto ? 'Revisar e inscribirme' : `Faltan ${totalHuecos - huecosRellenos} jugadores`}
               </button>
             </div>
           </div>
@@ -330,17 +401,21 @@ export default function CrearEquipoPorraPage() {
 
             <div style={{ background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
               <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>{nombreEquipo.trim()}</span>
-              {seleccionados.map((j) => (
-                <div key={j.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ flexShrink: 0, width: 32, height: 32, borderRadius: '50%', background: COLOR_GRUPO[j.grupo_porra as GrupoPorra], color: '#04140B', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(255,255,255,0.2)' }}>
-                    {inicialesJugador(j.nombre)}
-                  </span>
-                  <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-                    <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 13.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.nombre}</span>
-                    <span style={{ fontSize: 10.5, fontWeight: 700, color: COLOR_GRUPO[j.grupo_porra as GrupoPorra] }}>{GRUPO_PORRA_LABELS[j.grupo_porra as GrupoPorra]}</span>
+              {seleccionados.map(({ jugador: j, esComodin }) => {
+                const color = esComodin ? COMODIN_COLOR : COLOR_GRUPO[j.grupo_porra as GrupoPorra];
+                const etiqueta = esComodin ? `Comodín · ${GRUPO_PORRA_LABELS[j.grupo_porra as GrupoPorra]}` : GRUPO_PORRA_LABELS[j.grupo_porra as GrupoPorra];
+                return (
+                  <div key={`${j.id}-${esComodin ? 'comodin' : 'titular'}`} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ flexShrink: 0, width: 32, height: 32, borderRadius: '50%', background: color, color: '#04140B', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(255,255,255,0.2)' }}>
+                      {inicialesJugador(j.nombre)}
+                    </span>
+                    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                      <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 13.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.nombre}</span>
+                      <span style={{ fontSize: 10.5, fontWeight: 700, color }}>{etiqueta}</span>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid #1E2723', marginTop: 4, paddingTop: 10 }}>
                 <span style={{ fontSize: 13, color: S.MUTED_2 }}>Precio del equipo</span>
                 <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 15, color: '#F0B94D' }}>{formatEuros(porra.precio)}</span>

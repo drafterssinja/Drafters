@@ -215,6 +215,37 @@ alter table public.jugadores add constraint jugadores_grupo_porra_check
   check (grupo_porra in ('amarillo', 'verde', 'azul', 'morado', 'espanoles') or grupo_porra is null);
 
 -- ----------------------------------------------------------------------------
+-- 4.5. RANKINGS MUNDIALES (golf y tenis) — mantenido a mano por el admin,
+-- independiente de cualquier torneo concreto
+-- ----------------------------------------------------------------------------
+-- Pedido por Iñi (23/09): un ranking mundial de golf y otro de tenis que él
+-- pueda actualizar cuando quiera desde /admin, para que al importar un
+-- torneo nuevo la app compare el listado de inscritos contra ESTE ranking
+-- (en vez de asumir que el orden en que se pegó el listado de inscritos ya
+-- es el ranking real) — tanto para el precio de cada jugador
+-- (lib/pricing.ts) como para las listas por color de la porra clásica
+-- (lib/porraGrupos.ts). Ver confirmarImportacionTorneo() en
+-- app/admin/page.tsx, que hace el cruce por nombre.
+create table if not exists public.rankings_mundiales (
+  id uuid primary key default gen_random_uuid(),
+  deporte text not null check (deporte in ('golf', 'tenis')),
+  nombre text not null,
+  puesto int not null,
+  actualizado_en timestamptz not null default now()
+);
+
+-- Guardar el ranking de un deporte reemplaza SIEMPRE la lista entera para
+-- ese deporte (se borran las filas anteriores y se insertan las nuevas en
+-- una sola operación, ver guardarRanking() en app/admin/page.tsx) — no es
+-- un merge fila a fila. Este índice es solo una red de seguridad contra un
+-- nombre repetido dentro del mismo pegado (sin distinguir mayúsculas);
+-- para comparar contra el listado de un torneo concreto, que sí necesita
+-- ignorar acentos ("José María Olazábal" = "Jose Maria Olazabal"), la
+-- normalización real vive en lib/nombreMatch.ts, del lado de la app.
+create unique index if not exists rankings_mundiales_jugador_unico
+  on public.rankings_mundiales (deporte, lower(nombre));
+
+-- ----------------------------------------------------------------------------
 -- 5. EQUIPOS
 -- ----------------------------------------------------------------------------
 -- Un equipo pertenece SIEMPRE a una sala (modo 'sala' o 'mtt') o a una porra
@@ -695,6 +726,7 @@ alter table public.perfiles enable row level security;
 alter table public.salas enable row level security;
 alter table public.porras enable row level security;
 alter table public.jugadores enable row level security;
+alter table public.rankings_mundiales enable row level security;
 alter table public.equipos enable row level security;
 alter table public.inscripciones enable row level security;
 alter table public.resultados_evento enable row level security;
@@ -740,6 +772,13 @@ create policy "jugadores_select_publico" on public.jugadores
 
 drop policy if exists "jugadores_admin_todo" on public.jugadores;
 create policy "jugadores_admin_todo" on public.jugadores
+  for all using (public.es_admin()) with check (public.es_admin());
+
+-- Rankings mundiales: solo lo usa el propio admin (para cotejar al
+-- importar un torneo), nunca se muestra a los usuarios — así que, a
+-- diferencia de jugadores/salas/porras, ni siquiera hay lectura pública.
+drop policy if exists "rankings_mundiales_admin_todo" on public.rankings_mundiales;
+create policy "rankings_mundiales_admin_todo" on public.rankings_mundiales
   for all using (public.es_admin()) with check (public.es_admin());
 
 -- Equipos: cada usuario ve/crea/modifica solo los suyos; el admin ve y
@@ -1061,13 +1100,27 @@ begin
     raise exception 'Alguno de los jugadores elegidos no pertenece a este torneo';
   end if;
 
-  -- Como mucho un jugador de cada grupo de color.
+  -- No se puede elegir dos veces al mismo jugador (ni siquiera como
+  -- "comodín" — el comodín es para repetir GRUPO, nunca jugador).
+  if jsonb_array_length(p_jugadores) <> (
+    select count(distinct v) from jsonb_array_elements_text(p_jugadores) v
+  ) then
+    raise exception 'No puedes elegir el mismo jugador más de una vez';
+  end if;
+
+  -- Un jugador de cada grupo de color, más un único "comodín" que puede
+  -- repetir grupo (regla corregida por Iñi el 23/09: el quinto jugador del
+  -- equipo siempre puede salir de cualquiera de las listas ya usadas) — así
+  -- que como mucho un grupo puede aparecer dos veces, nunca más de dos, y
+  -- nunca dos grupos repetidos a la vez.
   if (
-    select count(distinct j.grupo_porra)
-    from public.jugadores j
-    where j.id in (select (jsonb_array_elements_text(p_jugadores))::uuid)
-  ) < jsonb_array_length(p_jugadores) then
-    raise exception 'Solo puedes elegir un jugador de cada grupo';
+    jsonb_array_length(p_jugadores) - (
+      select count(distinct j.grupo_porra)
+      from public.jugadores j
+      where j.id in (select (jsonb_array_elements_text(p_jugadores))::uuid)
+    )
+  ) > 1 then
+    raise exception 'Como mucho puedes repetir un grupo de color (tu jugador comodín)';
   end if;
 
   select saldo_simulado into v_saldo from public.perfiles where id = auth.uid() for update;
@@ -1090,10 +1143,53 @@ $$;
 revoke all on function public.inscribirse_en_porra(uuid, jsonb, text) from public;
 grant execute on function public.inscribirse_en_porra(uuid, jsonb, text) to authenticated;
 
+-- Reemplaza de golpe todo el ranking mundial de un deporte (golf o tenis)
+-- por el listado que acaba de pegar el admin — en una única transacción,
+-- para que un fallo a mitad de camino nunca deje la tabla vacía (ver
+-- guardarRanking() en app/admin/page.tsx, que llama a esto en vez de hacer
+-- el borrado y la inserción como dos llamadas sueltas desde el cliente).
+-- Es SECURITY DEFINER para poder saltarse la RLS de rankings_mundiales
+-- (que solo permite acceso al admin) sin tener que abrirla más — pero
+-- comprueba el rol ella misma, así que sigue siendo tan seguro como la RLS.
+create or replace function public.reemplazar_ranking_mundial(p_deporte text, p_jugadores jsonb)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if not public.es_admin() then
+    raise exception 'Solo el administrador puede actualizar el ranking mundial';
+  end if;
+  if p_deporte not in ('golf', 'tenis') then
+    raise exception 'Deporte no válido';
+  end if;
+
+  delete from public.rankings_mundiales where deporte = p_deporte;
+
+  insert into public.rankings_mundiales (deporte, nombre, puesto)
+  select p_deporte, (elem ->> 'nombre'), (elem ->> 'puesto')::int
+  from jsonb_array_elements(p_jugadores) as elem;
+end;
+$$;
+
+revoke all on function public.reemplazar_ranking_mundial(text, jsonb) from public;
+grant execute on function public.reemplazar_ranking_mundial(text, jsonb) to authenticated;
+
 -- ============================================================================
--- CONVERTIR TU CUENTA EN SUPERADMINISTRADOR (ejecútalo aparte, una sola vez,
--- DESPUÉS de haberte registrado tú mismo en la app con tu email)
+-- CONVERTIR TU CUENTA EN SUPERADMINISTRADOR
 -- ============================================================================
--- update public.perfiles set rol = 'admin' where id = (
---   select id from auth.users where email = 'inigo.sinde@gmail.com'
--- );
+-- Activo (sin comentar): cada vez que se vuelva a pegar y ejecutar este
+-- archivo completo en el SQL Editor de Supabase, esta línea se asegura de
+-- que tu cuenta (porrasgolfspain@gmail.com) tenga rol = 'admin' — no hace
+-- nada si ya lo tenía (es idempotente, como el resto del esquema). Si el
+-- email todavía no existe en auth.users (no te has registrado aún en la
+-- app con ese email), la subconsulta no encuentra ningún id y el UPDATE
+-- simplemente no toca ninguna fila — no da error.
+update public.perfiles set rol = 'admin' where id = (
+  select id from auth.users where email = 'porrasgolfspain@gmail.com'
+);
+
+-- Cuando me digas el segundo usuario que debe tener acceso al panel de
+-- admin, añado aquí una línea igual que esta con su email — no hace falta
+-- tocar nada más del código, la tarjeta de "Mi cuenta" y la protección de
+-- /admin ya funcionan para cualquier cuenta con rol = 'admin'.

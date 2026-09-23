@@ -1,31 +1,46 @@
 // Reparto automático de jugadores de golf en las listas por color de una
-// porra clásica, tal como lo describió Iñi (22/09):
+// porra clásica, tal como lo corrigió Iñi (23/09, sustituyendo la versión
+// anterior basada en "es un major"):
 //
-// - Majors (Masters de Augusta, Open Championship, US Open, PGA
-//   Championship): amarillo 1-15, verde 16-35, azul 36 en adelante.
-// - Resto de torneos: amarillo 1-15, verde 16-35, azul 36-70, morado 71 en
-//   adelante.
-// - En cualquier torneo (major o no) en el que jueguen al menos 3 jugadores
-//   marcados como españoles, esos jugadores se sacan de su lista por
-//   ranking y van todos juntos a una lista aparte ('espanoles'). Si hay
-//   menos de 3, no hay lista de españoles y cada uno se queda en su tramo
-//   de ranking normal.
+// - Amarillo: puesto 1-15 del ranking mundial.
+// - Verde: puesto 16-35.
+// - A partir de ahí, depende de si juegan 3 o más españoles en el torneo:
+//   - Con menos de 3 españoles inscritos: Azul = 36-70, Morado = 71 en
+//     adelante (ambos grupos existen).
+//   - Con 3 o más españoles inscritos: Azul = 36 en adelante (sin tope, no
+//     hay grupo Morado), y esos españoles se sacan de su tramo de ranking
+//     normal y van todos juntos a una lista aparte ("Españoles").
+// - El quinto jugador del equipo es siempre un "comodín": se puede repetir
+//   un jugador de cualquiera de las listas ya usadas (ver el hueco extra en
+//   la pantalla de crear equipo, app/porras/[id]/crear-equipo/page.tsx, y
+//   la comprobación equivalente en inscribirse_en_porra() del esquema SQL).
 //
-// El puesto (rank) usado para decidir el tramo es el de la posición en el
-// listado/ranking pegado por el admin — nunca se recalcula al sacar a los
-// españoles de las demás listas.
+// El puesto (rank) usado para decidir el tramo es el del **ranking mundial
+// real** (tabla `rankings_mundiales`, mantenida aparte por Iñi), no el
+// orden en que se pegó el listado de inscritos de este torneo en concreto
+// — ver confirmarImportacionTorneo() en app/admin/page.tsx, que cruza
+// ambos listados por nombre antes de llamar a esta función. Un jugador que
+// no aparezca en el ranking mundial guardado se trata como si tuviera un
+// puesto muy bajo (cae siempre en Morado, o en Azul sin tope si hay lista
+// de españoles) — nunca se le asigna Amarillo o Verde por error.
 
 export type GrupoPorra = 'amarillo' | 'verde' | 'azul' | 'morado' | 'espanoles';
 
 export const UMBRAL_MINIMO_ESPANOLES = 3;
 
-export function calcularGrupoPorra(rank: number, esEspanol: boolean, numEspanolesTotal: number, esMajor: boolean): GrupoPorra {
-  if (esEspanol && numEspanolesTotal >= UMBRAL_MINIMO_ESPANOLES) {
+// Puesto que se usa para un jugador que no se ha podido encontrar en el
+// ranking mundial guardado (ver arriba) — suficientemente alto para caer
+// siempre en el tramo más bajo disponible, nunca en Amarillo/Verde.
+export const PUESTO_NO_ENCONTRADO = 100000;
+
+export function calcularGrupoPorra(rank: number, esEspanol: boolean, numEspanolesTotal: number): GrupoPorra {
+  const hayListaEspanoles = numEspanolesTotal >= UMBRAL_MINIMO_ESPANOLES;
+  if (esEspanol && hayListaEspanoles) {
     return 'espanoles';
   }
   if (rank <= 15) return 'amarillo';
   if (rank <= 35) return 'verde';
-  if (esMajor) return 'azul';
+  if (hayListaEspanoles) return 'azul'; // sin tope: al no haber Morado, todo lo que sobra de Verde es Azul
   return rank <= 70 ? 'azul' : 'morado';
 }
 

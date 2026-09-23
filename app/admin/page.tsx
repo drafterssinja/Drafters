@@ -1,16 +1,26 @@
 'use client';
 
-import { useEffect, useState, FormEvent } from 'react';
+import { useEffect, useMemo, useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase, Perfil } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
 import { parseListaJugadores, JugadorParseado } from '@/lib/parsePlayerList';
 import { precioPorRanking } from '@/lib/pricing';
+import { parsearListadoCuotas } from '@/lib/parsearCuotas';
+import { calcularPreciosPorCuota, cuotaValida } from '@/lib/precioPorCuota';
 import { generarSalasParaTorneo } from '@/lib/tiposDeSala';
-import { calcularGrupoPorra, UMBRAL_MINIMO_ESPANOLES } from '@/lib/porraGrupos';
+import { calcularGrupoPorra, UMBRAL_MINIMO_ESPANOLES, PUESTO_NO_ENCONTRADO } from '@/lib/porraGrupos';
+import { normalizarNombre } from '@/lib/nombreMatch';
 
-type PreviewJugador = JugadorParseado & { esEspanol: boolean };
+// El precio de golf/tenis ya no sale del ranking mundial, sino de la cuota
+// de "Ganador" de la casa de apuestas de esa semana (decidido con Iñi el
+// 23/09) — lib/precioPorCuota.ts. Si el listado pegado no trae ninguna
+// cuota reconocible, se mantiene el cálculo antiguo por ranking como
+// respaldo (ver previsualizarTorneo/confirmarImportacionTorneo más abajo).
+// El grupo de color de la porra clásica NO cambia: sigue saliendo del
+// ranking mundial guardado (rankings_mundiales, lib/porraGrupos.ts).
+type PreviewJugador = JugadorParseado & { esEspanol: boolean; cuota: number | null };
 
 type Sala = { id: string; codigo: string; nombre: string; deporte: string; tipo: string; estado: string; buy_in: number };
 type Jugador = {
@@ -84,6 +94,13 @@ export default function AdminPage() {
   const [precioJugador, setPrecioJugador] = useState(10000);
   const [creandoJugador, setCreandoJugador] = useState(false);
 
+  // Precio editable a mano por jugador ya creado (pedido de Iñi, 23/09: el
+  // precio se calcula solo por ranking al importar, pero tiene que poder
+  // corregirlo él si lo considera necesario).
+  const [editandoPrecioId, setEditandoPrecioId] = useState<string | null>(null);
+  const [precioEditado, setPrecioEditado] = useState('');
+  const [guardandoPrecio, setGuardandoPrecio] = useState(false);
+
   // Automatización: jornada de fútbol (football-data.org, vía ruta de servidor)
   const [sincronizandoFutbol, setSincronizandoFutbol] = useState(false);
   const [resultadoFutbol, setResultadoFutbol] = useState<
@@ -96,10 +113,41 @@ export default function AdminPage() {
   const [torneoDeporte, setTorneoDeporte] = useState<'golf' | 'tenis'>('golf');
   const [torneoTexto, setTorneoTexto] = useState('');
   const [torneoFechaLimite, setTorneoFechaLimite] = useState('');
-  const [torneoEsMajor, setTorneoEsMajor] = useState(false);
   const [previewJugadores, setPreviewJugadores] = useState<PreviewJugador[]>([]);
+  // Avisos del parseo de cuotas (líneas sin cuota reconocible o con una
+  // cuota inválida) — el jugador correspondiente no entra en la vista
+  // previa hasta que se corrija el texto pegado y se vuelva a previsualizar.
+  const [avisosCuotas, setAvisosCuotas] = useState<string[]>([]);
   const [importandoTorneo, setImportandoTorneo] = useState(false);
   const [resultadoTorneo, setResultadoTorneo] = useState<string | null>(null);
+
+  // Rankings mundiales de golf y tenis (mantenidos aparte, ver
+  // drafters-schema.sql sección 4.5) — se usan para saber el puesto REAL de
+  // cada inscrito al importar un torneo, en vez de asumir que el orden del
+  // listado pegado ya es el ranking.
+  const [rankingDeporte, setRankingDeporte] = useState<'golf' | 'tenis'>('golf');
+  const [rankingConteos, setRankingConteos] = useState<Record<'golf' | 'tenis', { total: number; actualizado: string | null }>>({
+    golf: { total: 0, actualizado: null },
+    tenis: { total: 0, actualizado: null },
+  });
+  const [rankingTexto, setRankingTexto] = useState('');
+  const [rankingPreview, setRankingPreview] = useState<JugadorParseado[]>([]);
+  const [guardandoRanking, setGuardandoRanking] = useState(false);
+  const [resultadoRanking, setResultadoRanking] = useState<string | null>(null);
+  const [errorRanking, setErrorRanking] = useState<string | null>(null);
+  // Ranking mundial del deporte del torneo que se está importando ahora
+  // mismo, cargado al pulsar "Previsualizar listado" — sirve para pintar
+  // en cada fila si el jugador se ha encontrado o no (ver más abajo).
+  const [mapaRankingActual, setMapaRankingActual] = useState<Map<string, number>>(new Map());
+
+  // true si el listado pegado en "Nuevo torneo" trae cuotas reales (no el
+  // respaldo por ranking) — decide qué columnas se ven en la vista previa y
+  // qué precio se guarda al confirmar (ver confirmarImportacionTorneo()).
+  const usandoCuotas = useMemo(() => previewJugadores.some((j) => j.cuota !== null), [previewJugadores]);
+  const preciosPreviewCuota = useMemo(
+    () => calcularPreciosPorCuota(previewJugadores.map((j) => ({ nombre: j.nombre, cuota: j.cuota }))),
+    [previewJugadores]
+  );
 
   async function cargarTodo() {
     const [{ data: salasData }, { data: jugadoresData }, { count }, { data: inscripcionesData, error: inscripcionesError }, { data: movimientosData, error: movimientosError }] =
@@ -121,6 +169,21 @@ export default function AdminPage() {
     else setInscripciones((inscripcionesData as unknown as InscripcionFila[]) ?? []);
     if (movimientosError) setError('No se han podido cargar los movimientos de saldo.');
     else setMovimientos((movimientosData as MovimientoFila[]) ?? []);
+  }
+
+  async function cargarRankings() {
+    const [{ data: golfData }, { data: tenisData }] = await Promise.all([
+      supabase.from('rankings_mundiales').select('actualizado_en').eq('deporte', 'golf').order('actualizado_en', { ascending: false }).limit(1),
+      supabase.from('rankings_mundiales').select('actualizado_en').eq('deporte', 'tenis').order('actualizado_en', { ascending: false }).limit(1),
+    ]);
+    const [{ count: golfCount }, { count: tenisCount }] = await Promise.all([
+      supabase.from('rankings_mundiales').select('id', { count: 'exact', head: true }).eq('deporte', 'golf'),
+      supabase.from('rankings_mundiales').select('id', { count: 'exact', head: true }).eq('deporte', 'tenis'),
+    ]);
+    setRankingConteos({
+      golf: { total: golfCount ?? 0, actualizado: (golfData as { actualizado_en: string }[] | null)?.[0]?.actualizado_en ?? null },
+      tenis: { total: tenisCount ?? 0, actualizado: (tenisData as { actualizado_en: string }[] | null)?.[0]?.actualizado_en ?? null },
+    });
   }
 
   useEffect(() => {
@@ -152,7 +215,7 @@ export default function AdminPage() {
 
       setPerfil(p);
       setAutorizado(true);
-      await cargarTodo();
+      await Promise.all([cargarTodo(), cargarRankings()]);
     }
 
     verificarAcceso();
@@ -246,9 +309,33 @@ export default function AdminPage() {
     setSincronizandoFutbol(false);
   }
 
-  function previsualizarTorneo() {
+  async function previsualizarTorneo() {
     setResultadoTorneo(null);
-    setPreviewJugadores(parseListaJugadores(torneoTexto).map((j) => ({ ...j, esEspanol: false })));
+
+    // Primero se intenta leer el listado como nombre + cuota de "Ganador"
+    // (lib/parsearCuotas.ts) — si trae al menos una cuota reconocible, el
+    // precio de cada jugador saldrá de ahí (lib/precioPorCuota.ts). Si no
+    // se reconoce ninguna cuota (p. ej. Iñi ha pegado solo una lista de
+    // nombres, como antes), se cae al importador antiguo por ranking.
+    const { jugadores: conCuota, avisos } = parsearListadoCuotas(torneoTexto);
+    if (conCuota.length > 0) {
+      setPreviewJugadores(conCuota.map((j, i) => ({ nombre: j.nombre, rank: i + 1, esEspanol: false, cuota: j.cuota })));
+      setAvisosCuotas(avisos);
+    } else {
+      setPreviewJugadores(parseListaJugadores(torneoTexto).map((j) => ({ ...j, esEspanol: false, cuota: null })));
+      setAvisosCuotas([]);
+    }
+
+    // Carga el ranking mundial de este deporte para poder mostrar, fila a
+    // fila, si cada jugador se ha encontrado o no — el grupo de color de la
+    // porra clásica sigue saliendo de aquí (no de la cuota), así que esto
+    // no cambia con el precio por cuotas. Así Iñi puede corregir el nombre
+    // en la vista previa ANTES de confirmar, en vez de enterarse después
+    // con el aviso de "no encontrados".
+    const { data } = await supabase.from('rankings_mundiales').select('nombre, puesto').eq('deporte', torneoDeporte);
+    const mapa = new Map<string, number>();
+    ((data as { nombre: string; puesto: number }[] | null) ?? []).forEach((r) => mapa.set(normalizarNombre(r.nombre), r.puesto));
+    setMapaRankingActual(mapa);
   }
 
   function quitarDeVistaPrevia(index: number) {
@@ -259,8 +346,53 @@ export default function AdminPage() {
     setPreviewJugadores((prev) => prev.map((j, i) => (i === index ? { ...j, nombre } : j)));
   }
 
+  function editarCuotaVistaPrevia(index: number, texto: string) {
+    const cuota = texto.trim() === '' ? null : Number(texto);
+    setPreviewJugadores((prev) => prev.map((j, i) => (i === index ? { ...j, cuota: cuota !== null && Number.isFinite(cuota) ? cuota : null } : j)));
+  }
+
   function toggleEspanolVistaPrevia(index: number) {
     setPreviewJugadores((prev) => prev.map((j, i) => (i === index ? { ...j, esEspanol: !j.esEspanol } : j)));
+  }
+
+  function previsualizarRanking() {
+    setResultadoRanking(null);
+    setErrorRanking(null);
+    setRankingPreview(parseListaJugadores(rankingTexto));
+  }
+
+  function quitarDeRankingPreview(index: number) {
+    setRankingPreview((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function editarNombreRankingPreview(index: number, nombre: string) {
+    setRankingPreview((prev) => prev.map((j, i) => (i === index ? { ...j, nombre } : j)));
+  }
+
+  async function guardarRanking() {
+    if (rankingPreview.length === 0) return;
+    setGuardandoRanking(true);
+    setErrorRanking(null);
+    setResultadoRanking(null);
+
+    // reemplazar_ranking_mundial() borra e inserta en una sola transacción
+    // (ver drafters-schema.sql) — sustituye SIEMPRE la lista entera de este
+    // deporte, nunca hace un merge fila a fila con la anterior.
+    const { error: rpcError } = await supabase.rpc('reemplazar_ranking_mundial', {
+      p_deporte: rankingDeporte,
+      p_jugadores: rankingPreview.map((j) => ({ nombre: j.nombre, puesto: j.rank })),
+    });
+
+    setGuardandoRanking(false);
+    if (rpcError) {
+      setErrorRanking('No se ha podido guardar el ranking. Inténtalo de nuevo.');
+      return;
+    }
+
+    setResultadoRanking(`Ranking de ${rankingDeporte === 'golf' ? 'golf' : 'tenis'} actualizado: ${rankingPreview.length} jugadores.`);
+    setRankingPreview([]);
+    setRankingTexto('');
+    await cargarRankings();
   }
 
   async function confirmarImportacionTorneo() {
@@ -273,15 +405,56 @@ export default function AdminPage() {
 
     const total = previewJugadores.length;
     const esGolf = torneoDeporte === 'golf';
+
+    // Cruza el listado de inscritos contra el ranking mundial guardado
+    // (sección 4.5 del esquema) — el precio y el grupo de porra de cada
+    // jugador se calculan a partir de su puesto REAL, no del orden en que
+    // se pegó el listado de este torneo (pedido de Iñi, 23/09). Un jugador
+    // que no aparezca en el ranking mundial se trata como si tuviera un
+    // puesto muy bajo: nunca cae en Amarillo/Verde, y su precio queda cerca
+    // del mínimo — nunca bloquea la importación.
+    const { data: rankingData } = await supabase.from('rankings_mundiales').select('nombre, puesto').eq('deporte', torneoDeporte);
+    const mapaRanking = new Map<string, number>();
+    ((rankingData as { nombre: string; puesto: number }[] | null) ?? []).forEach((r) => {
+      mapaRanking.set(normalizarNombre(r.nombre), r.puesto);
+    });
+
+    let noEncontrados = 0;
+    const conPuestoGlobal = previewJugadores.map((j, i) => {
+      const puestoGlobal = mapaRanking.get(normalizarNombre(j.nombre));
+      if (puestoGlobal === undefined) noEncontrados += 1;
+      return { ...j, i, puestoGlobal: puestoGlobal ?? null };
+    });
+
+    // Precio (23/09): si el listado pegado traía cuotas de "Ganador", el
+    // precio de cada jugador sale de ahí (lib/precioPorCuota.ts) — ya no
+    // del ranking mundial. Si no había ninguna cuota reconocible (se pegó
+    // solo una lista de nombres), se mantiene el cálculo antiguo por
+    // ranking como respaldo, exactamente igual que antes.
+    const precioPorIndice = new Map<number, number>();
+    if (usandoCuotas) {
+      const conPrecioCuota = calcularPreciosPorCuota(previewJugadores.map((j) => ({ nombre: j.nombre, cuota: j.cuota })));
+      conPrecioCuota.forEach((p, i) => precioPorIndice.set(i, p.precio));
+    } else {
+      // Reordena el campo de este torneo según el puesto mundial real (los
+      // no encontrados van al final, en el orden en que venían) y usa esa
+      // posición dentro del campo (precioPorRanking).
+      const ordenParaPrecio = [...conPuestoGlobal].sort((a, b) => (a.puestoGlobal ?? PUESTO_NO_ENCONTRADO) - (b.puestoGlobal ?? PUESTO_NO_ENCONTRADO) || a.i - b.i);
+      ordenParaPrecio.forEach((j, idx) => precioPorIndice.set(j.i, precioPorRanking(idx + 1, total)));
+    }
+
     const numEspanoles = esGolf ? previewJugadores.filter((j) => j.esEspanol).length : 0;
-    const filas = previewJugadores.map((j) => ({
+    const filas = conPuestoGlobal.map((j) => ({
       nombre: j.nombre,
       deporte: torneoDeporte,
       competicion: nombreTorneo,
-      precio: precioPorRanking(j.rank, total),
+      precio: precioPorIndice.get(j.i)!,
       // El grupo de la porra clásica (listas por color) solo aplica a golf
-      // por ahora — ver lib/porraGrupos.ts para la regla completa.
-      grupo_porra: esGolf ? calcularGrupoPorra(j.rank, j.esEspanol, numEspanoles, torneoEsMajor) : null,
+      // por ahora — ver lib/porraGrupos.ts para la regla completa. Usa el
+      // puesto mundial ABSOLUTO (no el índice dentro del campo): Amarillo/
+      // Verde/Azul/Morado son tramos de ranking real, no "los 15 mejores
+      // de este torneo en concreto".
+      grupo_porra: esGolf ? calcularGrupoPorra(j.puestoGlobal ?? PUESTO_NO_ENCONTRADO, j.esEspanol, numEspanoles) : null,
       es_espanol: esGolf ? j.esEspanol : false,
     }));
 
@@ -329,21 +502,44 @@ export default function AdminPage() {
       }
     }
 
+    const sinCuotaValida = usandoCuotas ? previewJugadores.filter((j) => !cuotaValida(j.cuota)).length : 0;
+
     setImportandoTorneo(false);
     setResultadoTorneo(
-      `Importados ${filas.length} jugadores de "${nombreTorneo}". ${salasCreadas} salas nuevas creadas.` +
-        (esGolf ? ` ${porraCreada ? 'Porra clásica creada.' : 'Porra clásica ya existía.'}` : '')
+      `Importados ${filas.length} jugadores de "${nombreTorneo}" (precio ${usandoCuotas ? 'por cuota' : 'por ranking'}). ${salasCreadas} salas nuevas creadas.` +
+        (esGolf ? ` ${porraCreada ? 'Porra clásica creada.' : 'Porra clásica ya existía.'}` : '') +
+        (noEncontrados > 0
+          ? ` ⚠️ ${noEncontrados} jugador${noEncontrados === 1 ? '' : 'es'} no ${noEncontrados === 1 ? 'se ha encontrado' : 'se han encontrado'} en el ranking mundial de ${esGolf ? 'golf' : 'tenis'} — revisa que el nombre coincida exactamente, si no ${esGolf ? 'su grupo de porra se ha calculado' : 'se ha calculado'} como si fuera de los últimos del ranking${usandoCuotas ? ' (el precio no se ve afectado, viene de la cuota)' : '.'}`
+          : '') +
+        (sinCuotaValida > 0
+          ? ` ⚠️ ${sinCuotaValida} jugador${sinCuotaValida === 1 ? '' : 'es'} sin cuota válida — se ${sinCuotaValida === 1 ? 'le' : 'les'} ha puesto el precio mínimo (${new Intl.NumberFormat('es-ES').format(3500)} €).`
+          : '')
     );
     setPreviewJugadores([]);
+    setAvisosCuotas([]);
     setTorneoTexto('');
     setTorneoNombre('');
     setTorneoFechaLimite('');
-    setTorneoEsMajor(false);
     await cargarTodo();
   }
 
   async function toggleLesionado(jugador: Jugador) {
     await supabase.from('jugadores').update({ lesionado: !jugador.lesionado }).eq('id', jugador.id);
+    await cargarTodo();
+  }
+
+  function empezarEdicionPrecio(jugador: Jugador) {
+    setEditandoPrecioId(jugador.id);
+    setPrecioEditado(String(jugador.precio));
+  }
+
+  async function guardarPrecioEditado(jugador: Jugador) {
+    const nuevoPrecio = Number(precioEditado);
+    if (!Number.isFinite(nuevoPrecio) || nuevoPrecio < 0) return;
+    setGuardandoPrecio(true);
+    await supabase.from('jugadores').update({ precio: nuevoPrecio }).eq('id', jugador.id);
+    setGuardandoPrecio(false);
+    setEditandoPrecioId(null);
     await cargarTodo();
   }
 
@@ -455,13 +651,95 @@ export default function AdminPage() {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <span style={S.sectionLabel}>Rankings mundiales (golf y tenis)</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 14 }}>
+              <p style={{ fontSize: 12.5, color: S.MUTED_2, margin: 0, lineHeight: 1.5 }}>
+                El ranking mundial que guardes aquí es lo que usa la app para calcular el precio y el grupo de la porra
+                clásica de cada jugador al importar un torneo (más abajo) — no hace falta volver a pegarlo por cada
+                torneo, solo actualizarlo de vez en cuando.
+              </p>
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                {(['golf', 'tenis'] as const).map((d) => (
+                  <button key={d} type="button" onClick={() => setRankingDeporte(d)} style={S.pill(rankingDeporte === d)}>
+                    {d === 'golf' ? 'Golf' : 'Tenis'} · {rankingConteos[d].total}
+                  </button>
+                ))}
+              </div>
+              <span style={{ fontSize: 11, color: S.MUTED_3 }}>
+                {rankingConteos[rankingDeporte].total > 0
+                  ? `Guardado: ${rankingConteos[rankingDeporte].total} jugadores${
+                      rankingConteos[rankingDeporte].actualizado ? ` · actualizado ${new Date(rankingConteos[rankingDeporte].actualizado!).toLocaleDateString('es-ES')}` : ''
+                    }.`
+                  : 'Todavía no hay ranking guardado para este deporte.'}
+              </span>
+
+              <div style={S.field}>
+                <span style={S.label}>Ranking mundial pegado (uno por línea, en orden de ranking)</span>
+                <textarea
+                  value={rankingTexto}
+                  onChange={(e) => setRankingTexto(e.target.value)}
+                  placeholder={'1  Scottie Scheffler\n2  Rory McIlroy\n3  Jon Rahm\n...'}
+                  rows={6}
+                  style={{ ...S.input, fontFamily: 'monospace', fontSize: 13, resize: 'vertical' }}
+                />
+              </div>
+              <button type="button" onClick={previsualizarRanking} disabled={!rankingTexto.trim()} style={{ ...S.secondaryLinkButton, opacity: rankingTexto.trim() ? 1 : 0.5 }}>
+                Previsualizar ranking
+              </button>
+
+              {rankingPreview.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <span style={{ fontSize: 11, color: S.MUTED_3 }}>
+                    {rankingPreview.length} jugadores detectados — al guardar, sustituye por completo el ranking de {rankingDeporte === 'golf' ? 'golf' : 'tenis'} que hubiera antes.
+                  </span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 260, overflowY: 'auto' }}>
+                    {rankingPreview.map((j, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ width: 28, flexShrink: 0, fontSize: 11, color: S.MUTED_3, textAlign: 'right' }}>#{j.rank}</span>
+                        <input
+                          value={j.nombre}
+                          onChange={(e) => editarNombreRankingPreview(i, e.target.value)}
+                          style={{ ...S.input, padding: '8px 10px', fontSize: 13 }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => quitarDeRankingPreview(i)}
+                          aria-label="Quitar"
+                          style={{ flexShrink: 0, background: 'transparent', border: `1px solid ${S.BORDER}`, borderRadius: 8, color: S.ERROR, width: 32, height: 32, cursor: 'pointer' }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={guardarRanking}
+                    disabled={guardandoRanking}
+                    style={{ ...S.primaryButton, marginTop: 0, opacity: guardandoRanking ? 0.7 : 1 }}
+                  >
+                    {guardandoRanking ? 'Guardando...' : `Guardar ranking de ${rankingDeporte === 'golf' ? 'golf' : 'tenis'} (${rankingPreview.length} jugadores)`}
+                  </button>
+                </div>
+              )}
+              {errorRanking && <p style={S.errorText}>{errorRanking}</p>}
+              {resultadoRanking && <p style={S.infoText}>{resultadoRanking}</p>}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <span style={S.sectionLabel}>Nuevo torneo de golf o tenis</span>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 14 }}>
               <p style={{ fontSize: 12.5, color: S.MUTED_2, margin: 0, lineHeight: 1.5 }}>
                 No hay ninguna API gratuita (ni forma fiable/legal de hacer scraping) de las webs de PGA Tour, DP World
-                Tour, ATP o WTA. Pega aquí el listado de inscritos o el ranking copiado directamente de la web del
-                circuito — una línea por jugador, en el orden en que salga — y se interpreta automáticamente. El precio
-                de cada jugador se calcula según su posición en ese listado.
+                Tour, ATP o WTA. Pega aquí el listado de INSCRITOS de este torneo — una línea por jugador, en
+                cualquier orden. Si cada línea lleva también la cuota de &quot;Ganador&quot; de la casa de apuestas
+                (p. ej. <code>Aaberg, Ludvig 8,50</code>), el precio de cada jugador sale de esa cuota — el favorito
+                cuesta el 38% del presupuesto y el resto en proporción, para que no quepan dos o tres favoritos en el
+                mismo equipo. Si pegas solo nombres, sin cuotas, el precio se calcula como antes, por ranking mundial.
+                En cualquier caso, el grupo de color de la porra clásica siempre sale del ranking mundial que tengas
+                guardado más abajo, tengas o no cuotas.
               </p>
               <div style={S.field}>
                 <span style={S.label}>Nombre del torneo</span>
@@ -478,18 +756,12 @@ export default function AdminPage() {
                 <span style={S.label}>Fecha y hora límite de inscripción</span>
                 <input type="datetime-local" value={torneoFechaLimite} onChange={(e) => setTorneoFechaLimite(e.target.value)} style={S.input} />
               </div>
-              {torneoDeporte === 'golf' && (
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: S.MUTED, cursor: 'pointer' }}>
-                  <input type="checkbox" checked={torneoEsMajor} onChange={(e) => setTorneoEsMajor(e.target.checked)} />
-                  Es un major (Masters de Augusta, Open Championship, US Open o PGA Championship)
-                </label>
-              )}
               <div style={S.field}>
                 <span style={S.label}>Listado pegado de la web del circuito</span>
                 <textarea
                   value={torneoTexto}
                   onChange={(e) => setTorneoTexto(e.target.value)}
-                  placeholder={'1  Scottie Scheffler\n2  Rory McIlroy\n3  Jon Rahm\n...'}
+                  placeholder={'Con cuotas:\nAaberg, Ludvig 8,50\nFitzpatrick, Matthew 9,50\n...\n\nSolo nombres (sin cuotas, precio por ranking):\n1  Scottie Scheffler\n2  Rory McIlroy\n...'}
                   rows={6}
                   style={{ ...S.input, fontFamily: 'monospace', fontSize: 13, resize: 'vertical' }}
                 />
@@ -501,19 +773,54 @@ export default function AdminPage() {
               {previewJugadores.length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <span style={{ fontSize: 11, color: S.MUTED_3 }}>
-                    {previewJugadores.length} jugadores detectados — revisa y corrige antes de confirmar.
+                    {previewJugadores.length} jugadores detectados{usandoCuotas ? ' · precio calculado por cuota' : ' · precio calculado por ranking (sin cuotas en el listado)'} —
+                    revisa y corrige antes de confirmar.
                     {torneoDeporte === 'golf' &&
                       ` Marca "ES" en los jugadores españoles — con ${UMBRAL_MINIMO_ESPANOLES} o más marcados se les crea una lista aparte.`}
                   </span>
+                  {avisosCuotas.length > 0 && (
+                    <ul style={{ margin: 0, paddingLeft: 18, fontSize: 11, color: '#F0B94D' }}>
+                      {avisosCuotas.map((a, i) => (
+                        <li key={i}>{a} — no está en la lista de abajo; corrige el texto pegado y vuelve a previsualizar si falta.</li>
+                      ))}
+                    </ul>
+                  )}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 260, overflowY: 'auto' }}>
-                    {previewJugadores.map((j, i) => (
+                    {previewJugadores.map((j, i) => {
+                      const puestoMundial = mapaRankingActual.get(normalizarNombre(j.nombre));
+                      const precioCalc = preciosPreviewCuota[i];
+                      return (
                       <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ width: 28, flexShrink: 0, fontSize: 11, color: S.MUTED_3, textAlign: 'right' }}>#{j.rank}</span>
+                        <span
+                          title={puestoMundial !== undefined ? 'Puesto en el ranking mundial guardado (grupo de porra)' : 'No encontrado en el ranking mundial guardado — revisa el nombre (afecta al grupo de porra)'}
+                          style={{ width: 40, flexShrink: 0, fontSize: 10.5, fontWeight: 700, textAlign: 'right', color: puestoMundial !== undefined ? S.ACCENT : S.ERROR }}
+                        >
+                          {puestoMundial !== undefined ? `#${puestoMundial}` : '¿?'}
+                        </span>
                         <input
                           value={j.nombre}
                           onChange={(e) => editarNombreVistaPrevia(i, e.target.value)}
                           style={{ ...S.input, padding: '8px 10px', fontSize: 13 }}
                         />
+                        {usandoCuotas && (
+                          <input
+                            type="number"
+                            step="0.01"
+                            min={1.01}
+                            title="Cuota de Ganador"
+                            value={j.cuota ?? ''}
+                            onChange={(e) => editarCuotaVistaPrevia(i, e.target.value)}
+                            style={{ ...S.input, width: 64, flexShrink: 0, padding: '8px 6px', fontSize: 12, textAlign: 'right' }}
+                          />
+                        )}
+                        {usandoCuotas && (
+                          <span
+                            title={precioCalc.sinCuota ? 'Sin cuota válida — precio mínimo' : 'Precio calculado por cuota'}
+                            style={{ width: 60, flexShrink: 0, fontSize: 11, fontWeight: 800, textAlign: 'right', color: precioCalc.sinCuota ? S.ERROR : '#F0B94D' }}
+                          >
+                            {precioCalc.precio} €
+                          </span>
+                        )}
                         {torneoDeporte === 'golf' && (
                           <label
                             title="Jugador español"
@@ -532,7 +839,8 @@ export default function AdminPage() {
                           ×
                         </button>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                   <button
                     type="button"
@@ -716,7 +1024,42 @@ export default function AdminPage() {
                     <span style={{ flexShrink: 0, fontSize: 10.5, color: S.FAINT }}>· {j.deporte}</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                    <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 12.5, color: '#F0B94D' }}>{j.precio} €</span>
+                    {editandoPrecioId === j.id ? (
+                      <>
+                        <input
+                          type="number"
+                          min={0}
+                          autoFocus
+                          value={precioEditado}
+                          onChange={(e) => setPrecioEditado(e.target.value)}
+                          style={{ ...S.input, width: 80, padding: '5px 8px', fontSize: 12.5 }}
+                        />
+                        <button
+                          type="button"
+                          disabled={guardandoPrecio}
+                          onClick={() => guardarPrecioEditado(j)}
+                          style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: '#04140B', background: '#3DDC84', border: 'none', borderRadius: 8, padding: '5px 9px', cursor: 'pointer', opacity: guardandoPrecio ? 0.7 : 1 }}
+                        >
+                          Guardar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditandoPrecioId(null)}
+                          style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: '#C9D2CC', background: 'transparent', border: `1px solid ${S.BORDER}`, borderRadius: 8, padding: '5px 9px', cursor: 'pointer' }}
+                        >
+                          Cancelar
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => empezarEdicionPrecio(j)}
+                        title="Editar precio"
+                        style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 12.5, color: '#F0B94D', background: 'transparent', border: '1px solid transparent', borderRadius: 8, padding: '4px 6px', cursor: 'pointer' }}
+                      >
+                        {j.precio} € ✎
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => toggleLesionado(j)}
