@@ -35,6 +35,13 @@ export function traducirErrorAuth(mensaje: string | null | undefined): string {
   if (/already registered|already exists/i.test(m)) {
     return 'Ya existe una cuenta registrada con este email.';
   }
+  // Mensaje que puede devolver Supabase al pedir "reenviar código" (resend)
+  // para un email que ya está verificado — no hay nada que reenviar, así
+  // que lo decimos claro en vez de dejar pasar un genérico "ha ocurrido un
+  // error" (pedido de Iñi, 23/09, ver app/verificar/page.tsx).
+  if (/already confirmed|already verified/i.test(m)) {
+    return 'Ese email ya está verificado. Inicia sesión.';
+  }
   if (/invalid.*email|email.*invalid/i.test(m)) {
     return 'El email no es válido.';
   }

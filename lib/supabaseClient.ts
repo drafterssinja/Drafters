@@ -32,6 +32,11 @@ export type Perfil = {
   terminos_aceptados: boolean;
   rol: 'usuario' | 'admin';
   created_at: string;
+  // Copia de solo lectura del email de auth.users (nuevo, ronda de
+  // correcciones del 23/09) — solo para que el admin la vea en el listado
+  // de usuarios registrados (/admin/usuarios). Puede venir null en algún
+  // perfil muy antiguo hasta que se vuelva a pegar el esquema.
+  email?: string | null;
 };
 
 export type Movimiento = {

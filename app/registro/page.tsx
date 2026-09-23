@@ -27,6 +27,9 @@ export default function RegistroPage() {
   const [terminos, setTerminos] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cargando, setCargando] = useState(false);
+  // Se activa cuando Supabase responde sin ninguna "identity" nueva — ver el
+  // comentario junto a su uso más abajo (pedido de Iñi, 23/09).
+  const [emailYaUsado, setEmailYaUsado] = useState(false);
 
   // Comprueba la disponibilidad del nombre de usuario en cuanto el usuario
   // deja el campo, para avisar antes de intentar crear la cuenta entera (en
@@ -55,6 +58,7 @@ export default function RegistroPage() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    setEmailYaUsado(false);
 
     if (!terminos) {
       setError('Tienes que aceptar los términos para continuar.');
@@ -98,14 +102,20 @@ export default function RegistroPage() {
       return;
     }
 
-    // Supabase, para no revelar qué emails están registrados, responde
-    // "éxito" incluso si el email ya tiene una cuenta CONFIRMADA — la única
-    // forma de detectarlo en el cliente es que no venga ninguna "identity"
-    // nueva. Si el email ya estaba registrado pero SIN confirmar, sí manda
-    // (o reenvía, según el límite de frecuencia) el código y seguimos igual
-    // que en un alta nueva.
+    // Supabase, para no revelar qué emails están registrados, puede
+    // responder "éxito" sin ninguna "identity" nueva tanto si el email ya
+    // tiene una cuenta CONFIRMADA como, según la versión, si ya existe pero
+    // SIN confirmar — no hay forma fiable de distinguir los dos casos desde
+    // aquí (corregido 23/09: antes dábamos por hecho que esto solo pasaba
+    // con cuentas confirmadas, y eso dejaba bloqueado sin ninguna salida a
+    // quien de verdad tenía una cuenta a medio verificar — "ese correo ya no
+    // me deja"). Como no podemos saber cuál de los dos casos es, ofrecemos
+    // las dos salidas: iniciar sesión (si ya está confirmada) o ir a
+    // verificar el email (si no lo estaba — desde ahí "Reenviar código" pide
+    // uno nuevo aunque este intento de registro no lo haya mandado).
     if (data.user && data.user.identities && data.user.identities.length === 0) {
-      setError('Ya existe una cuenta registrada con este email. Inicia sesión o recupera tu contraseña.');
+      setEmailYaUsado(true);
+      setError('Ya hay una cuenta con este email, o todavía no la has verificado.');
       return;
     }
 
@@ -222,7 +232,24 @@ export default function RegistroPage() {
               </span>
             </div>
 
-            {error && <p style={S.errorText}>{error}</p>}
+            {error && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <p style={S.errorText}>{error}</p>
+                {emailYaUsado && (
+                  <div style={{ display: 'flex', gap: 14 }}>
+                    <Link href="/login" style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 12.5, color: S.ACCENT }}>
+                      Iniciar sesión →
+                    </Link>
+                    <Link
+                      href={`/verificar?email=${encodeURIComponent(email)}`}
+                      style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 12.5, color: S.ACCENT }}
+                    >
+                      Verificar mi email →
+                    </Link>
+                  </div>
+                )}
+              </div>
+            )}
 
             <button type="submit" disabled={cargando} style={{ ...S.primaryButton, opacity: cargando ? 0.7 : 1 }}>
               {cargando ? 'Creando cuenta...' : 'Crear cuenta'}

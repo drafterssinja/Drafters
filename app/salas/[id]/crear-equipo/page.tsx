@@ -421,6 +421,12 @@ export default function CrearEquipoPage() {
               </div>
             </div>
 
+            <p style={{ fontSize: 11, lineHeight: 1.5, color: S.MUTED_3, margin: 0 }}>
+              El listado de jugadores es el oficial facilitado por la competición/circuito correspondiente. Drafters
+              no se hace responsable de que algún jugador cause baja de última hora y, por tanto, no puntúe —
+              recomendamos comprobar que los jugadores elegidos siguen confirmados antes de que empiece.
+            </p>
+
             {errorEnvio && <p style={S.errorText}>{errorEnvio}</p>}
 
             <button type="button" disabled={enviando} onClick={confirmarInscripcion} style={{ ...submitButtonStyle(true), opacity: enviando ? 0.7 : 1 }}>

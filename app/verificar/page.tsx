@@ -65,7 +65,7 @@ function VerificarForm() {
               Verifica tu email
             </h1>
             <p style={{ fontSize: 14, lineHeight: 1.5, color: S.MUTED, margin: 0 }}>
-              Te hemos enviado un código de 6 dígitos a{' '}
+              Te hemos enviado un código de verificación a{' '}
               <span style={{ color: S.TEXT, fontWeight: 600 }}>{email || 'tu email'}</span>.
             </p>
           </div>
@@ -96,11 +96,19 @@ function VerificarForm() {
               <input
                 type="text"
                 inputMode="numeric"
-                maxLength={6}
+                // Sin longitud fija (pedido de Iñi, 23/09): el código que manda
+                // Supabase por email puede tener más o menos dígitos según la
+                // configuración del proyecto (nos han reportado códigos de 8
+                // cifras, no de 6) — antes este campo cortaba la entrada a los
+                // 6 primeros caracteres y era imposible completar el código.
+                // Quitamos cualquier cosa que no sea un dígito (por si se pega
+                // el código con espacios alrededor) y dejamos un máximo generoso
+                // solo para evitar pegados absurdos, no para validar la longitud.
+                maxLength={12}
                 required
-                placeholder="000000"
+                placeholder="Código"
                 value={codigo}
-                onChange={(e) => setCodigo(e.target.value)}
+                onChange={(e) => setCodigo(e.target.value.replace(/[^0-9]/g, ''))}
                 style={S.codeInput}
               />
             </div>

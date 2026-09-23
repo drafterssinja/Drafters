@@ -33,6 +33,7 @@ const ICONO_TIPO: Record<string, string> = {
   reembolsado: '€',
   eliminado: '⚠',
   resultado: '🏆',
+  nuevo_usuario: '👤',
 };
 
 export default function NotificacionesPage() {

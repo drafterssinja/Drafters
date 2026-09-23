@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { supabase, Perfil } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
@@ -94,6 +95,17 @@ export default function AdminPage() {
   const [movimientos, setMovimientos] = useState<MovimientoFila[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  // "Mesas recientes" y "Jugadores" son listados largos que hoy no aportan
+  // mucho de un vistazo — pedido de Iñi: que estén plegados de entrada,
+  // como un desplegable, en vez de mostrar siempre todas las filas.
+  const [mostrarMesasCreadas, setMostrarMesasCreadas] = useState(false);
+  const [mostrarJugadoresCreados, setMostrarJugadoresCreados] = useState(false);
+  // Crear mesa aislada (pedido de Iñi, ronda de correcciones): normalmente no
+  // hace falta — al crear un torneo/jornada ya se generan solas 2 mesas de
+  // cada tipo/buy-in (y la porra, en golf) — así que este formulario se deja
+  // oculto de primeras, igual que las listas de mesas/jugadores de abajo.
+  const [mostrarCrearMesa, setMostrarCrearMesa] = useState(false);
+
   const [filtroDeporte, setFiltroDeporte] = useState<string>('todos');
   const [filtroTipoSala, setFiltroTipoSala] = useState<string>('todos');
   const [filtroBuyIn, setFiltroBuyIn] = useState<string>('todos');
@@ -174,6 +186,47 @@ export default function AdminPage() {
     () => calcularPreciosPorCuota(previewJugadores.map((j) => ({ nombre: j.nombre, cuota: j.cuota }))),
     [previewJugadores]
   );
+  // Puesto DENTRO DE ESTE TORNEO por cuota (más favorito = puesto 1) — es el
+  // que decide el grupo de color de la porra clásica cuando hay cuotas
+  // (corregido 23/09, ver lib/porraGrupos.ts). Se muestra en la vista previa
+  // para que Iñi vea de un vistazo en qué lista caerá cada jugador antes de
+  // confirmar — un array en paralelo a previewJugadores (mismo índice).
+  const puestosPreviewPorCuota = useMemo(() => {
+    const orden = previewJugadores
+      .map((j, i) => ({ i, cuota: j.cuota }))
+      .sort((a, b) => {
+        const aValida = cuotaValida(a.cuota);
+        const bValida = cuotaValida(b.cuota);
+        if (aValida && bValida) return (a.cuota as number) - (b.cuota as number);
+        if (aValida) return -1;
+        if (bValida) return 1;
+        return a.i - b.i;
+      });
+    const puestos = new Array<number | null>(previewJugadores.length).fill(null);
+    orden.forEach((j, idx) => {
+      puestos[j.i] = cuotaValida(j.cuota) ? idx + 1 : null;
+    });
+    return puestos;
+  }, [previewJugadores]);
+  // Puesto DENTRO DE ESTE TORNEO por ranking mundial guardado — respaldo
+  // cuando el listado no trae cuotas (corregido 23/09, tercera vuelta — Iñi:
+  // "en la lista amarilla del 1 al 15 tienen que salir los primeros 15
+  // jugadores del ranking [de este torneo]", no los jugadores cuyo puesto
+  // mundial absoluto sea <=15. Si el nº1 del ranking mundial no juega este
+  // torneo, el mejor clasificado que sí juega tiene que poder ser Amarillo).
+  // Mismo criterio de orden que ya usa el precio por ranking (ver
+  // confirmarImportacionTorneo): encontrados por puesto mundial ascendente,
+  // los no encontrados al final en el orden en que se pegaron.
+  const puestosPreviewPorRankingMundial = useMemo(() => {
+    const orden = previewJugadores
+      .map((j, i) => ({ i, puestoGlobal: mapaRankingActual.get(normalizarNombre(j.nombre)) ?? null }))
+      .sort((a, b) => (a.puestoGlobal ?? PUESTO_NO_ENCONTRADO) - (b.puestoGlobal ?? PUESTO_NO_ENCONTRADO) || a.i - b.i);
+    const puestos = new Array<number | null>(previewJugadores.length).fill(null);
+    orden.forEach((j, idx) => {
+      puestos[j.i] = j.puestoGlobal !== null ? idx + 1 : null;
+    });
+    return puestos;
+  }, [previewJugadores, mapaRankingActual]);
 
   async function cargarTodo() {
     const [{ data: salasData }, { data: porrasData }, { data: jugadoresData }, { count }, { data: inscripcionesData, error: inscripcionesError }, { data: movimientosData, error: movimientosError }] =
@@ -181,6 +234,10 @@ export default function AdminPage() {
         supabase.from('salas').select('id, codigo, nombre, deporte, tipo, estado, buy_in, competicion, fecha_limite_inscripcion').order('created_at', { ascending: false }),
         supabase.from('porras').select('id, major, competicion, estado, precio, fecha_limite_inscripcion').order('created_at', { ascending: false }),
         supabase.from('jugadores').select('id, nombre, deporte, competicion, precio, lesionado').order('created_at', { ascending: false }),
+        // Solo el total (head: true, sin traer filas) — el listado completo
+        // de usuarios vive en su propia pantalla (/admin/usuarios), a la que
+        // se llega pulsando esta misma tarjeta (pedido de Iñi: no quería un
+        // listado siempre visible aquí, solo accesible al pulsar el número).
         supabase.from('perfiles').select('id', { count: 'exact', head: true }),
         // Las inscripciones 'reembolsada' son dinero devuelto íntegro (la sala no se
         // llenó a tiempo y no había con quién juntarla) — no cuentan como partida
@@ -460,15 +517,45 @@ export default function AdminPage() {
     // solo una lista de nombres), se mantiene el cálculo antiguo por
     // ranking como respaldo, exactamente igual que antes.
     const precioPorIndice = new Map<number, number>();
+    // Grupo de la porra clásica (23/09, tercera corrección — Iñi: "me has
+    // entendido mal" otra vez): el puesto que decide el tramo (Amarillo/
+    // Verde/Azul/Morado) es SIEMPRE la posición DENTRO DE ESTE TORNEO, nunca
+    // un puesto absoluto — con cuotas, por la cuota de "Ganador" (más
+    // favorito = puesto 1); sin cuotas, por el ranking mundial guardado,
+    // pero reordenando el campo de este torneo por ese ranking y usando la
+    // posición resultante DENTRO DEL CAMPO (idéntico criterio al precio por
+    // ranking, precioPorRanking) — no si el puesto mundial absoluto del
+    // jugador es <=15. Antes de esta corrección se usaba el puesto absoluto
+    // del ranking mundial para el grupo cuando no había cuotas: si el nº1
+    // del mundo no jugaba este torneo, la lista Amarillo se quedaba vacía
+    // aunque hubiera 15 jugadores razonables en el campo — eso era el
+    // malentendido.
+    const puestoParaGrupo = new Map<number, number>();
     if (usandoCuotas) {
       const conPrecioCuota = calcularPreciosPorCuota(previewJugadores.map((j) => ({ nombre: j.nombre, cuota: j.cuota })));
       conPrecioCuota.forEach((p, i) => precioPorIndice.set(i, p.precio));
+
+      const ordenPorCuota = previewJugadores
+        .map((j, i) => ({ i, cuota: j.cuota }))
+        .sort((a, b) => {
+          const aValida = cuotaValida(a.cuota);
+          const bValida = cuotaValida(b.cuota);
+          if (aValida && bValida) return (a.cuota as number) - (b.cuota as number);
+          if (aValida) return -1;
+          if (bValida) return 1;
+          return a.i - b.i;
+        });
+      ordenPorCuota.forEach((j, idx) => puestoParaGrupo.set(j.i, cuotaValida(j.cuota) ? idx + 1 : PUESTO_NO_ENCONTRADO));
     } else {
       // Reordena el campo de este torneo según el puesto mundial real (los
       // no encontrados van al final, en el orden en que venían) y usa esa
-      // posición dentro del campo (precioPorRanking).
-      const ordenParaPrecio = [...conPuestoGlobal].sort((a, b) => (a.puestoGlobal ?? PUESTO_NO_ENCONTRADO) - (b.puestoGlobal ?? PUESTO_NO_ENCONTRADO) || a.i - b.i);
-      ordenParaPrecio.forEach((j, idx) => precioPorIndice.set(j.i, precioPorRanking(idx + 1, total)));
+      // posición DENTRO DEL CAMPO tanto para el precio (precioPorRanking)
+      // como para el grupo de la porra — misma orden, mismo índice relativo.
+      const ordenPorRankingMundial = [...conPuestoGlobal].sort((a, b) => (a.puestoGlobal ?? PUESTO_NO_ENCONTRADO) - (b.puestoGlobal ?? PUESTO_NO_ENCONTRADO) || a.i - b.i);
+      ordenPorRankingMundial.forEach((j, idx) => {
+        precioPorIndice.set(j.i, precioPorRanking(idx + 1, total));
+        puestoParaGrupo.set(j.i, idx + 1);
+      });
     }
 
     const numEspanoles = esGolf ? previewJugadores.filter((j) => j.esEspanol).length : 0;
@@ -478,11 +565,8 @@ export default function AdminPage() {
       competicion: nombreTorneo,
       precio: precioPorIndice.get(j.i)!,
       // El grupo de la porra clásica (listas por color) solo aplica a golf
-      // por ahora — ver lib/porraGrupos.ts para la regla completa. Usa el
-      // puesto mundial ABSOLUTO (no el índice dentro del campo): Amarillo/
-      // Verde/Azul/Morado son tramos de ranking real, no "los 15 mejores
-      // de este torneo en concreto".
-      grupo_porra: esGolf ? calcularGrupoPorra(j.puestoGlobal ?? PUESTO_NO_ENCONTRADO, j.esEspanol, numEspanoles) : null,
+      // por ahora — ver lib/porraGrupos.ts para la regla completa.
+      grupo_porra: esGolf ? calcularGrupoPorra(puestoParaGrupo.get(j.i) ?? PUESTO_NO_ENCONTRADO, j.esEspanol, numEspanoles) : null,
       es_espanol: esGolf ? j.esEspanol : false,
     }));
 
@@ -576,6 +660,25 @@ export default function AdminPage() {
     await cargarTodo();
   }
 
+  // Eliminar un jugador concreto de la ficha maestra (pedido de Iñi, 23/09:
+  // "por ejemplo se ha dado de baja del torneo, poder eliminarlo de esa
+  // lista") — a diferencia de "Marcar lesión" (que lo deja elegible pero
+  // avisando), esto lo quita del todo: ya no se puede fichar. Si algún
+  // equipo ya lo había elegido antes de la baja, su ficha simplemente deja
+  // de aparecer en ese equipo — no se reembolsa ni se deshace nada más, es
+  // el mismo riesgo que ya se avisa en la pantalla de confirmar equipo.
+  const [eliminandoJugadorId, setEliminandoJugadorId] = useState<string | null>(null);
+
+  async function eliminarJugador(jugador: Jugador) {
+    if (!window.confirm(`¿Estás seguro de que quieres eliminar a "${jugador.nombre}" de esta lista? No se puede deshacer.`)) {
+      return;
+    }
+    setEliminandoJugadorId(jugador.id);
+    await supabase.from('jugadores').delete().eq('id', jugador.id);
+    setEliminandoJugadorId(null);
+    await cargarTodo();
+  }
+
   function empezarEdicionPrecio(jugador: Jugador) {
     setEditandoPrecioId(jugador.id);
     setPrecioEditado(String(jugador.precio));
@@ -658,6 +761,28 @@ export default function AdminPage() {
     await cargarTodo();
   }
 
+  // Editar una porra ya creada, directamente desde su propia tarjeta en
+  // "Porras creadas" (pedido de Iñi, ronda de correcciones: antes solo se
+  // podía tocar su fecha límite indirectamente, editando el torneo entero
+  // — ahora también se puede aquí mismo, igual que con "Eliminar").
+  const [editandoFechaPorra, setEditandoFechaPorra] = useState<string | null>(null);
+  const [fechaPorraEditada, setFechaPorraEditada] = useState('');
+  const [guardandoFechaPorra, setGuardandoFechaPorra] = useState(false);
+
+  function empezarEdicionFechaPorra(porra: PorraAdmin) {
+    setEditandoFechaPorra(porra.id);
+    setFechaPorraEditada(porra.fecha_limite_inscripcion ? porra.fecha_limite_inscripcion.slice(0, 16) : '');
+  }
+
+  async function guardarFechaPorra(porraId: string) {
+    setGuardandoFechaPorra(true);
+    const nuevaFechaIso = fechaPorraEditada ? new Date(fechaPorraEditada).toISOString() : null;
+    await supabase.from('porras').update({ fecha_limite_inscripcion: nuevaFechaIso }).eq('id', porraId);
+    setGuardandoFechaPorra(false);
+    setEditandoFechaPorra(null);
+    await cargarTodo();
+  }
+
   if (autorizado === null || !perfil) {
     return (
       <main style={S.mainReset}>
@@ -716,13 +841,15 @@ export default function AdminPage() {
   const saldoLabel = `${perfil.saldo_simulado.toFixed(2)} €`;
   const initials = S.iniciales(perfil.nombre, perfil.apellido);
 
-  const statCards: { value: string; label: string }[] = [
+  const statCards: { value: string; label: string; href?: string }[] = [
     { value: `${dineroDepositado.toFixed(2)} €`, label: 'Dinero depositado' },
     { value: `${dineroRetirado.toFixed(2)} €`, label: 'Dinero retirado' },
     { value: `${partidasJugadas}`, label: 'Partidas jugadas' },
     { value: `${dineroJugado.toFixed(2)} €`, label: 'Dinero jugado' },
     { value: `${rakeGanado.toFixed(2)} €`, label: 'Rake ganado (10%)' },
-    { value: `${totalUsuarios ?? '—'}`, label: 'Usuarios registrados' },
+    // Clicable (pedido de Iñi): pulsar el número lleva al listado completo
+    // de usuarios en su propia pantalla, en vez de mostrarlo siempre aquí.
+    { value: `${totalUsuarios ?? '—'}`, label: 'Usuarios registrados', href: '/admin/usuarios' },
   ];
 
   return (
@@ -859,9 +986,12 @@ export default function AdminPage() {
                 cualquier orden. Si cada línea lleva también la cuota de &quot;Ganador&quot; de la casa de apuestas
                 (p. ej. <code>Aaberg, Ludvig 8,50</code>), el precio de cada jugador sale de esa cuota — el favorito
                 cuesta el 38% del presupuesto y el resto en proporción, para que no quepan dos o tres favoritos en el
-                mismo equipo. Si pegas solo nombres, sin cuotas, el precio se calcula como antes, por ranking mundial.
-                En cualquier caso, el grupo de color de la porra clásica siempre sale del ranking mundial que tengas
-                guardado más abajo, tengas o no cuotas.
+                mismo equipo. La misma cuota decide también el grupo de color de la porra clásica: Amarillo son los
+                15 favoritos de este torneo, Verde del 16 al 35, y así — nunca hace falta el ranking mundial guardado
+                más abajo si pegas cuotas. Si pegas solo nombres, sin cuotas, tanto el precio como el grupo de la
+                porra se calculan por el ranking mundial guardado, pero siempre en relación a este torneo: Amarillo
+                son los 15 jugadores mejor clasificados que juegan este torneo, no los jugadores cuyo puesto mundial
+                sea 1-15 (si el nº1 del mundo no juega, el mejor clasificado que sí juega puede ser Amarillo).
               </p>
               <div style={S.field}>
                 <span style={S.label}>Nombre del torneo</span>
@@ -885,13 +1015,23 @@ export default function AdminPage() {
                   duplican). Desmarca lo que no quieras recrear — por ejemplo, si solo has borrado la porra para
                   rehacerla y las mesas de Drafters ya están bien tal cual.
                 </p>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: S.TEXT, cursor: 'pointer' }}>
-                  <input type="checkbox" checked={crearMesas} onChange={(e) => setCrearMesas(e.target.checked)} />
+                <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, color: S.TEXT, cursor: 'pointer', padding: '4px 0' }}>
+                  <input
+                    type="checkbox"
+                    checked={crearMesas}
+                    onChange={(e) => setCrearMesas(e.target.checked)}
+                    style={{ width: 18, height: 18, flexShrink: 0, accentColor: S.ACCENT, cursor: 'pointer' }}
+                  />
                   Crear mesas de Drafters
                 </label>
                 {torneoDeporte === 'golf' && (
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: S.TEXT, cursor: 'pointer' }}>
-                    <input type="checkbox" checked={crearPorraCheck} onChange={(e) => setCrearPorraCheck(e.target.checked)} />
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, color: S.TEXT, cursor: 'pointer', padding: '4px 0' }}>
+                    <input
+                      type="checkbox"
+                      checked={crearPorraCheck}
+                      onChange={(e) => setCrearPorraCheck(e.target.checked)}
+                      style={{ width: 18, height: 18, flexShrink: 0, accentColor: S.ACCENT, cursor: 'pointer' }}
+                    />
                     Crear la porra
                   </label>
                 )}
@@ -927,15 +1067,30 @@ export default function AdminPage() {
                   )}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 260, overflowY: 'auto' }}>
                     {previewJugadores.map((j, i) => {
-                      const puestoMundial = mapaRankingActual.get(normalizarNombre(j.nombre));
                       const precioCalc = preciosPreviewCuota[i];
+                      // El puesto que se muestra aquí es el que de verdad decide el
+                      // grupo de la porra (sección "de dónde sale el puesto" en
+                      // lib/porraGrupos.ts): con cuotas, la posición por cuota
+                      // dentro de este torneo; sin cuotas, la posición DENTRO DE
+                      // ESTE TORNEO según el ranking mundial guardado (corregido
+                      // 23/09, tercera vuelta — no el puesto mundial absoluto: si
+                      // el nº1 del mundo no juega este torneo, el mejor clasificado
+                      // que sí juega tiene que poder ser Amarillo).
+                      const puestoGrupo = usandoCuotas ? puestosPreviewPorCuota[i] : puestosPreviewPorRankingMundial[i];
+                      const tituloPuesto = usandoCuotas
+                        ? puestoGrupo !== null
+                          ? 'Puesto en este torneo por cuota de Ganador (decide el grupo de la porra)'
+                          : 'Sin cuota válida — revísala (decide el grupo de la porra)'
+                        : puestoGrupo !== null
+                          ? 'Puesto en este torneo según el ranking mundial guardado (decide el grupo de la porra, sin cuotas)'
+                          : 'No encontrado en el ranking mundial guardado — revisa el nombre (afecta al grupo de porra)';
                       return (
                       <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span
-                          title={puestoMundial !== undefined ? 'Puesto en el ranking mundial guardado (grupo de porra)' : 'No encontrado en el ranking mundial guardado — revisa el nombre (afecta al grupo de porra)'}
-                          style={{ width: 40, flexShrink: 0, fontSize: 10.5, fontWeight: 700, textAlign: 'right', color: puestoMundial !== undefined ? S.ACCENT : S.ERROR }}
+                          title={tituloPuesto}
+                          style={{ width: 40, flexShrink: 0, fontSize: 10.5, fontWeight: 700, textAlign: 'right', color: puestoGrupo !== null ? S.ACCENT : S.ERROR }}
                         >
-                          {puestoMundial !== undefined ? `#${puestoMundial}` : '¿?'}
+                          {puestoGrupo !== null ? `#${puestoGrupo}` : '¿?'}
                         </span>
                         <input
                           value={j.nombre}
@@ -964,9 +1119,14 @@ export default function AdminPage() {
                         {torneoDeporte === 'golf' && (
                           <label
                             title="Jugador español"
-                            style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, fontSize: 11, color: S.MUTED_2, cursor: 'pointer' }}
+                            style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, fontSize: 11, color: S.MUTED_2, cursor: 'pointer' }}
                           >
-                            <input type="checkbox" checked={j.esEspanol} onChange={() => toggleEspanolVistaPrevia(i)} />
+                            <input
+                              type="checkbox"
+                              checked={j.esEspanol}
+                              onChange={() => toggleEspanolVistaPrevia(i)}
+                              style={{ width: 15, height: 15, flexShrink: 0, accentColor: S.ACCENT, cursor: 'pointer' }}
+                            />
                             ES
                           </label>
                         )}
@@ -1052,58 +1212,111 @@ export default function AdminPage() {
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            {statCards.map((c) => (
-              <div key={c.label} style={{ display: 'flex', flexDirection: 'column', gap: 4, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 14 }}>
-                <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 22, color: S.TEXT }}>{c.value}</span>
-                <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: S.MUTED_2 }}>{c.label}</span>
-              </div>
-            ))}
+            {statCards.map((c) => {
+              const contenido = (
+                <>
+                  <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 22, color: S.TEXT }}>{c.value}</span>
+                  <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: S.MUTED_2 }}>
+                    {c.label}
+                    {c.href && <span style={{ marginLeft: 5, color: S.ACCENT }}>→</span>}
+                  </span>
+                </>
+              );
+              return c.href ? (
+                <Link
+                  key={c.label}
+                  href={c.href}
+                  style={{ display: 'flex', flexDirection: 'column', gap: 4, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 14, textDecoration: 'none', cursor: 'pointer' }}
+                >
+                  {contenido}
+                </Link>
+              ) : (
+                <div key={c.label} style={{ display: 'flex', flexDirection: 'column', gap: 4, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 14 }}>
+                  {contenido}
+                </div>
+              );
+            })}
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <span style={S.sectionLabel}>Crear mesa</span>
-            <form onSubmit={crearSala} style={{ display: 'flex', flexDirection: 'column', gap: 10, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 14 }}>
-              <div style={S.field}>
-                <span style={S.label}>Nombre</span>
-                <input required value={nombreSala} onChange={(e) => setNombreSala(e.target.value)} style={S.input} />
-              </div>
-              <div style={S.field}>
-                <span style={S.label}>Deporte</span>
-                <select value={deporteSala} onChange={(e) => setDeporteSala(e.target.value as typeof deporteSala)} style={S.selectInput}>
-                  {DEPORTES.map((d) => <option key={d} value={d}>{d}</option>)}
-                </select>
-              </div>
-              <div style={S.field}>
-                <span style={S.label}>Competición</span>
-                <input required value={competicionSala} onChange={(e) => setCompeticionSala(e.target.value)} placeholder="La Liga, PGA Tour..." style={S.input} />
-              </div>
-              <div style={S.field}>
-                <span style={S.label}>Tipo</span>
-                <select value={tipoSala} onChange={(e) => setTipoSala(e.target.value as typeof tipoSala)} style={S.selectInput}>
-                  {TIPOS_SALA.map((t) => <option key={t} value={t}>{TIPO_SALA_LABELS[t]}</option>)}
-                </select>
-              </div>
-              {tipoSala !== 'maraton' && (
-                <div style={S.field}>
-                  <span style={S.label}>Aforo</span>
-                  <input type="number" min={2} required value={aforoSala} onChange={(e) => setAforoSala(Number(e.target.value))} style={S.input} />
-                </div>
-              )}
-              {tipoSala === 'maraton' && (
-                <p style={{ fontSize: 11.5, color: S.MUTED_2, margin: 0 }}>El Maratón no tiene aforo fijo — inscripción sin límite.</p>
-              )}
-              <div style={S.field}>
-                <span style={S.label}>Buy-in (€ simulados)</span>
-                <input type="number" min={0} required value={buyInSala} onChange={(e) => setBuyInSala(Number(e.target.value))} style={S.input} />
-              </div>
-              <button type="submit" disabled={creandoSala} style={{ ...S.primaryButton, marginTop: 0, opacity: creandoSala ? 0.7 : 1 }}>
-                {creandoSala ? 'Creando...' : 'Crear mesa'}
-              </button>
-            </form>
-            <p style={{ fontSize: 11, color: S.MUTED_3, margin: 0 }}>
-              Recuerda crear al menos 2 mesas de cada tipo/deporte/competición — cuando una se cierre, el sistema repone
-              automáticamente hasta llegar a ese mínimo.
-            </p>
+            <button
+              type="button"
+              onClick={() => setMostrarCrearMesa((v) => !v)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+                background: 'transparent',
+                border: 'none',
+                padding: 0,
+                cursor: 'pointer',
+                textAlign: 'left',
+              }}
+            >
+              <span style={S.sectionLabel}>Crear mesa aislada</span>
+              <span
+                style={{
+                  fontSize: 13,
+                  color: S.MUTED_2,
+                  transform: mostrarCrearMesa ? 'rotate(180deg)' : 'rotate(0deg)',
+                  transition: 'transform 0.15s ease',
+                  flexShrink: 0,
+                }}
+              >
+                ▾
+              </span>
+            </button>
+            {mostrarCrearMesa && (
+              <>
+                <p style={{ fontSize: 11, color: S.MUTED_3, margin: 0 }}>
+                  Normalmente no hace falta: al crear un torneo o jornada ya se generan solas 2 mesas de cada
+                  tipo/buy-in (y la porra, en golf). Usa esto solo para un caso suelto.
+                </p>
+                <form onSubmit={crearSala} style={{ display: 'flex', flexDirection: 'column', gap: 10, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 14 }}>
+                  <div style={S.field}>
+                    <span style={S.label}>Nombre</span>
+                    <input required value={nombreSala} onChange={(e) => setNombreSala(e.target.value)} style={S.input} />
+                  </div>
+                  <div style={S.field}>
+                    <span style={S.label}>Deporte</span>
+                    <select value={deporteSala} onChange={(e) => setDeporteSala(e.target.value as typeof deporteSala)} style={S.selectInput}>
+                      {DEPORTES.map((d) => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                  </div>
+                  <div style={S.field}>
+                    <span style={S.label}>Competición</span>
+                    <input required value={competicionSala} onChange={(e) => setCompeticionSala(e.target.value)} placeholder="La Liga, PGA Tour..." style={S.input} />
+                  </div>
+                  <div style={S.field}>
+                    <span style={S.label}>Tipo</span>
+                    <select value={tipoSala} onChange={(e) => setTipoSala(e.target.value as typeof tipoSala)} style={S.selectInput}>
+                      {TIPOS_SALA.map((t) => <option key={t} value={t}>{TIPO_SALA_LABELS[t]}</option>)}
+                    </select>
+                  </div>
+                  {tipoSala !== 'maraton' && (
+                    <div style={S.field}>
+                      <span style={S.label}>Aforo</span>
+                      <input type="number" min={2} required value={aforoSala} onChange={(e) => setAforoSala(Number(e.target.value))} style={S.input} />
+                    </div>
+                  )}
+                  {tipoSala === 'maraton' && (
+                    <p style={{ fontSize: 11.5, color: S.MUTED_2, margin: 0 }}>El Maratón no tiene aforo fijo — inscripción sin límite.</p>
+                  )}
+                  <div style={S.field}>
+                    <span style={S.label}>Buy-in (€ simulados)</span>
+                    <input type="number" min={0} required value={buyInSala} onChange={(e) => setBuyInSala(Number(e.target.value))} style={S.input} />
+                  </div>
+                  <button type="submit" disabled={creandoSala} style={{ ...S.primaryButton, marginTop: 0, opacity: creandoSala ? 0.7 : 1 }}>
+                    {creandoSala ? 'Creando...' : 'Crear mesa'}
+                  </button>
+                </form>
+                <p style={{ fontSize: 11, color: S.MUTED_3, margin: 0 }}>
+                  Recuerda crear al menos 2 mesas de cada tipo/deporte/competición — cuando una se cierre, el sistema
+                  repone automáticamente hasta llegar a ese mínimo.
+                </p>
+              </>
+            )}
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1141,21 +1354,55 @@ export default function AdminPage() {
                       </div>
                     </div>
                     {editando && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <input
-                          type="datetime-local"
-                          value={fechaTorneoEditada}
-                          onChange={(e) => setFechaTorneoEditada(e.target.value)}
-                          style={{ ...S.input, padding: '8px 10px', fontSize: 12.5 }}
-                        />
-                        <button
-                          type="button"
-                          disabled={guardandoFechaTorneo}
-                          onClick={() => guardarFechaTorneo(t.competicion)}
-                          style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: '#04140B', background: '#3DDC84', border: 'none', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', opacity: guardandoFechaTorneo ? 0.7 : 1, whiteSpace: 'nowrap' }}
-                        >
-                          Guardar fecha límite
-                        </button>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <input
+                            type="datetime-local"
+                            value={fechaTorneoEditada}
+                            onChange={(e) => setFechaTorneoEditada(e.target.value)}
+                            style={{ ...S.input, padding: '8px 10px', fontSize: 12.5 }}
+                          />
+                          <button
+                            type="button"
+                            disabled={guardandoFechaTorneo}
+                            onClick={() => guardarFechaTorneo(t.competicion)}
+                            style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: '#04140B', background: '#3DDC84', border: 'none', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', opacity: guardandoFechaTorneo ? 0.7 : 1, whiteSpace: 'nowrap' }}
+                          >
+                            Guardar fecha límite
+                          </button>
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, borderTop: `1px solid ${S.CARD_BORDER}`, paddingTop: 10 }}>
+                          <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>
+                            Jugadores de este torneo
+                          </span>
+                          {jugadores.filter((j) => j.deporte === t.deporte && j.competicion === t.competicion).length === 0 && (
+                            <p style={{ fontSize: 11.5, color: S.MUTED_3, margin: 0 }}>No hay jugadores importados para este torneo.</p>
+                          )}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 260, overflowY: 'auto' }}>
+                            {jugadores
+                              .filter((j) => j.deporte === t.deporte && j.competicion === t.competicion)
+                              .map((j) => (
+                                <div key={j.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, background: '#10150F', border: '1px solid #1E2723', borderRadius: 8, padding: '7px 10px' }}>
+                                  <span style={{ minWidth: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 12.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    {j.nombre}
+                                  </span>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                                    <span style={{ fontSize: 11, color: '#F0B94D', fontWeight: 700 }}>{j.precio} €</span>
+                                    <button
+                                      type="button"
+                                      disabled={eliminandoJugadorId === j.id}
+                                      onClick={() => eliminarJugador(j)}
+                                      aria-label={`Eliminar a ${j.nombre}`}
+                                      style={{ background: 'transparent', border: `1px solid ${S.ERROR}`, borderRadius: 7, color: S.ERROR, width: 26, height: 26, cursor: 'pointer', opacity: eliminandoJugadorId === j.id ? 0.6 : 1 }}
+                                    >
+                                      ×
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -1173,29 +1420,111 @@ export default function AdminPage() {
             <span style={S.sectionLabel}>Porras creadas</span>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {porrasAdmin.length === 0 && <p style={{ fontSize: 12.5, color: S.MUTED_3, margin: 0 }}>Todavía no hay ninguna porra creada.</p>}
-              {porrasAdmin.map((p) => (
-                <div key={p.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: '12px 14px' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-                    <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 13.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {p.major}
-                    </span>
-                    <span style={{ fontSize: 11, color: S.FAINT }}>{p.estado} · {p.precio.toFixed(2)} €</span>
+              {porrasAdmin.map((p) => {
+                const editandoPorra = editandoFechaPorra === p.id;
+                return (
+                  <div key={p.id} style={{ display: 'flex', flexDirection: 'column', gap: 8, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: '12px 14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                        <span
+                          style={{
+                            fontFamily: "'Manrope', sans-serif",
+                            fontWeight: 700,
+                            fontSize: 9.5,
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.05em',
+                            color: S.ACCENT,
+                          }}
+                        >
+                          Porra
+                        </span>
+                        <span
+                          style={{
+                            fontFamily: "'Manrope', sans-serif",
+                            fontWeight: 700,
+                            fontSize: 13.5,
+                            color: S.TEXT,
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                        >
+                          {p.major || p.competicion || '(sin nombre de torneo)'}
+                        </span>
+                        <span style={{ fontSize: 11, color: S.FAINT }}>{p.estado} · {p.precio.toFixed(2)} €</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                        <button
+                          type="button"
+                          onClick={() => (editandoPorra ? setEditandoFechaPorra(null) : empezarEdicionFechaPorra(p))}
+                          style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: '#C9D2CC', background: 'transparent', border: `1px solid ${S.BORDER}`, borderRadius: 8, padding: '6px 10px', cursor: 'pointer' }}
+                        >
+                          {editandoPorra ? 'Cancelar' : 'Editar'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={eliminandoPorraId === p.id}
+                          onClick={() => eliminarPorra(p)}
+                          style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: S.ERROR, background: 'transparent', border: `1px solid ${S.ERROR}`, borderRadius: 8, padding: '6px 10px', cursor: 'pointer', opacity: eliminandoPorraId === p.id ? 0.6 : 1 }}
+                        >
+                          {eliminandoPorraId === p.id ? 'Eliminando...' : 'Eliminar'}
+                        </button>
+                      </div>
+                    </div>
+                    {editandoPorra && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, borderTop: `1px solid ${S.CARD_BORDER}`, paddingTop: 10 }}>
+                        <input
+                          type="datetime-local"
+                          value={fechaPorraEditada}
+                          onChange={(e) => setFechaPorraEditada(e.target.value)}
+                          style={{ ...S.input, padding: '8px 10px', fontSize: 12.5 }}
+                        />
+                        <button
+                          type="button"
+                          disabled={guardandoFechaPorra}
+                          onClick={() => guardarFechaPorra(p.id)}
+                          style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: '#04140B', background: '#3DDC84', border: 'none', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', opacity: guardandoFechaPorra ? 0.7 : 1, whiteSpace: 'nowrap' }}
+                        >
+                          Guardar fecha límite
+                        </button>
+                      </div>
+                    )}
                   </div>
-                  <button
-                    type="button"
-                    disabled={eliminandoPorraId === p.id}
-                    onClick={() => eliminarPorra(p)}
-                    style={{ flexShrink: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: S.ERROR, background: 'transparent', border: `1px solid ${S.ERROR}`, borderRadius: 8, padding: '6px 10px', cursor: 'pointer', opacity: eliminandoPorraId === p.id ? 0.6 : 1 }}
-                  >
-                    {eliminandoPorraId === p.id ? 'Eliminando...' : 'Eliminar'}
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <span style={S.sectionLabel}>Mesas recientes</span>
+            <button
+              type="button"
+              onClick={() => setMostrarMesasCreadas((v) => !v)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+                background: 'transparent',
+                border: 'none',
+                padding: 0,
+                cursor: 'pointer',
+                textAlign: 'left',
+              }}
+            >
+              <span style={S.sectionLabel}>Listado de mesas creadas ({salas.length})</span>
+              <span
+                style={{
+                  fontSize: 13,
+                  color: S.MUTED_2,
+                  transform: mostrarMesasCreadas ? 'rotate(180deg)' : 'rotate(0deg)',
+                  transition: 'transform 0.15s ease',
+                  flexShrink: 0,
+                }}
+              >
+                ▾
+              </span>
+            </button>
+            {mostrarMesasCreadas && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {salas.map((s) => (
                 <div key={s.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: '12px 14px' }}>
@@ -1235,10 +1564,39 @@ export default function AdminPage() {
                 </div>
               ))}
             </div>
+            )}
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <span style={S.sectionLabel}>Jugadores</span>
+            <button
+              type="button"
+              onClick={() => setMostrarJugadoresCreados((v) => !v)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+                background: 'transparent',
+                border: 'none',
+                padding: 0,
+                cursor: 'pointer',
+                textAlign: 'left',
+              }}
+            >
+              <span style={S.sectionLabel}>Listado de jugadores creados ({jugadores.length})</span>
+              <span
+                style={{
+                  fontSize: 13,
+                  color: S.MUTED_2,
+                  transform: mostrarJugadoresCreados ? 'rotate(180deg)' : 'rotate(0deg)',
+                  transition: 'transform 0.15s ease',
+                  flexShrink: 0,
+                }}
+              >
+                ▾
+              </span>
+            </button>
+            {mostrarJugadoresCreados && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {jugadores.map((j) => (
                 <div key={j.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: '12px 14px' }}>
@@ -1299,6 +1657,7 @@ export default function AdminPage() {
                 </div>
               ))}
             </div>
+            )}
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

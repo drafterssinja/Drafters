@@ -7,6 +7,10 @@ import { supabase, Perfil, Movimiento } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
 
+// Mismo criterio que en el registro (app/registro/page.tsx): solo letras,
+// números, guion bajo y punto, sin espacios, 3-20 caracteres.
+const NOMBRE_USUARIO_REGEX = /^[a-zA-Z0-9_.]{3,20}$/;
+
 type FilaHistorial = {
   id: string;
   nombre_equipo: string | null;
@@ -42,6 +46,15 @@ export default function CuentaPage() {
   const [nuevaPassword, setNuevaPassword] = useState('');
   const [guardando, setGuardando] = useState(false);
   const [guardadoOk, setGuardadoOk] = useState<string | null>(null);
+
+  // Nombre de usuario editable (pedido de Iñi, 23/09): antes solo se podía
+  // elegir una vez, en el registro — algunas cuentas creadas antes de que
+  // ese campo existiera (como la suya propia) recibieron un nombre
+  // provisional automático al pegar el esquema, y necesitan poder ponerse
+  // uno de verdad desde aquí.
+  const [nombreUsuario, setNombreUsuario] = useState('');
+  const [usuarioDisponible, setUsuarioDisponible] = useState<boolean | null>(null);
+  const [comprobandoUsuario, setComprobandoUsuario] = useState(false);
 
   useEffect(() => {
     let activo = true;
@@ -87,6 +100,7 @@ export default function CuentaPage() {
         setApellido(p.apellido ?? '');
         setFechaNacimiento(p.fecha_nacimiento ?? '');
         setEmail(session.user.email ?? '');
+        setNombreUsuario(p.nombre_usuario ?? '');
       }
 
       if (historialError) setError('No se ha podido cargar tu historial de partidas.');
@@ -104,20 +118,58 @@ export default function CuentaPage() {
     };
   }, [router]);
 
+  // Comprueba disponibilidad en cuanto se deja el campo — igual que en el
+  // registro, pero excluyendo la propia fila (p_excluir_id), para que
+  // dejarlo tal cual (sin cambiarlo) no salga como "no disponible".
+  async function comprobarUsuario() {
+    if (!perfil) return;
+    const valor = nombreUsuario.trim();
+    if (valor === (perfil.nombre_usuario ?? '') || !NOMBRE_USUARIO_REGEX.test(valor)) {
+      setUsuarioDisponible(null);
+      return;
+    }
+    setComprobandoUsuario(true);
+    const { data, error: rpcError } = await supabase.rpc('nombre_usuario_disponible', {
+      p_nombre_usuario: valor,
+      p_excluir_id: perfil.id,
+    });
+    setComprobandoUsuario(false);
+    if (rpcError) {
+      setUsuarioDisponible(null);
+      return;
+    }
+    setUsuarioDisponible(Boolean(data));
+  }
+
   async function guardarCambios() {
     if (!perfil) return;
     setError(null);
     setGuardadoOk(null);
+
+    const nombreUsuarioTrim = nombreUsuario.trim();
+    if (!NOMBRE_USUARIO_REGEX.test(nombreUsuarioTrim)) {
+      setError('El nombre de usuario debe tener entre 3 y 20 caracteres, sin espacios (solo letras, números, "_" y ".").');
+      return;
+    }
+    if (usuarioDisponible === false) {
+      setError('Ese nombre de usuario ya está en uso. Elige otro.');
+      return;
+    }
+
     setGuardando(true);
 
     const { error: perfilUpdateError } = await supabase
       .from('perfiles')
-      .update({ nombre, apellido, fecha_nacimiento: fechaNacimiento || null })
+      .update({ nombre, apellido, fecha_nacimiento: fechaNacimiento || null, nombre_usuario: nombreUsuarioTrim })
       .eq('id', perfil.id);
 
     if (perfilUpdateError) {
       setGuardando(false);
-      setError('No se han podido guardar los cambios. Inténtalo de nuevo.');
+      setError(
+        perfilUpdateError.message.includes('perfiles_nombre_usuario_unico')
+          ? 'Ese nombre de usuario ya está en uso. Elige otro.'
+          : 'No se han podido guardar los cambios. Inténtalo de nuevo.'
+      );
       return;
     }
 
@@ -136,7 +188,8 @@ export default function CuentaPage() {
 
     setGuardando(false);
     setNuevaPassword('');
-    setPerfil({ ...perfil, nombre, apellido, fecha_nacimiento: fechaNacimiento || null });
+    setPerfil({ ...perfil, nombre, apellido, fecha_nacimiento: fechaNacimiento || null, nombre_usuario: nombreUsuarioTrim });
+    setUsuarioDisponible(null);
     setGuardadoOk(
       cambiosAuth.email
         ? 'Cambios guardados. Revisa tu email para confirmar el nuevo correo.'
@@ -334,6 +387,23 @@ export default function CuentaPage() {
             <div style={S.field}>
               <span style={S.label}>Apellido</span>
               <input value={apellido} onChange={(e) => setApellido(e.target.value)} style={S.input} />
+            </div>
+            <div style={S.field}>
+              <span style={S.label}>Nombre de usuario</span>
+              <input
+                value={nombreUsuario}
+                onChange={(e) => setNombreUsuario(e.target.value)}
+                onBlur={comprobarUsuario}
+                style={S.input}
+              />
+              {comprobandoUsuario && <span style={{ fontSize: 11.5, color: S.MUTED_3 }}>Comprobando...</span>}
+              {!comprobandoUsuario && usuarioDisponible === true && (
+                <span style={{ fontSize: 11.5, color: S.ACCENT }}>Disponible.</span>
+              )}
+              {!comprobandoUsuario && usuarioDisponible === false && (
+                <span style={{ fontSize: 11.5, color: S.ERROR }}>Ese nombre de usuario ya está en uso.</span>
+              )}
+              <span style={{ fontSize: 11, color: S.MUTED_3 }}>Es el nombre que verán el resto de jugadores — nunca tu nombre real.</span>
             </div>
             <div style={S.field}>
               <span style={S.label}>Email</span>

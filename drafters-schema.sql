@@ -72,12 +72,28 @@ create table if not exists public.perfiles (
 comment on table public.perfiles is 'Datos de producto de cada usuario registrado. El saldo es siempre simulado (€), sin conexión a ningún sistema de pago real. rol=''admin'' identifica al superadministrador (solo Iñi).';
 
 -- Si la tabla ya existía de una ejecución anterior del esquema (el "create
--- table if not exists" de arriba no la toca en ese caso), estas dos columnas
--- se añaden igualmente aquí.
+-- table if not exists" de arriba no la toca en ese caso), estas columnas se
+-- añaden igualmente aquí.
 alter table public.perfiles add column if not exists apellido text;
 alter table public.perfiles add column if not exists nombre_usuario text;
 
 comment on column public.perfiles.nombre_usuario is 'Nombre público del usuario: es el que se muestra cuando participa en una sala/MTT. En las porras clásicas el usuario pone en su lugar un nombre de equipo (ver equipos.nombre_equipo).';
+
+-- email (nuevo, ronda de correcciones del 23/09): copia de solo lectura del
+-- email de auth.users, guardada aquí SOLO para que el admin pueda verla en
+-- el listado de "Usuarios registrados" (sección 6/11.9) sin tener que
+-- consultar auth.users directamente (el cliente no tiene permiso, y no hay
+-- forma de hacer un join contra ese esquema desde RLS normal). Se mantiene
+-- al día sola: handle_new_user() la rellena en cada alta nueva (ver más
+-- abajo), y este update rellena aquí, una sola vez, los perfiles que ya
+-- existían de antes de esta columna. Sigue protegida por la misma RLS que
+-- el resto de `perfiles` (el propio usuario, o el admin) — nunca es
+-- pública.
+alter table public.perfiles add column if not exists email text;
+update public.perfiles p
+set email = u.email
+from auth.users u
+where u.id = p.id and p.email is null;
 
 -- El nombre de usuario tiene que ser único (sin distinguir mayúsculas de
 -- minúsculas), pero se permite null mientras algún perfil antiguo no lo
@@ -402,10 +418,12 @@ create table if not exists public.notificaciones (
 -- cuánto has ganado (pedido de Iñi, 23/09; queda preparado en el modelo de
 -- datos, pero todavía no hay ningún sitio en la app que calcule
 -- automáticamente resultados/premios de verdad, así que por ahora nada
--- genera notificaciones de este tipo todavía).
+-- genera notificaciones de este tipo todavía). 'nuevo_usuario' (23/09,
+-- segunda ronda): aviso solo para el/los admin cuando alguien completa el
+-- registro — ver handle_new_user() más abajo.
 alter table public.notificaciones drop constraint if exists notificaciones_tipo_check;
 alter table public.notificaciones add constraint notificaciones_tipo_check
-  check (tipo in ('trasladado', 'reembolsado', 'eliminado', 'resultado'));
+  check (tipo in ('trasladado', 'reembolsado', 'eliminado', 'resultado', 'nuevo_usuario'));
 
 -- A dónde lleva la notificación al tocarla (p.ej. la sala/porra en cuestión)
 -- — null si no aplica (como en 'eliminado', que ya no tiene sala que ver).
@@ -459,22 +477,48 @@ $$;
 -- en `options.data`. El rol siempre se crea como 'usuario' — el ascenso a
 -- 'admin' se hace a mano, una sola vez, desde el SQL Editor (ver
 -- instrucciones aparte).
+--
+-- Además (nuevo, 23/09, pedido de Iñi), avisa al superadministrador: cada
+-- perfil con rol='admin' recibe una notificación 'nuevo_usuario' con el
+-- nombre de usuario de la persona recién registrada. Nota de interpretación:
+-- el aviso se genera en el momento de rellenar el formulario de registro
+-- (que es cuando se crea de verdad la fila en `perfiles`), no al verificar
+-- el código del email — así que también avisa de registros que luego
+-- queden sin verificar. Si prefieres que solo avise tras verificar el
+-- email, dímelo y lo cambio.
+--
+-- También copia el email a `perfiles.email` (nuevo, ronda de correcciones
+-- del 23/09) para que el listado de "Usuarios registrados" del admin lo
+-- pueda mostrar sin tocar auth.users directamente.
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
 security definer set search_path = public
 as $$
+declare
+  v_nombre_usuario text := nullif(new.raw_user_meta_data ->> 'nombre_usuario', '');
 begin
-  insert into public.perfiles (id, nombre, apellido, nombre_usuario, fecha_nacimiento, terminos_aceptados, terminos_aceptados_en)
+  insert into public.perfiles (id, nombre, apellido, nombre_usuario, fecha_nacimiento, terminos_aceptados, terminos_aceptados_en, email)
   values (
     new.id,
     coalesce(new.raw_user_meta_data ->> 'nombre', ''),
     nullif(new.raw_user_meta_data ->> 'apellido', ''),
-    nullif(new.raw_user_meta_data ->> 'nombre_usuario', ''),
+    v_nombre_usuario,
     nullif(new.raw_user_meta_data ->> 'fecha_nacimiento', '')::date,
     coalesce((new.raw_user_meta_data ->> 'terminos_aceptados')::boolean, false),
-    case when (new.raw_user_meta_data ->> 'terminos_aceptados')::boolean then now() else null end
+    case when (new.raw_user_meta_data ->> 'terminos_aceptados')::boolean then now() else null end,
+    new.email
   );
+
+  insert into public.notificaciones (usuario_id, tipo, titulo, mensaje)
+  select
+    p.id,
+    'nuevo_usuario',
+    'Nuevo usuario registrado',
+    'Se acaba de registrar en Drafters el usuario "' || coalesce(v_nombre_usuario, '(sin nombre de usuario)') || '".'
+  from public.perfiles p
+  where p.rol = 'admin';
+
   return new;
 end;
 $$;
@@ -510,18 +554,31 @@ $$;
 -- vez de que el usuario se entere solo al fallar el registro entero.
 -- security definer: así se puede llamar sin estar todavía autenticado (en
 -- pleno registro) sin dar acceso de lectura al resto de la tabla `perfiles`.
-create or replace function public.nombre_usuario_disponible(p_nombre_usuario text)
+-- p_excluir_id (nuevo, 23/09): al comprobar disponibilidad desde "Mi cuenta"
+-- (para poder CAMBIAR tu propio nombre de usuario, no solo elegirlo en el
+-- registro), hay que ignorar tu propia fila — si no, comprobar tu nombre
+-- actual sin cambiarlo saldría siempre "no disponible" porque ya lo tienes
+-- tú mismo. Se quita primero la versión de un solo parámetro para no dejar
+-- dos funciones distintas (ambigüedad al llamarla con un solo argumento) —
+-- la llamada ya existente desde el registro (solo con p_nombre_usuario)
+-- sigue funcionando igual, p_excluir_id se queda en null por defecto.
+drop function if exists public.nombre_usuario_disponible(text);
+
+create or replace function public.nombre_usuario_disponible(p_nombre_usuario text, p_excluir_id uuid default null)
 returns boolean
 language sql
 stable
 security definer set search_path = public
 as $$
   select not exists (
-    select 1 from public.perfiles where lower(nombre_usuario) = lower(p_nombre_usuario)
+    select 1 from public.perfiles
+    where lower(nombre_usuario) = lower(p_nombre_usuario)
+      and (p_excluir_id is null or id <> p_excluir_id)
   );
 $$;
 
-grant execute on function public.nombre_usuario_disponible(text) to anon, authenticated;
+revoke all on function public.nombre_usuario_disponible(text, uuid) from public;
+grant execute on function public.nombre_usuario_disponible(text, uuid) to anon, authenticated;
 
 -- ============================================================================
 -- CONSOLIDACIÓN DE SALAS INCOMPLETAS AL CERRAR LA INSCRIPCIÓN
