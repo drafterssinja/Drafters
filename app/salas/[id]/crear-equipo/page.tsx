@@ -85,7 +85,11 @@ export default function CrearEquipoPage() {
       const salaRow = salaData as SalaRow;
 
       if (salaRow.estado === 'completa' || salaRow.estado === 'finalizada') {
-        router.push(`/salas/${salaId}`);
+        // replace, no push: esto es un redirect de "no deberías estar aquí",
+        // no una navegación del usuario — con push, la flecha "volver" de la
+        // cabecera (que usa el historial) rebotaba de vuelta a esta misma
+        // pantalla en vez de salir a /salas (bug reportado por Iñi, 23/09).
+        router.replace(`/salas/${salaId}`);
         return;
       }
 
@@ -98,7 +102,7 @@ export default function CrearEquipoPage() {
 
       const miEquipo = miEquipoData as { id: string; inscripciones: { estado: string }[] } | null;
       if (miEquipo && miEquipo.inscripciones.some((i) => i.estado !== 'reembolsada')) {
-        router.push(`/salas/${salaId}`);
+        router.replace(`/salas/${salaId}`);
         return;
       }
 
@@ -189,7 +193,11 @@ export default function CrearEquipoPage() {
       setEnviando(false);
       return;
     }
-    router.push(`/salas/${salaId}`);
+    // replace: al confirmar, esta pantalla de crear equipo deja de tener
+    // sentido en el historial (si vuelves a ella, redirige otra vez a la
+    // sala) — con push, la flecha de "volver" quedaba atrapada rebotando
+    // entre las dos pantallas en vez de salir a /salas.
+    router.replace(`/salas/${salaId}`);
   }
 
   if (cargando || !perfil) {

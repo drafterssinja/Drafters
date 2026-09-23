@@ -22,7 +22,25 @@ import { normalizarNombre } from '@/lib/nombreMatch';
 // ranking mundial guardado (rankings_mundiales, lib/porraGrupos.ts).
 type PreviewJugador = JugadorParseado & { esEspanol: boolean; cuota: number | null };
 
-type Sala = { id: string; codigo: string; nombre: string; deporte: string; tipo: string; estado: string; buy_in: number };
+type Sala = {
+  id: string;
+  codigo: string;
+  nombre: string;
+  deporte: string;
+  tipo: string;
+  estado: string;
+  buy_in: number;
+  competicion: string;
+  fecha_limite_inscripcion: string | null;
+};
+type PorraAdmin = {
+  id: string;
+  major: string;
+  competicion: string | null;
+  estado: string;
+  precio: number;
+  fecha_limite_inscripcion: string | null;
+};
 type Jugador = {
   id: string;
   nombre: string;
@@ -69,6 +87,7 @@ export default function AdminPage() {
   const [perfil, setPerfil] = useState<Perfil | null>(null);
   const [autorizado, setAutorizado] = useState<boolean | null>(null);
   const [salas, setSalas] = useState<Sala[]>([]);
+  const [porrasAdmin, setPorrasAdmin] = useState<PorraAdmin[]>([]);
   const [jugadores, setJugadores] = useState<Jugador[]>([]);
   const [totalUsuarios, setTotalUsuarios] = useState<number | null>(null);
   const [inscripciones, setInscripciones] = useState<InscripcionFila[]>([]);
@@ -113,6 +132,13 @@ export default function AdminPage() {
   const [torneoDeporte, setTorneoDeporte] = useState<'golf' | 'tenis'>('golf');
   const [torneoTexto, setTorneoTexto] = useState('');
   const [torneoFechaLimite, setTorneoFechaLimite] = useState('');
+  // Checks separados para crear mesas/porra al importar (pedido de Iñi,
+  // 23/09): por defecto los dos activados (torneo nuevo de cero), pero se
+  // pueden desmarcar por separado — p.ej. si ya borró la porra para
+  // recrearla sola y las mesas de Drafters de ese torneo ya están bien, no
+  // hace falta duplicarlas.
+  const [crearMesas, setCrearMesas] = useState(true);
+  const [crearPorraCheck, setCrearPorraCheck] = useState(true);
   const [previewJugadores, setPreviewJugadores] = useState<PreviewJugador[]>([]);
   // Avisos del parseo de cuotas (líneas sin cuota reconocible o con una
   // cuota inválida) — el jugador correspondiente no entra en la vista
@@ -150,9 +176,10 @@ export default function AdminPage() {
   );
 
   async function cargarTodo() {
-    const [{ data: salasData }, { data: jugadoresData }, { count }, { data: inscripcionesData, error: inscripcionesError }, { data: movimientosData, error: movimientosError }] =
+    const [{ data: salasData }, { data: porrasData }, { data: jugadoresData }, { count }, { data: inscripcionesData, error: inscripcionesError }, { data: movimientosData, error: movimientosError }] =
       await Promise.all([
-        supabase.from('salas').select('id, codigo, nombre, deporte, tipo, estado, buy_in').order('created_at', { ascending: false }),
+        supabase.from('salas').select('id, codigo, nombre, deporte, tipo, estado, buy_in, competicion, fecha_limite_inscripcion').order('created_at', { ascending: false }),
+        supabase.from('porras').select('id, major, competicion, estado, precio, fecha_limite_inscripcion').order('created_at', { ascending: false }),
         supabase.from('jugadores').select('id, nombre, deporte, competicion, precio, lesionado').order('created_at', { ascending: false }),
         supabase.from('perfiles').select('id', { count: 'exact', head: true }),
         // Las inscripciones 'reembolsada' son dinero devuelto íntegro (la sala no se
@@ -163,6 +190,7 @@ export default function AdminPage() {
       ]);
 
     setSalas((salasData as Sala[]) ?? []);
+    setPorrasAdmin((porrasData as PorraAdmin[]) ?? []);
     setJugadores((jugadoresData as Jugador[]) ?? []);
     setTotalUsuarios(count ?? 0);
     if (inscripcionesError) setError('No se han podido cargar las estadísticas de partidas jugadas.');
@@ -458,6 +486,21 @@ export default function AdminPage() {
       es_espanol: esGolf ? j.esEspanol : false,
     }));
 
+    // Si ya había jugadores de este mismo torneo (competición + deporte) —
+    // p.ej. porque se pegó el listado dos veces por error, o porque se está
+    // reimportando a propósito para corregir algo — se sustituyen enteros
+    // por el listado nuevo en vez de añadirse encima. Antes, al no
+    // comprobarse esto, un reimport accidental dejaba a cada jugador
+    // duplicado dentro de la porra (bug reportado por Iñi, 23/09: "Open de
+    // Francia" con cada jugador dos veces). Mismo criterio de "sustituir
+    // entero" que reemplazarRanking() ya usa para el ranking mundial.
+    const { error: borrarError } = await supabase.from('jugadores').delete().eq('deporte', torneoDeporte).eq('competicion', nombreTorneo);
+    if (borrarError) {
+      setImportandoTorneo(false);
+      setError('No se ha podido preparar la importación (borrado de jugadores previos). Inténtalo de nuevo.');
+      return;
+    }
+
     const { error: insertError } = await supabase.from('jugadores').insert(filas);
     if (insertError) {
       setImportandoTorneo(false);
@@ -467,26 +510,28 @@ export default function AdminPage() {
 
     const fechaLimiteIso = torneoFechaLimite ? new Date(torneoFechaLimite).toISOString() : null;
 
-    const { count: salasExistentes } = await supabase
-      .from('salas')
-      .select('id', { count: 'exact', head: true })
-      .eq('competicion', nombreTorneo);
-
     let salasCreadas = 0;
-    if (!salasExistentes) {
-      const nuevasSalas = generarSalasParaTorneo({
-        competicionLabel: nombreTorneo,
-        deporte: torneoDeporte,
-        fechaLimiteIso,
-      });
-      const { error: salasError } = await supabase.from('salas').insert(nuevasSalas);
-      if (!salasError) salasCreadas = nuevasSalas.length;
+    if (crearMesas) {
+      const { count: salasExistentes } = await supabase
+        .from('salas')
+        .select('id', { count: 'exact', head: true })
+        .eq('competicion', nombreTorneo);
+
+      if (!salasExistentes) {
+        const nuevasSalas = generarSalasParaTorneo({
+          competicionLabel: nombreTorneo,
+          deporte: torneoDeporte,
+          fechaLimiteIso,
+        });
+        const { error: salasError } = await supabase.from('salas').insert(nuevasSalas);
+        if (!salasError) salasCreadas = nuevasSalas.length;
+      }
     }
 
     // Porra clásica: por ahora solo para golf, una por torneo, usando el
     // mismo listado de jugadores (ya repartido en sus listas por color).
     let porraCreada = false;
-    if (esGolf) {
+    if (esGolf && crearPorraCheck) {
       const { count: porraExistente } = await supabase
         .from('porras')
         .select('id', { count: 'exact', head: true })
@@ -506,8 +551,9 @@ export default function AdminPage() {
 
     setImportandoTorneo(false);
     setResultadoTorneo(
-      `Importados ${filas.length} jugadores de "${nombreTorneo}" (precio ${usandoCuotas ? 'por cuota' : 'por ranking'}). ${salasCreadas} salas nuevas creadas.` +
-        (esGolf ? ` ${porraCreada ? 'Porra clásica creada.' : 'Porra clásica ya existía.'}` : '') +
+      `Importados ${filas.length} jugadores de "${nombreTorneo}" (precio ${usandoCuotas ? 'por cuota' : 'por ranking'}).` +
+        (crearMesas ? ` ${salasCreadas} salas nuevas creadas.` : ' Mesas de Drafters no marcadas para crear.') +
+        (esGolf ? (crearPorraCheck ? ` ${porraCreada ? 'Porra clásica creada.' : 'Porra clásica ya existía.'}` : ' Porra clásica no marcada para crear.') : '') +
         (noEncontrados > 0
           ? ` ⚠️ ${noEncontrados} jugador${noEncontrados === 1 ? '' : 'es'} no ${noEncontrados === 1 ? 'se ha encontrado' : 'se han encontrado'} en el ranking mundial de ${esGolf ? 'golf' : 'tenis'} — revisa que el nombre coincida exactamente, si no ${esGolf ? 'su grupo de porra se ha calculado' : 'se ha calculado'} como si fuera de los últimos del ranking${usandoCuotas ? ' (el precio no se ve afectado, viene de la cuota)' : '.'}`
           : '') +
@@ -520,6 +566,8 @@ export default function AdminPage() {
     setTorneoTexto('');
     setTorneoNombre('');
     setTorneoFechaLimite('');
+    setCrearMesas(true);
+    setCrearPorraCheck(true);
     await cargarTodo();
   }
 
@@ -548,6 +596,68 @@ export default function AdminPage() {
     await cargarTodo();
   }
 
+  // Eliminar torneo/jornada y eliminar porra (pedido de Iñi, 23/09): borra
+  // de verdad, reembolsando y avisando a quien estuviera inscrito (todo
+  // eso lo hace la función de base de datos, en una sola transacción — ver
+  // eliminar_torneo()/eliminar_porra() en drafters-schema.sql).
+  const [eliminandoTorneo, setEliminandoTorneo] = useState<string | null>(null);
+  const [eliminandoPorraId, setEliminandoPorraId] = useState<string | null>(null);
+
+  async function eliminarTorneo(competicion: string, deporte: string) {
+    if (!window.confirm(`¿Estás seguro de que quieres eliminar el torneo/jornada "${competicion}" (${deporte})? Se borrarán todas sus mesas, se reembolsará a los inscritos y se les avisará. Esta acción no se puede deshacer.`)) {
+      return;
+    }
+    setEliminandoTorneo(competicion);
+    setError(null);
+    const { error: rpcError } = await supabase.rpc('eliminar_torneo', { p_competicion: competicion });
+    setEliminandoTorneo(null);
+    if (rpcError) {
+      setError('No se ha podido eliminar el torneo/jornada. Inténtalo de nuevo.');
+      return;
+    }
+    await cargarTodo();
+  }
+
+  async function eliminarPorra(porra: PorraAdmin) {
+    if (!window.confirm(`¿Estás seguro de que quieres eliminar la porra "${porra.major}"? Se reembolsará a los equipos inscritos y se les avisará. Esta acción no se puede deshacer.`)) {
+      return;
+    }
+    setEliminandoPorraId(porra.id);
+    setError(null);
+    const { error: rpcError } = await supabase.rpc('eliminar_porra', { p_porra_id: porra.id });
+    setEliminandoPorraId(null);
+    if (rpcError) {
+      setError('No se ha podido eliminar la porra. Inténtalo de nuevo.');
+      return;
+    }
+    await cargarTodo();
+  }
+
+  // Editar torneo/jornada: por ahora, la fecha límite de inscripción (el
+  // campo que de verdad afecta a todas sus mesas y a su porra a la vez) —
+  // se aplica a todas las salas de esa competición y, si la hay, también a
+  // su porra clásica, en la misma acción.
+  const [editandoFechaTorneo, setEditandoFechaTorneo] = useState<string | null>(null);
+  const [fechaTorneoEditada, setFechaTorneoEditada] = useState('');
+  const [guardandoFechaTorneo, setGuardandoFechaTorneo] = useState(false);
+
+  function empezarEdicionFechaTorneo(competicion: string, fechaActual: string | null) {
+    setEditandoFechaTorneo(competicion);
+    setFechaTorneoEditada(fechaActual ? fechaActual.slice(0, 16) : '');
+  }
+
+  async function guardarFechaTorneo(competicion: string) {
+    setGuardandoFechaTorneo(true);
+    const nuevaFechaIso = fechaTorneoEditada ? new Date(fechaTorneoEditada).toISOString() : null;
+    await Promise.all([
+      supabase.from('salas').update({ fecha_limite_inscripcion: nuevaFechaIso }).eq('competicion', competicion),
+      supabase.from('porras').update({ fecha_limite_inscripcion: nuevaFechaIso }).eq('competicion', competicion),
+    ]);
+    setGuardandoFechaTorneo(false);
+    setEditandoFechaTorneo(null);
+    await cargarTodo();
+  }
+
   if (autorizado === null || !perfil) {
     return (
       <main style={S.mainReset}>
@@ -565,6 +675,18 @@ export default function AdminPage() {
     deporte: d,
     total: salas.filter((s) => s.deporte === d && s.estado !== 'finalizada').length,
   }));
+
+  // Agrupa las mesas por torneo/jornada (misma competición + deporte) para
+  // el panel de "Torneos y jornadas creados" — pedido de Iñi, 23/09: poder
+  // ver, editar y eliminar cada torneo entero, no mesa a mesa.
+  const torneosAgrupados = Object.values(
+    salas.reduce<Record<string, { competicion: string; deporte: string; mesas: number; fechaLimite: string | null }>>((acc, s) => {
+      const key = `${s.deporte}::${s.competicion}`;
+      if (!acc[key]) acc[key] = { competicion: s.competicion, deporte: s.deporte, mesas: 0, fechaLimite: s.fecha_limite_inscripcion };
+      acc[key].mesas += 1;
+      return acc;
+    }, {})
+  ).sort((a, b) => a.competicion.localeCompare(b.competicion));
 
   const maxDias = FECHA_OPCIONES.find((f) => f.key === filtroFecha)?.dias ?? null;
   const dentroDelPeriodo = (fechaIso: string) => {
@@ -755,6 +877,24 @@ export default function AdminPage() {
               <div style={S.field}>
                 <span style={S.label}>Fecha y hora límite de inscripción</span>
                 <input type="datetime-local" value={torneoFechaLimite} onChange={(e) => setTorneoFechaLimite(e.target.value)} style={S.input} />
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <span style={S.label}>Qué crear al confirmar</span>
+                <p style={{ fontSize: 11, color: S.MUTED_3, margin: 0, lineHeight: 1.4 }}>
+                  Los jugadores importados siempre sustituyen a los que ya hubiera de este mismo torneo (nunca se
+                  duplican). Desmarca lo que no quieras recrear — por ejemplo, si solo has borrado la porra para
+                  rehacerla y las mesas de Drafters ya están bien tal cual.
+                </p>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: S.TEXT, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={crearMesas} onChange={(e) => setCrearMesas(e.target.checked)} />
+                  Crear mesas de Drafters
+                </label>
+                {torneoDeporte === 'golf' && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: S.TEXT, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={crearPorraCheck} onChange={(e) => setCrearPorraCheck(e.target.checked)} />
+                    Crear la porra
+                  </label>
+                )}
               </div>
               <div style={S.field}>
                 <span style={S.label}>Listado pegado de la web del circuito</span>
@@ -964,6 +1104,94 @@ export default function AdminPage() {
               Recuerda crear al menos 2 mesas de cada tipo/deporte/competición — cuando una se cierre, el sistema repone
               automáticamente hasta llegar a ese mínimo.
             </p>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <span style={S.sectionLabel}>Torneos y jornadas creados</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {torneosAgrupados.length === 0 && <p style={{ fontSize: 12.5, color: S.MUTED_3, margin: 0 }}>Todavía no hay ningún torneo o jornada creado.</p>}
+              {torneosAgrupados.map((t) => {
+                const key = `${t.deporte}::${t.competicion}`;
+                const editando = editandoFechaTorneo === t.competicion;
+                return (
+                  <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: 8, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: '12px 14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                        <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 13.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {t.competicion}
+                        </span>
+                        <span style={{ fontSize: 11, color: S.FAINT }}>{t.deporte} · {t.mesas} mesa{t.mesas === 1 ? '' : 's'}</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                        <button
+                          type="button"
+                          onClick={() => (editando ? setEditandoFechaTorneo(null) : empezarEdicionFechaTorneo(t.competicion, t.fechaLimite))}
+                          style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: '#C9D2CC', background: 'transparent', border: `1px solid ${S.BORDER}`, borderRadius: 8, padding: '6px 10px', cursor: 'pointer' }}
+                        >
+                          {editando ? 'Cancelar' : 'Editar'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={eliminandoTorneo === t.competicion}
+                          onClick={() => eliminarTorneo(t.competicion, t.deporte)}
+                          style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: S.ERROR, background: 'transparent', border: `1px solid ${S.ERROR}`, borderRadius: 8, padding: '6px 10px', cursor: 'pointer', opacity: eliminandoTorneo === t.competicion ? 0.6 : 1 }}
+                        >
+                          {eliminandoTorneo === t.competicion ? 'Eliminando...' : 'Eliminar'}
+                        </button>
+                      </div>
+                    </div>
+                    {editando && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <input
+                          type="datetime-local"
+                          value={fechaTorneoEditada}
+                          onChange={(e) => setFechaTorneoEditada(e.target.value)}
+                          style={{ ...S.input, padding: '8px 10px', fontSize: 12.5 }}
+                        />
+                        <button
+                          type="button"
+                          disabled={guardandoFechaTorneo}
+                          onClick={() => guardarFechaTorneo(t.competicion)}
+                          style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: '#04140B', background: '#3DDC84', border: 'none', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', opacity: guardandoFechaTorneo ? 0.7 : 1, whiteSpace: 'nowrap' }}
+                        >
+                          Guardar fecha límite
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <p style={{ fontSize: 11, color: S.MUTED_3, margin: 0 }}>
+              Al eliminar un torneo/jornada se borran todas sus mesas, se reembolsa íntegramente a quien estuviera
+              inscrito y se le avisa — la porra clásica de ese mismo torneo (si la hay) no se toca aquí, se elimina
+              aparte más abajo.
+            </p>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <span style={S.sectionLabel}>Porras creadas</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {porrasAdmin.length === 0 && <p style={{ fontSize: 12.5, color: S.MUTED_3, margin: 0 }}>Todavía no hay ninguna porra creada.</p>}
+              {porrasAdmin.map((p) => (
+                <div key={p.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: '12px 14px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                    <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 13.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {p.major}
+                    </span>
+                    <span style={{ fontSize: 11, color: S.FAINT }}>{p.estado} · {p.precio.toFixed(2)} €</span>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={eliminandoPorraId === p.id}
+                    onClick={() => eliminarPorra(p)}
+                    style={{ flexShrink: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: S.ERROR, background: 'transparent', border: `1px solid ${S.ERROR}`, borderRadius: 8, padding: '6px 10px', cursor: 'pointer', opacity: eliminandoPorraId === p.id ? 0.6 : 1 }}
+                  >
+                    {eliminandoPorraId === p.id ? 'Eliminando...' : 'Eliminar'}
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

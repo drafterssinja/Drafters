@@ -24,8 +24,10 @@ import { formatEuros, posicionLabel, closesInLabel } from '@/lib/salaShared';
 
 type PorraFila = { id: string; major: string; estado: string; precio: number; competicion: string | null; fecha_limite_inscripcion: string | null };
 type JugadorRow = { id: string; nombre: string; grupo_porra: GrupoPorra | null; precio: number };
+type EquipoMio = { id: string; nombre_equipo: string | null; jugadores: string[]; gasto_total: number; created_at: string };
+type EquipoParticipante = { equipoId: string; nombreEquipo: string | null; createdAt: string; oculto: boolean };
 
-type Tab = 'info' | 'premios' | 'grupos';
+type Tab = 'equipo' | 'info' | 'premios' | 'grupos' | 'equipos';
 
 export default function PorraDetallePage() {
   const router = useRouter();
@@ -35,8 +37,13 @@ export default function PorraDetallePage() {
   const [perfil, setPerfil] = useState<Perfil | null>(null);
   const [porra, setPorra] = useState<PorraFila | null>(null);
   const [jugadores, setJugadores] = useState<JugadorRow[]>([]);
+  const [jugadoresDeMisEquipos, setJugadoresDeMisEquipos] = useState<JugadorRow[]>([]);
   const [signedUp, setSignedUp] = useState(0);
-  const [tengoEquipo, setTengoEquipo] = useState(false);
+  // Un usuario puede tener varios equipos en la misma porra (pedido de Iñi,
+  // 23/09: "en la porra puedo participar todas las veces que quiera") — así
+  // que aquí se guarda la lista entera, no un único equipo.
+  const [misEquipos, setMisEquipos] = useState<EquipoMio[]>([]);
+  const [participantes, setParticipantes] = useState<EquipoParticipante[]>([]);
   const [tab, setTab] = useState<Tab>('info');
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -72,14 +79,23 @@ export default function PorraDetallePage() {
       // inscritos_por_porra() es una función de base de datos (RPC): las
       // filas de equipos/inscripciones de otros usuarios no son visibles
       // por RLS, pero el número de inscritos de la porra es un dato
-      // agregado y público. Ver drafters-schema.sql. Si tengo equipo propio
-      // en esta porra sí se puede consultar directamente (RLS lo permite).
-      const [{ data: inscritosPorraData }, { data: miEquipoData }, { data: jugData }] = await Promise.all([
+      // agregado y público. Ver drafters-schema.sql. Mis propios equipos en
+      // esta porra sí se pueden consultar directamente (RLS lo permite).
+      // participantes_porra() da la lista de equipos de TODOS (con el
+      // nombre oculto hasta que empiece la porra, calculado en el propio
+      // servidor — ver drafters-schema.sql).
+      const [{ data: inscritosPorraData }, { data: misEquiposData }, { data: jugData }, { data: participantesData }] = await Promise.all([
         supabase.rpc('inscritos_por_porra'),
-        supabase.from('equipos').select('id, inscripciones(estado)').eq('porra_id', porraId).eq('usuario_id', session.user.id).maybeSingle(),
+        supabase
+          .from('equipos')
+          .select('id, nombre_equipo, jugadores, gasto_total, created_at, inscripciones(estado)')
+          .eq('porra_id', porraId)
+          .eq('usuario_id', session.user.id)
+          .order('created_at', { ascending: true }),
         porraRow.competicion
           ? supabase.from('jugadores').select('id,nombre,grupo_porra,precio').eq('deporte', 'golf').eq('competicion', porraRow.competicion)
           : Promise.resolve({ data: [] }),
+        supabase.rpc('participantes_porra', { p_porra_id: porraId }),
       ]);
 
       if (!activo) return;
@@ -87,10 +103,25 @@ export default function PorraDetallePage() {
       const filaPorra = ((inscritosPorraData as { porra_id: string; inscritos: number }[]) ?? []).find((f) => f.porra_id === porraId);
       setSignedUp(filaPorra ? Number(filaPorra.inscritos) : 0);
 
-      const miEquipo = miEquipoData as { id: string; inscripciones: { estado: string }[] } | null;
-      setTengoEquipo(!!miEquipo && miEquipo.inscripciones.some((i) => i.estado !== 'reembolsada'));
+      const misEquiposFilas = (misEquiposData as (EquipoMio & { inscripciones: { estado: string }[] })[]) ?? [];
+      const misEquiposActivos = misEquiposFilas.filter((e) => e.inscripciones.some((i) => i.estado !== 'reembolsada'));
+      setMisEquipos(misEquiposActivos);
 
-      setJugadores((jugData as JugadorRow[]) ?? []);
+      const filasParticipantes = (participantesData as { equipo_id: string; nombre_equipo: string | null; created_at: string; oculto: boolean }[]) ?? [];
+      setParticipantes(
+        filasParticipantes.map((p) => ({ equipoId: p.equipo_id, nombreEquipo: p.nombre_equipo, createdAt: p.created_at, oculto: p.oculto }))
+      );
+
+      const jugRows = (jugData as JugadorRow[]) ?? [];
+      setJugadores(jugRows);
+      setTab(misEquiposActivos.length > 0 ? 'equipo' : 'info');
+
+      const idsMisJugadores = Array.from(new Set(misEquiposActivos.flatMap((e) => e.jugadores ?? [])));
+      if (idsMisJugadores.length > 0) {
+        const { data: jugMiosData } = await supabase.from('jugadores').select('id,nombre,grupo_porra,precio').in('id', idsMisJugadores);
+        if (activo) setJugadoresDeMisEquipos((jugMiosData as JugadorRow[]) ?? []);
+      }
+
       setCargando(false);
     }
 
@@ -140,7 +171,9 @@ export default function PorraDetallePage() {
     jugadores: jugadores.filter((j) => j.grupo_porra === g).sort((a, b) => a.nombre.localeCompare(b.nombre)),
   })).filter((g) => g.jugadores.length > 0);
 
-  const showJoinCta = !tengoEquipo && porra.estado !== 'finalizada';
+  // Se puede crear otro equipo aunque ya tengas uno o varios (pedido de
+  // Iñi, 23/09: "en la porra puedo participar todas las veces que quiera").
+  const showJoinCta = porra.estado !== 'finalizada';
 
   return (
     <main style={S.mainReset}>
@@ -158,7 +191,12 @@ export default function PorraDetallePage() {
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {misEquipos.length > 0 && (
+              <button type="button" onClick={() => setTab('equipo')} style={tabButtonStyle(tab === 'equipo')}>
+                Mis equipos{misEquipos.length > 1 ? ` (${misEquipos.length})` : ''}
+              </button>
+            )}
             <button type="button" onClick={() => setTab('info')} style={tabButtonStyle(tab === 'info')}>
               Información
             </button>
@@ -168,7 +206,77 @@ export default function PorraDetallePage() {
             <button type="button" onClick={() => setTab('grupos')} style={tabButtonStyle(tab === 'grupos')}>
               Grupos
             </button>
+            <button type="button" onClick={() => setTab('equipos')} style={tabButtonStyle(tab === 'equipos')}>
+              Equipos
+            </button>
           </div>
+
+          {tab === 'equipo' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {misEquipos.map((eq) => {
+                const jugadoresDeEsteEquipo = (eq.jugadores ?? [])
+                  .map((id) => jugadoresDeMisEquipos.find((j) => j.id === id))
+                  .filter((j): j is JugadorRow => !!j);
+                return (
+                  <div key={eq.id} style={{ display: 'flex', flexDirection: 'column', gap: 8, background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: 14 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                      <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 16, color: S.TEXT }}>{eq.nombre_equipo}</span>
+                      {porra.estado !== 'finalizada' && (
+                        <Link
+                          href={`/porras/${porra.id}/crear-equipo?equipo=${eq.id}`}
+                          style={{ flexShrink: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11.5, color: '#3DDC84', textDecoration: 'none', border: '1px solid rgba(61,220,132,0.35)', borderRadius: 8, padding: '6px 11px' }}
+                        >
+                          Editar equipo
+                        </Link>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {jugadoresDeEsteEquipo.map((j) => (
+                        <div key={j.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 12px', background: '#10150F', border: '1px solid #1E2723', borderRadius: 9 }}>
+                          <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 13, color: S.TEXT }}>{j.nombre}</span>
+                          {j.grupo_porra && <span style={{ fontSize: 10.5, fontWeight: 700, color: COLOR_GRUPO[j.grupo_porra] }}>{GRUPO_PORRA_LABELS[j.grupo_porra]}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {tab === 'equipos' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <span style={{ fontSize: 12, color: S.MUTED_3 }}>{signedUp} equipo{signedUp === 1 ? '' : 's'} inscrito{signedUp === 1 ? '' : 's'}</span>
+              {participantes.length > 0 && participantes[0].oculto && (
+                <p style={{ fontSize: 12, color: S.MUTED_2, margin: 0 }}>Los nombres de los equipos se mantienen ocultos hasta que empiece la porra.</p>
+              )}
+              {participantes.map((p, i) => (
+                <div key={p.equipoId} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
+                  <span
+                    style={{
+                      flexShrink: 0,
+                      width: 26,
+                      height: 26,
+                      borderRadius: '50%',
+                      background: '#1E2723',
+                      color: S.MUTED_2,
+                      fontFamily: "'Barlow Condensed', sans-serif",
+                      fontWeight: 700,
+                      fontSize: 12,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    {i + 1}
+                  </span>
+                  <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 13.5, color: p.oculto ? S.MUTED_3 : S.TEXT, fontStyle: p.oculto ? 'italic' : 'normal' }}>
+                    {p.oculto ? 'Oculto hasta que empiece' : p.nombreEquipo}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
 
           {tab === 'info' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -243,7 +351,7 @@ export default function PorraDetallePage() {
                 textDecoration: 'none',
               }}
             >
-              Elegir equipo · {formatEuros(porra.precio)}
+              {misEquipos.length > 0 ? 'Crear otro equipo' : 'Elegir equipo'} · {formatEuros(porra.precio)}
             </Link>
           )}
         </div>

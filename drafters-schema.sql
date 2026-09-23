@@ -86,6 +86,17 @@ create unique index if not exists perfiles_nombre_usuario_unico
   on public.perfiles (lower(nombre_usuario))
   where nombre_usuario is not null;
 
+-- Relleno de emergencia: cualquier perfil antiguo (de antes de que el
+-- registro pidiera nombre_usuario) que todavía no tenga uno recibe aquí un
+-- valor provisional no identificativo, derivado de su id, en vez de quedarse
+-- en null. El nombre real del usuario (columna "nombre") NUNCA debe usarse
+-- como sustituto en ningún sitio donde se muestre a otros usuarios: es un
+-- dato privado. El usuario puede cambiar este nombre provisional por uno a
+-- su gusto desde "Mi cuenta".
+update public.perfiles
+set nombre_usuario = 'jugador-' || replace(id::text, '-', '')
+where nombre_usuario is null;
+
 -- ----------------------------------------------------------------------------
 -- CÓDIGO CORRELATIVO ÚNICO DE MESA (compartido por salas y porras)
 -- ----------------------------------------------------------------------------
@@ -384,6 +395,21 @@ create table if not exists public.notificaciones (
   leido boolean not null default false,
   created_at timestamptz not null default now()
 );
+
+-- 'eliminado': el admin ha borrado el torneo/jornada o la porra en la que
+-- participabas y se te ha reembolsado (ver eliminar_torneo()/eliminar_porra()
+-- más abajo). 'resultado': tu mesa/porra ha finalizado — posición final y
+-- cuánto has ganado (pedido de Iñi, 23/09; queda preparado en el modelo de
+-- datos, pero todavía no hay ningún sitio en la app que calcule
+-- automáticamente resultados/premios de verdad, así que por ahora nada
+-- genera notificaciones de este tipo todavía).
+alter table public.notificaciones drop constraint if exists notificaciones_tipo_check;
+alter table public.notificaciones add constraint notificaciones_tipo_check
+  check (tipo in ('trasladado', 'reembolsado', 'eliminado', 'resultado'));
+
+-- A dónde lleva la notificación al tocarla (p.ej. la sala/porra en cuestión)
+-- — null si no aplica (como en 'eliminado', que ya no tiene sala que ver).
+alter table public.notificaciones add column if not exists link text;
 
 -- Registra un ingreso o retirada de saldo simulado de forma atómica: inserta
 -- la fila en `movimientos` Y actualiza `perfiles.saldo_simulado` en la misma
@@ -912,7 +938,12 @@ language sql
 security definer set search_path = public
 stable
 as $$
-  select e.id, coalesce(p.nombre_usuario, p.nombre), e.created_at
+  -- Nunca se usa p.nombre (nombre real) aquí: si por lo que sea un perfil no
+  -- tiene nombre_usuario, se muestra un identificador provisional derivado
+  -- de su id en vez del nombre real (el relleno de arriba en la tabla
+  -- perfiles ya debería evitar que esto pase, pero se deja como red de
+  -- seguridad porque los nombres reales no pueden aparecer nunca).
+  select e.id, coalesce(p.nombre_usuario, 'jugador-' || replace(p.id::text, '-', '')), e.created_at
   from public.equipos e
   join public.inscripciones i on i.equipo_id = e.id
   join public.perfiles p on p.id = e.usuario_id
@@ -922,6 +953,40 @@ $$;
 
 revoke all on function public.participantes_sala(uuid) from public;
 grant execute on function public.participantes_sala(uuid) to authenticated;
+
+-- Equipos participantes de una porra clásica (pestaña "Equipos" del
+-- detalle) — pedido de Iñi, 23/09: se ve QUÉ EQUIPOS participan, pero sus
+-- nombres se quedan ocultos hasta que la porra haya empezado de verdad. Aquí
+-- se considera "empezada" cuando ya pasó su fecha límite de inscripción (o
+-- no tiene, en cuyo caso solo se considera empezada si ya está finalizada) —
+-- es la única marca de tiempo real que existe hoy para "el torneo ya está
+-- en juego". Mientras no ha empezado, nombre_equipo vuelve null y
+-- oculto=true; el cliente pinta un texto tipo "Oculto hasta que empiece".
+create or replace function public.participantes_porra(p_porra_id uuid)
+returns table (equipo_id uuid, nombre_equipo text, created_at timestamptz, oculto boolean)
+language sql
+security definer set search_path = public
+stable
+as $$
+  select
+    e.id,
+    case when v.empezada then e.nombre_equipo else null end,
+    e.created_at,
+    not v.empezada
+  from public.equipos e
+  join public.inscripciones i on i.equipo_id = e.id
+  cross join lateral (
+    select p.estado = 'finalizada'
+      or (p.fecha_limite_inscripcion is not null and p.fecha_limite_inscripcion <= now()) as empezada
+    from public.porras p
+    where p.id = p_porra_id
+  ) v
+  where e.porra_id = p_porra_id and i.estado <> 'reembolsada'
+  order by e.created_at asc;
+$$;
+
+revoke all on function public.participantes_porra(uuid) from public;
+grant execute on function public.participantes_porra(uuid) to authenticated;
 
 -- ============================================================================
 -- INSCRIBIRSE EN UNA SALA / EN UNA PORRA (draft: elegir equipo y pagar)
@@ -1073,14 +1138,11 @@ begin
     raise exception 'Esta porra ya no admite inscripciones';
   end if;
 
-  if exists (
-    select 1 from public.equipos e
-    join public.inscripciones i on i.equipo_id = e.id
-    where e.porra_id = p_porra_id and e.usuario_id = auth.uid() and i.estado <> 'reembolsada'
-  ) then
-    raise exception 'Ya tienes un equipo en esta porra';
-  end if;
-
+  -- Un usuario puede tener varios equipos en la misma porra (pedido de Iñi,
+  -- 23/09: "en la porra puedo participar todas las veces que quiera") — así
+  -- que, a diferencia de las salas normales, aquí NO se bloquea por ya tener
+  -- un equipo. Lo único que tiene que ser único es el nombre del equipo
+  -- dentro de la porra (regla que ya existía).
   if exists (
     select 1 from public.equipos e
     where e.porra_id = p_porra_id and lower(e.nombre_equipo) = lower(trim(p_nombre_equipo))
@@ -1143,6 +1205,90 @@ $$;
 revoke all on function public.inscribirse_en_porra(uuid, jsonb, text) from public;
 grant execute on function public.inscribirse_en_porra(uuid, jsonb, text) to authenticated;
 
+-- Editar un equipo YA inscrito en una porra (pedido de Iñi, 23/09): cambia
+-- el nombre y/o los jugadores elegidos sin volver a cobrar (la inscripción y
+-- el importe ya existentes no se tocan). Repite las mismas validaciones que
+-- inscribirse_en_porra() salvo la de "ya tienes un equipo" (aquí no aplica:
+-- se está editando uno que ya existe) y excluye el propio equipo al
+-- comprobar que el nombre no esté repetido.
+create or replace function public.editar_equipo_porra(
+  p_equipo_id uuid,
+  p_jugadores jsonb,
+  p_nombre_equipo text
+)
+returns public.equipos
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_equipo public.equipos;
+  v_porra record;
+begin
+  if auth.uid() is null then
+    raise exception 'No autenticado';
+  end if;
+
+  select * into v_equipo from public.equipos where id = p_equipo_id and usuario_id = auth.uid() and modo = 'porra' for update;
+  if not found then
+    raise exception 'Equipo no encontrado';
+  end if;
+
+  select * into v_porra from public.porras where id = v_equipo.porra_id for update;
+  if not found or v_porra.estado = 'finalizada' then
+    raise exception 'Esta porra ya no admite cambios';
+  end if;
+
+  if p_nombre_equipo is null or length(trim(p_nombre_equipo)) = 0 then
+    raise exception 'Ponle un nombre a tu equipo';
+  end if;
+
+  if exists (
+    select 1 from public.equipos e
+    where e.porra_id = v_equipo.porra_id and e.id <> p_equipo_id and lower(e.nombre_equipo) = lower(trim(p_nombre_equipo))
+  ) then
+    raise exception 'Ese nombre de equipo ya está en uso en esta porra';
+  end if;
+
+  if p_jugadores is null or jsonb_array_length(p_jugadores) = 0 then
+    raise exception 'Tienes que elegir al menos un jugador';
+  end if;
+
+  if exists (
+    select 1 from public.jugadores j
+    where j.id in (select (jsonb_array_elements_text(p_jugadores))::uuid)
+      and (j.deporte <> 'golf' or j.competicion is distinct from v_porra.competicion)
+  ) then
+    raise exception 'Alguno de los jugadores elegidos no pertenece a este torneo';
+  end if;
+
+  if jsonb_array_length(p_jugadores) <> (
+    select count(distinct v) from jsonb_array_elements_text(p_jugadores) v
+  ) then
+    raise exception 'No puedes elegir el mismo jugador más de una vez';
+  end if;
+
+  if (
+    jsonb_array_length(p_jugadores) - (
+      select count(distinct j.grupo_porra)
+      from public.jugadores j
+      where j.id in (select (jsonb_array_elements_text(p_jugadores))::uuid)
+    )
+  ) > 1 then
+    raise exception 'Como mucho puedes repetir un grupo de color (tu jugador comodín)';
+  end if;
+
+  update public.equipos
+    set nombre_equipo = trim(p_nombre_equipo), jugadores = p_jugadores
+    where id = p_equipo_id
+    returning * into v_equipo;
+
+  return v_equipo;
+end;
+$$;
+
+revoke all on function public.editar_equipo_porra(uuid, jsonb, text) from public;
+grant execute on function public.editar_equipo_porra(uuid, jsonb, text) to authenticated;
+
 -- Reemplaza de golpe todo el ranking mundial de un deporte (golf o tenis)
 -- por el listado que acaba de pegar el admin — en una única transacción,
 -- para que un fallo a mitad de camino nunca deje la tabla vacía (ver
@@ -1174,6 +1320,109 @@ $$;
 
 revoke all on function public.reemplazar_ranking_mundial(text, jsonb) from public;
 grant execute on function public.reemplazar_ranking_mundial(text, jsonb) to authenticated;
+
+-- ============================================================================
+-- ELIMINAR TORNEO/JORNADA Y ELIMINAR PORRA (panel de admin, pedido de Iñi
+-- 23/09: "que me deje eliminar algún torneo... y en el caso de que
+-- eliminemos un torneo o una jornada, hay que quitar a todos los
+-- participantes, devolverles el dinero y lanzarles un mensaje")
+-- ============================================================================
+-- Borra TODAS las mesas (salas) de un torneo/jornada (mismo valor exacto de
+-- `competicion` que se usó al crearlas/importarlas) — antes de borrar nada,
+-- reembolsa íntegramente a cualquier inscrito activo y le deja una
+-- notificación. Las salas se borran de verdad (on delete cascade se lleva
+-- por delante sus equipos/inscripciones), pero el reembolso ya ha quedado
+-- registrado en `movimientos` de forma independiente, así que el historial
+-- de saldo del usuario no se pierde. La porra clásica de ese mismo torneo
+-- (si la hay) NO se toca aquí — es una entidad aparte que se borra con
+-- eliminar_porra() más abajo, tal y como las trata el propio panel de admin.
+create or replace function public.eliminar_torneo(p_competicion text)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  candidato record;
+begin
+  if not public.es_admin() then
+    raise exception 'Solo el administrador puede eliminar un torneo o jornada';
+  end if;
+  if p_competicion is null or length(trim(p_competicion)) = 0 then
+    raise exception 'Competición no válida';
+  end if;
+
+  for candidato in
+    select e.id as equipo_id, e.usuario_id, i.id as inscripcion_id, i.importe, s.nombre as sala_nombre
+    from public.equipos e
+    join public.inscripciones i on i.equipo_id = e.id and i.estado <> 'reembolsada'
+    join public.salas s on s.id = e.sala_id
+    where s.competicion = p_competicion
+  loop
+    update public.inscripciones set estado = 'reembolsada' where id = candidato.inscripcion_id;
+    update public.perfiles set saldo_simulado = saldo_simulado + candidato.importe where id = candidato.usuario_id;
+    insert into public.movimientos (usuario_id, tipo, importe) values (candidato.usuario_id, 'deposito', candidato.importe);
+    insert into public.notificaciones (usuario_id, tipo, titulo, mensaje) values (
+      candidato.usuario_id,
+      'eliminado',
+      'Tu mesa se ha borrado, se te ha devuelto el importe',
+      'El torneo/jornada "' || p_competicion || '" (' || candidato.sala_nombre || ') se ha eliminado. Te hemos devuelto tu inscripción íntegra, sin ningún descuento.'
+    );
+  end loop;
+
+  delete from public.salas where competicion = p_competicion;
+end;
+$$;
+
+revoke all on function public.eliminar_torneo(text) from public;
+grant execute on function public.eliminar_torneo(text) to authenticated;
+
+-- Borra una porra clásica concreta, con el mismo reembolso + notificación
+-- que eliminar_torneo() para cualquier equipo activo. Pensado sobre todo
+-- para el caso real que reportó Iñi: importar el mismo torneo dos veces deja
+-- los jugadores duplicados dentro de la porra ya existente — borrarla y
+-- volver a crearla (desde "Nuevo torneo", marcando solo el check de "crear
+-- porra") es la forma de dejarla limpia otra vez.
+create or replace function public.eliminar_porra(p_porra_id uuid)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  candidato record;
+  v_major text;
+begin
+  if not public.es_admin() then
+    raise exception 'Solo el administrador puede eliminar una porra';
+  end if;
+
+  select major into v_major from public.porras where id = p_porra_id;
+  if not found then
+    raise exception 'Porra no encontrada';
+  end if;
+
+  for candidato in
+    select e.id as equipo_id, e.usuario_id, i.id as inscripcion_id, i.importe
+    from public.equipos e
+    join public.inscripciones i on i.equipo_id = e.id and i.estado <> 'reembolsada'
+    where e.porra_id = p_porra_id
+  loop
+    update public.inscripciones set estado = 'reembolsada' where id = candidato.inscripcion_id;
+    update public.perfiles set saldo_simulado = saldo_simulado + candidato.importe where id = candidato.usuario_id;
+    insert into public.movimientos (usuario_id, tipo, importe) values (candidato.usuario_id, 'deposito', candidato.importe);
+    insert into public.notificaciones (usuario_id, tipo, titulo, mensaje) values (
+      candidato.usuario_id,
+      'eliminado',
+      'Tu porra se ha borrado, se te ha devuelto el importe',
+      'La porra "' || v_major || '" se ha eliminado. Te hemos devuelto tu inscripción íntegra, sin ningún descuento.'
+    );
+  end loop;
+
+  delete from public.porras where id = p_porra_id;
+end;
+$$;
+
+revoke all on function public.eliminar_porra(uuid) from public;
+grant execute on function public.eliminar_porra(uuid) to authenticated;
 
 -- ============================================================================
 -- CONVERTIR TU CUENTA EN SUPERADMINISTRADOR

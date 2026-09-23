@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { supabase, Perfil } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
@@ -34,6 +34,13 @@ export default function CrearEquipoPorraPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const porraId = params.id;
+  const searchParams = useSearchParams();
+  // Con ?equipo=<id> esta misma pantalla edita un equipo ya inscrito, en vez
+  // de crear uno nuevo (pedido de Iñi, 23/09: "en las porras puedo
+  // participar todas las veces que quiera" — así que ya no se bloquea por
+  // tener equipo, y además se puede editar el que ya tienes).
+  const equipoEditandoId = searchParams.get('equipo');
+  const modoEdicion = !!equipoEditandoId;
 
   const [perfil, setPerfil] = useState<Perfil | null>(null);
   const [porra, setPorra] = useState<PorraRow | null>(null);
@@ -76,28 +83,65 @@ export default function CrearEquipoPorraPage() {
       const porraRow = porraData as PorraRow;
 
       if (porraRow.estado === 'finalizada') {
-        router.push(`/porras/${porraId}`);
+        // replace, no push — ver el mismo comentario en salas/[id]/crear-equipo (bug de la flecha de volver, 23/09).
+        router.replace(`/porras/${porraId}`);
         return;
       }
 
-      const [{ data: miEquipoData }, { data: jugData }] = await Promise.all([
-        supabase.from('equipos').select('id, inscripciones(estado)').eq('porra_id', porraId).eq('usuario_id', session.user.id).maybeSingle(),
+      const [{ data: jugData }, { data: equipoEditandoData }] = await Promise.all([
         porraRow.competicion
           ? supabase.from('jugadores').select('id,nombre,grupo_porra,precio').eq('deporte', 'golf').eq('competicion', porraRow.competicion)
           : Promise.resolve({ data: [] as JugadorRow[] }),
+        equipoEditandoId
+          ? supabase
+              .from('equipos')
+              .select('id, nombre_equipo, jugadores, usuario_id')
+              .eq('id', equipoEditandoId)
+              .eq('porra_id', porraId)
+              .eq('usuario_id', session.user.id)
+              .maybeSingle()
+          : Promise.resolve({ data: null as { id: string; nombre_equipo: string | null; jugadores: string[] } | null }),
       ]);
 
       if (!activo) return;
 
-      const miEquipo = miEquipoData as { id: string; inscripciones: { estado: string }[] } | null;
-      if (miEquipo && miEquipo.inscripciones.some((i) => i.estado !== 'reembolsada')) {
-        router.push(`/porras/${porraId}`);
-        return;
-      }
-
       const jugRows = ((jugData as JugadorRow[]) ?? []).filter((j) => j.grupo_porra !== null);
       setPorra(porraRow);
       setJugadores(jugRows);
+
+      if (equipoEditandoId) {
+        const equipoEditando = equipoEditandoData as { id: string; nombre_equipo: string | null; jugadores: string[] } | null;
+        if (!equipoEditando) {
+          setError('No se ha encontrado ese equipo, o no es tuyo.');
+          setCargando(false);
+          return;
+        }
+        // Reconstruye qué jugador es el titular de cada grupo y cuál es el
+        // comodín a partir de la lista de ids guardada — un grupo con dos
+        // jugadores guardados es el grupo del comodín (da igual cuál de los
+        // dos se pinte como "titular" y cuál como "comodín", el resultado
+        // final es el mismo equipo).
+        const jugadoresPorIdLocal = new Map(jugRows.map((j) => [j.id, j]));
+        const porGrupo = new Map<GrupoPorra, string[]>();
+        (equipoEditando.jugadores ?? []).forEach((id) => {
+          const j = jugadoresPorIdLocal.get(id);
+          if (!j || !j.grupo_porra) return;
+          const arr = porGrupo.get(j.grupo_porra) ?? [];
+          arr.push(id);
+          porGrupo.set(j.grupo_porra, arr);
+        });
+        const nuevoSelected = new Map<GrupoPorra, string>();
+        let nuevoComodin: string | null = null;
+        porGrupo.forEach((ids, grupo) => {
+          const ordenados = [...ids].sort();
+          nuevoSelected.set(grupo, ordenados[0]);
+          if (ordenados[1]) nuevoComodin = ordenados[1];
+        });
+        setNombreEquipo(equipoEditando.nombre_equipo ?? '');
+        setSelected(nuevoSelected);
+        setComodinId(nuevoComodin);
+      }
+
       const primerGrupo = ORDEN_GRUPOS.find((g) => jugRows.some((j) => j.grupo_porra === g));
       setActiveGroup(primerGrupo ?? null);
       setCargando(false);
@@ -107,7 +151,7 @@ export default function CrearEquipoPorraPage() {
     return () => {
       activo = false;
     };
-  }, [router, porraId]);
+  }, [router, porraId, equipoEditandoId]);
 
   const gruposDisponibles = useMemo(() => ORDEN_GRUPOS.filter((g) => jugadores.some((j) => j.grupo_porra === g)), [jugadores]);
   const jugadoresPorId = useMemo(() => new Map(jugadores.map((j) => [j.id, j])), [jugadores]);
@@ -151,17 +195,25 @@ export default function CrearEquipoPorraPage() {
   async function confirmarInscripcion() {
     setEnviando(true);
     setErrorEnvio(null);
-    const { error: rpcError } = await supabase.rpc('inscribirse_en_porra', {
-      p_porra_id: porraId,
-      p_jugadores: [...Array.from(selected.values()), ...(comodinId ? [comodinId] : [])],
-      p_nombre_equipo: nombreEquipo.trim(),
-    });
+    const jugadoresElegidos = [...Array.from(selected.values()), ...(comodinId ? [comodinId] : [])];
+    const { error: rpcError } = modoEdicion
+      ? await supabase.rpc('editar_equipo_porra', {
+          p_equipo_id: equipoEditandoId,
+          p_jugadores: jugadoresElegidos,
+          p_nombre_equipo: nombreEquipo.trim(),
+        })
+      : await supabase.rpc('inscribirse_en_porra', {
+          p_porra_id: porraId,
+          p_jugadores: jugadoresElegidos,
+          p_nombre_equipo: nombreEquipo.trim(),
+        });
     if (rpcError) {
       setErrorEnvio(traducirError(rpcError.message));
       setEnviando(false);
       return;
     }
-    router.push(`/porras/${porraId}`);
+    // replace, no push — ver el mismo comentario en salas/[id]/crear-equipo (bug de la flecha de volver, 23/09).
+    router.replace(`/porras/${porraId}`);
   }
 
   if (cargando || !perfil) {
@@ -206,7 +258,7 @@ export default function CrearEquipoPorraPage() {
               </button>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#3DDC84' }}>{porra.major}</span>
-                <h1 style={{ fontSize: 24, fontWeight: 800, color: S.TEXT }}>Crea tu equipo</h1>
+                <h1 style={{ fontSize: 24, fontWeight: 800, color: S.TEXT }}>{modoEdicion ? 'Edita tu equipo' : 'Crea tu equipo'}</h1>
                 <p style={{ fontSize: 13, color: S.MUTED_2 }}>Elige un jugador de cada grupo de color, más un comodín de cualquier lista.</p>
               </div>
 
@@ -384,7 +436,7 @@ export default function CrearEquipoPorraPage() {
 
             <div style={{ position: 'sticky', bottom: 0, padding: '8px 20px 12px', background: 'linear-gradient(180deg, rgba(11,15,14,0) 0%, #0B0F0E 40%)' }}>
               <button type="button" disabled={!puedeConfirmar} onClick={() => setStep('confirm')} style={submitButtonStyle(puedeConfirmar, '#3DDC84')}>
-                {!nombreValido ? 'Ponle nombre a tu equipo' : equipoCompleto ? 'Revisar e inscribirme' : `Faltan ${totalHuecos - huecosRellenos} jugadores`}
+                {!nombreValido ? 'Ponle nombre a tu equipo' : equipoCompleto ? (modoEdicion ? 'Revisar cambios' : 'Revisar e inscribirme') : `Faltan ${totalHuecos - huecosRellenos} jugadores`}
               </button>
             </div>
           </div>
@@ -395,8 +447,10 @@ export default function CrearEquipoPorraPage() {
             </button>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#3DDC84' }}>{porra.major}</span>
-              <h1 style={{ fontSize: 24, fontWeight: 800, color: S.TEXT }}>Confirma tu equipo</h1>
-              <p style={{ fontSize: 13, color: S.MUTED_2 }}>Porra clásica · {formatEuros(porra.precio)} por equipo</p>
+              <h1 style={{ fontSize: 24, fontWeight: 800, color: S.TEXT }}>{modoEdicion ? 'Confirma los cambios' : 'Confirma tu equipo'}</h1>
+              <p style={{ fontSize: 13, color: S.MUTED_2 }}>
+                Porra clásica{modoEdicion ? ' · sin coste adicional, ya está pagado' : ` · ${formatEuros(porra.precio)} por equipo`}
+              </p>
             </div>
 
             <div style={{ background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -417,7 +471,7 @@ export default function CrearEquipoPorraPage() {
                 );
               })}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid #1E2723', marginTop: 4, paddingTop: 10 }}>
-                <span style={{ fontSize: 13, color: S.MUTED_2 }}>Precio del equipo</span>
+                <span style={{ fontSize: 13, color: S.MUTED_2 }}>{modoEdicion ? 'Ya pagado' : 'Precio del equipo'}</span>
                 <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 15, color: '#F0B94D' }}>{formatEuros(porra.precio)}</span>
               </div>
             </div>
@@ -425,7 +479,7 @@ export default function CrearEquipoPorraPage() {
             {errorEnvio && <p style={S.errorText}>{errorEnvio}</p>}
 
             <button type="button" disabled={enviando} onClick={confirmarInscripcion} style={{ ...submitButtonStyle(true, '#3DDC84'), opacity: enviando ? 0.7 : 1, fontSize: 16, padding: 14, minHeight: 44, borderRadius: 10 }}>
-              {enviando ? 'Inscribiendo...' : 'Confirmar inscripción'}
+              {enviando ? (modoEdicion ? 'Guardando...' : 'Inscribiendo...') : modoEdicion ? 'Guardar cambios' : 'Confirmar inscripción'}
             </button>
           </div>
         )}

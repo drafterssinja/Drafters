@@ -70,6 +70,26 @@ function VerificarForm() {
             </p>
           </div>
 
+          {/* Pedido de Iñi (23/09): que se vea bien claro, desde el primer momento
+              (no solo tras reenviar), que el correo puede llegar a spam. */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 8,
+              background: 'rgba(240,185,77,0.1)',
+              border: '1px solid rgba(240,185,77,0.35)',
+              borderRadius: 10,
+              padding: '12px 14px',
+            }}
+          >
+            <span style={{ flexShrink: 0, fontSize: 15 }}>⚠️</span>
+            <p style={{ fontSize: 13, lineHeight: 1.5, color: '#F0B94D', margin: 0 }}>
+              Si no ves el correo en tu bandeja de entrada, revisa la carpeta de <strong>spam</strong> (o correo no
+              deseado) — el código suele llegar ahí.
+            </p>
+          </div>
+
           <form onSubmit={onSubmit} style={S.fieldGroup}>
             <div style={S.field}>
               <span style={S.label}>Código de verificación</span>
