@@ -599,8 +599,20 @@ export default function AdminPage() {
     const { actualizados, nuevos } = previewValorMercado;
 
     if (actualizados.length > 0) {
+      // nombre/deporte incluidos también aquí por el mismo motivo que en
+      // confirmarJornadaFutbol() más abajo (bug real de Iñi, 25/09): el
+      // upsert de PostgREST comprueba las columnas NOT NULL sin default
+      // (nombre, deporte) antes de resolver el conflicto por id, aunque
+      // estos jugadores ya existan y el UPDATE final no las toque.
       const { error: errorValores } = await supabase.from('jugadores').upsert(
-        actualizados.map((f) => ({ id: f.jugadorId, valor_mercado: f.valor, posicion: f.posicion, equipo_real: f.equipoDb })),
+        actualizados.map((f) => ({
+          id: f.jugadorId,
+          nombre: f.nombreDb,
+          deporte: 'futbol',
+          valor_mercado: f.valor,
+          posicion: f.posicion,
+          equipo_real: f.equipoDb,
+        })),
         { onConflict: 'id' }
       );
       if (errorValores) {
@@ -610,9 +622,15 @@ export default function AdminPage() {
       }
       const conProbabilidad = actualizados.filter((f) => f.probabilidadTitular !== null);
       if (conProbabilidad.length > 0) {
-        await supabase
-          .from('jugadores')
-          .upsert(conProbabilidad.map((f) => ({ id: f.jugadorId, probabilidad_titular: f.probabilidadTitular })), { onConflict: 'id' });
+        await supabase.from('jugadores').upsert(
+          conProbabilidad.map((f) => ({
+            id: f.jugadorId,
+            nombre: f.nombreDb,
+            deporte: 'futbol',
+            probabilidad_titular: f.probabilidadTitular,
+          })),
+          { onConflict: 'id' }
+        );
       }
     }
 
@@ -773,8 +791,22 @@ export default function AdminPage() {
     // jornada anterior de la misma liga (o a ninguna, si es su primera
     // jornada) — sustituye ese valor sin más, igual que hacía la
     // sincronización automática por API.
+    // nombre/deporte van también en el upsert aunque estos jugadores ya
+    // existan: PostgREST hace el upsert como "INSERT ... ON CONFLICT (id) DO
+    // UPDATE", y Postgres exige que la fila del INSERT cumpla ya las
+    // columnas NOT NULL sin default (nombre, deporte) ANTES de comprobar el
+    // conflicto — aunque el UPDATE final no las vaya a tocar, si no van en
+    // el objeto Postgres intenta insertarlas como null y falla. Bug real
+    // encontrado por Iñi al confirmar una jornada de 639 jugadores.
     const { error: errorPrecios } = await supabase.from('jugadores').upsert(
-      previewCuotas.precios.map((p) => ({ id: p.id, precio: p.precio, valor_a_revisar: p.sinValor, competicion: nombreJornada })),
+      previewCuotas.precios.map((p) => ({
+        id: p.id,
+        nombre: p.nombre,
+        deporte: 'futbol',
+        precio: p.precio,
+        valor_a_revisar: p.sinValor,
+        competicion: nombreJornada,
+      })),
       { onConflict: 'id' }
     );
 

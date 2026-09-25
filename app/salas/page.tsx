@@ -45,6 +45,14 @@ type SalaFila = {
 type SortKey = 'nombre' | 'juego' | 'jugadores' | 'buyin';
 type PlazasFiltro = 'cualquiera' | 'libres' | 'casi';
 
+// Orden por defecto del listado (pedido de Iñi, 25/09, hasta que se pulse
+// una de las columnas de la cabecera): primero las salas a las que menos
+// jugadores les faltan para completarse (aforo - inscritos, ascendente), y
+// como segundo criterio de desempate, más dinero jugado primero (buy_in ×
+// inscritos) — nunca sustituye al reordenado manual por columna, que sigue
+// funcionando exactamente igual que antes; `sortKey` empieza en `null` para
+// representar "todavía no se ha pulsado ninguna columna".
+
 function SalasPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -53,7 +61,7 @@ function SalasPageInner() {
   const [tipo, setTipo] = useState<TipoSala | 'todas'>('todas');
   const [buyin, setBuyin] = useState<NivelBuyIn | 'cualquiera'>('cualquiera');
   const [plazas, setPlazas] = useState<PlazasFiltro>('cualquiera');
-  const [sortKey, setSortKey] = useState<SortKey>('nombre');
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortAsc, setSortAsc] = useState(true);
 
   const [salas, setSalas] = useState<SalaFila[]>([]);
@@ -110,6 +118,22 @@ function SalasPageInner() {
     if (plazas === 'casi') lista = lista.filter((s) => s.estado === 'casi_llena');
 
     const conSignedUp = lista.map((s) => ({ ...s, signedUp: inscritosPorSala.get(s.id) ?? 0 }));
+
+    if (sortKey === null) {
+      // Orden por defecto (25/09): menos plazas le faltan para completarse
+      // primero; una sala sin aforo fijo (no debería darse aquí, Maratón se
+      // excluye arriba) se manda al final en vez de romper el orden. Empate
+      // a plazas restantes → más dinero jugado primero.
+      conSignedUp.sort((a, b) => {
+        const restantesA = a.aforo != null ? Math.max(0, a.aforo - a.signedUp) : Infinity;
+        const restantesB = b.aforo != null ? Math.max(0, b.aforo - b.signedUp) : Infinity;
+        if (restantesA !== restantesB) return restantesA - restantesB;
+        const dineroA = a.buy_in * a.signedUp;
+        const dineroB = b.buy_in * b.signedUp;
+        return dineroB - dineroA;
+      });
+      return conSignedUp;
+    }
 
     conSignedUp.sort((a, b) => {
       let cmp = 0;
