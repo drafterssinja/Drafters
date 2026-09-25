@@ -1,0 +1,23 @@
+Daniil Medvedev 2,60
+Andrey Rublev 4,20
+Quentin Halys 10
+Tomas Martín Etcheverry 11
+Fabian Marozsan 13,50
+Roman Safiullin 15
+Jaime Faria 19
+Kamil Majchrzak 19
+Terence Atmane 19
+Michael Zheng 21
+Yunchaokete Bu 23
+Kyrian Jacquet 26
+Valentin Royer 26
+Mattia Bellucci 30
+Coleman Wong 36
+Adolfo Daniel Vallejo 46
+Hugo Gaston 46
+Rinky Hijikata 46
+Sho Shimabukuro 60
+Zhizhen Zhang 60
+Dane Sweeny 70
+Fajing Sun 225
+Jie Cui 225

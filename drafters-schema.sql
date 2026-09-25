@@ -273,6 +273,57 @@ create unique index if not exists rankings_mundiales_jugador_unico
   on public.rankings_mundiales (deporte, lower(nombre));
 
 -- ----------------------------------------------------------------------------
+-- 4.6. VALOR DE MERCADO Y CUOTAS 1X2 DE FÚTBOL (ENCARGO_precios_futbol_y_
+-- correccion_golf_tenis.md, parte A, 24/09/2026)
+-- ----------------------------------------------------------------------------
+-- El precio de fútbol dejaba de salir solo de la posición (PRECIO_POR_POSICION_
+-- FUTBOL, lib/pricing.ts — se mantiene como respaldo, ver A.5) y pasa a salir
+-- del valor de mercado de un fantasy oficial por competición (LaLiga/Premier/
+-- Champions), ajustado por las cuotas 1X2 de cada partido de la jornada (ver
+-- lib/precioFutbol.ts). El emparejamiento nombre+equipo entre la tabla de
+-- valores pegada por Iñi y los jugadores ya sincronizados desde football-data.org
+-- se hace en el cliente (app/admin/page.tsx, con lib/nombreMatch.ts y
+-- lib/aliasEquipos.ts) — aquí solo se guarda el resultado ya resuelto, con la
+-- misma RLS de "solo el admin" que jugadores/rankings_mundiales le permite
+-- actualizar directamente sin necesitar una función aparte.
+
+alter table public.jugadores add column if not exists valor_mercado numeric;
+alter table public.jugadores add column if not exists probabilidad_titular numeric;
+-- true si el jugador no tenía valor de mercado al cargar la tabla de esa
+-- competición y se le puso el precio mediano de su posición como respaldo
+-- (caso A.5 del encargo) — para que la vista previa lo marque como pendiente
+-- de revisar, no se borra solo al recalcular.
+alter table public.jugadores add column if not exists valor_a_revisar boolean not null default false;
+
+-- Cuándo se cargó (o se refrescó) por última vez la tabla de valores de
+-- mercado de cada competición — un registro por liga, para pintar en /admin
+-- "valores de LaLiga cargados el dd/mm" (pedido explícito del encargo, A.4).
+create table if not exists public.cargas_valor_mercado_futbol (
+  liga text primary key check (liga in ('la_liga', 'premier', 'champions')),
+  cargado_en timestamptz not null default now(),
+  jugadores_actualizados int not null default 0
+);
+
+-- Cuotas 1X2 de cada partido de la jornada, tal como las pega Iñi — se
+-- guardan (además de usarse para calcular el precio al confirmar) para
+-- llevar un histórico y poder recalcular sin tener que volver a pegarlas.
+-- Único por (competicion, equipo_local, equipo_visitante): volver a pegar
+-- las cuotas de la misma jornada actualiza la fila en vez de duplicarla.
+create table if not exists public.cuotas_partido_futbol (
+  id uuid primary key default gen_random_uuid(),
+  competicion text not null, -- mismo valor que jugadores.competicion, p.ej. 'La Liga - Jornada 8'
+  equipo_local text not null,
+  equipo_visitante text not null,
+  cuota_1 numeric not null,
+  cuota_x numeric not null,
+  cuota_2 numeric not null,
+  created_at timestamptz not null default now()
+);
+
+create unique index if not exists cuotas_partido_futbol_unico
+  on public.cuotas_partido_futbol (competicion, equipo_local, equipo_visitante);
+
+-- ----------------------------------------------------------------------------
 -- 5. EQUIPOS
 -- ----------------------------------------------------------------------------
 -- Un equipo pertenece SIEMPRE a una sala (modo 'sala' o 'mtt') o a una porra
@@ -862,6 +913,19 @@ create policy "jugadores_admin_todo" on public.jugadores
 -- diferencia de jugadores/salas/porras, ni siquiera hay lectura pública.
 drop policy if exists "rankings_mundiales_admin_todo" on public.rankings_mundiales;
 create policy "rankings_mundiales_admin_todo" on public.rankings_mundiales
+  for all using (public.es_admin()) with check (public.es_admin());
+
+-- Valor de mercado y cuotas 1x2 de fútbol: mismo caso que rankings_mundiales
+-- — datos de trabajo del admin para calcular precios, nunca se muestran tal
+-- cual a los usuarios (el resultado ya resuelto sí se ve, en jugadores.precio).
+alter table public.cargas_valor_mercado_futbol enable row level security;
+drop policy if exists "cargas_valor_mercado_futbol_admin_todo" on public.cargas_valor_mercado_futbol;
+create policy "cargas_valor_mercado_futbol_admin_todo" on public.cargas_valor_mercado_futbol
+  for all using (public.es_admin()) with check (public.es_admin());
+
+alter table public.cuotas_partido_futbol enable row level security;
+drop policy if exists "cuotas_partido_futbol_admin_todo" on public.cuotas_partido_futbol;
+create policy "cuotas_partido_futbol_admin_todo" on public.cuotas_partido_futbol
   for all using (public.es_admin()) with check (public.es_admin());
 
 -- Equipos: cada usuario ve/crea/modifica solo los suyos; el admin ve y

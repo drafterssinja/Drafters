@@ -13,6 +13,10 @@ import { calcularPreciosPorCuota, cuotaValida } from '@/lib/precioPorCuota';
 import { generarSalasParaTorneo } from '@/lib/tiposDeSala';
 import { calcularGrupoPorra, UMBRAL_MINIMO_ESPANOLES, PUESTO_NO_ENCONTRADO } from '@/lib/porraGrupos';
 import { normalizarNombre } from '@/lib/nombreMatch';
+import { parsearValoresMercado, FilaValorMercado } from '@/lib/parsearValoresMercado';
+import { parsearCuotasPartidosFutbol } from '@/lib/parsearCuotasFutbol';
+import { emparejarEquipo } from '@/lib/aliasEquipos';
+import { calcularPreciosFutbolDetallado, factorPosicion, fuerzaPorEquipo, PosicionFutbol, JugadorConPrecioFutbol } from '@/lib/precioFutbol';
 
 // El precio de golf/tenis ya no sale del ranking mundial, sino de la cuota
 // de "Ganador" de la casa de apuestas de esa semana (decidido con Iñi el
@@ -56,6 +60,34 @@ type InscripcionFila = {
   equipos: { modo: string; salas: { deporte: string; tipo: string; buy_in: number } | null } | null;
 };
 type MovimientoFila = { tipo: 'deposito' | 'retiro'; importe: number; creado_en: string };
+
+// --- Valor de mercado y cuotas 1X2 de fútbol (ENCARGO parte A) ---
+type LigaFutbol = 'la_liga' | 'premier' | 'champions';
+const LIGAS_FUTBOL: LigaFutbol[] = ['la_liga', 'premier', 'champions'];
+const LIGA_FUTBOL_LABEL: Record<LigaFutbol, string> = { la_liga: 'La Liga', premier: 'Premier League', champions: 'Champions League' };
+// Mismo texto que usa app/api/admin/sync-jornada-futbol/route.ts al construir
+// `competicion` ("La Liga - Jornada 8") — así se filtran los jugadores de
+// cada liga sin necesitar una columna nueva.
+const LIGA_FUTBOL_PREFIJO: Record<LigaFutbol, string> = { la_liga: 'La Liga', premier: 'Premier League', champions: 'Champions League' };
+
+type JugadorFutbolDb = { id: string; nombre: string; equipo_real: string | null; posicion: PosicionFutbol | null; valor_mercado: number | null; competicion: string };
+
+type FilaValorEmparejada = { jugadorId: string; nombreDb: string; equipoDb: string; equipoOrigen: string; jugadorOrigen: string; valor: number; probabilidadTitular: number | null };
+type FilaValorNoEmparejada = FilaValorMercado & { motivo: string };
+type PreviewValorMercado = {
+  emparejados: FilaValorEmparejada[];
+  noEmparejados: FilaValorNoEmparejada[];
+  sinValorEnPlantilla: { id: string; nombre: string; equipo: string | null }[];
+};
+
+type PreviewCuotasFutbol = {
+  precios: (JugadorConPrecioFutbol & { nombre: string; equipoReal: string | null })[];
+  partidosSinCuota: string[]; // equipos que juegan esta jornada pero no aparecieron en el pegado
+  partidosNoEmparejados: string[]; // líneas pegadas cuyo equipo no se ha podido emparejar
+  topeUsado: number;
+  gammaUsado: number;
+  reglasCumplidas: boolean;
+};
 
 const DEPORTES = ['futbol', 'golf', 'tenis'] as const;
 const TIPOS_SALA = ['doble_o_nada', 'triple_o_nada', 'oro_y_plata', 'tridente', 'maraton'] as const;
@@ -138,6 +170,34 @@ export default function AdminPage() {
     { competicion: string; jornada: number | null; jugadoresSincronizados: number; salasCreadas: number; fechaLimite: string | null; aviso?: string }[] | null
   >(null);
   const [errorFutbol, setErrorFutbol] = useState<string | null>(null);
+
+  // Valor de mercado de fútbol, por competición (ENCARGO A.4) — se carga la
+  // primera vez y se refresca cada pocas semanas.
+  const [ligaValorMercado, setLigaValorMercado] = useState<LigaFutbol>('la_liga');
+  const [cargasValorMercado, setCargasValorMercado] = useState<Record<LigaFutbol, { cargadoEn: string | null; jugadoresActualizados: number }>>({
+    la_liga: { cargadoEn: null, jugadoresActualizados: 0 },
+    premier: { cargadoEn: null, jugadoresActualizados: 0 },
+    champions: { cargadoEn: null, jugadoresActualizados: 0 },
+  });
+  const [textoValorMercado, setTextoValorMercado] = useState('');
+  const [calculandoPreviewValor, setCalculandoPreviewValor] = useState(false);
+  const [previewValorMercado, setPreviewValorMercado] = useState<PreviewValorMercado | null>(null);
+  const [avisosValorMercado, setAvisosValorMercado] = useState<string[]>([]);
+  const [guardandoValorMercado, setGuardandoValorMercado] = useState(false);
+  const [resultadoValorMercado, setResultadoValorMercado] = useState<string | null>(null);
+  const [errorValorMercado, setErrorValorMercado] = useState<string | null>(null);
+
+  // Cuotas 1X2 de la jornada de fútbol (ENCARGO A.4) — calcula y guarda el
+  // precio final de cada jugador de esa jornada, a partir del valor de
+  // mercado ya cargado más el ajuste por partido.
+  const [competicionCuotas, setCompeticionCuotas] = useState('');
+  const [textoCuotas, setTextoCuotas] = useState('');
+  const [calculandoPreviewCuotas, setCalculandoPreviewCuotas] = useState(false);
+  const [previewCuotas, setPreviewCuotas] = useState<PreviewCuotasFutbol | null>(null);
+  const [avisosCuotasFutbol, setAvisosCuotasFutbol] = useState<string[]>([]);
+  const [guardandoCuotas, setGuardandoCuotas] = useState(false);
+  const [resultadoCuotas, setResultadoCuotas] = useState<string | null>(null);
+  const [errorCuotas, setErrorCuotas] = useState<string | null>(null);
 
   // Automatización: torneo de golf/tenis pegado a mano (sin API disponible)
   const [torneoNombre, setTorneoNombre] = useState('');
@@ -228,6 +288,21 @@ export default function AdminPage() {
     return puestos;
   }, [previewJugadores, mapaRankingActual]);
 
+  // Jornadas de fútbol ya sincronizadas (para el desplegable del cargador de
+  // cuotas 1X2) — mismo valor que competicion en jugadores/salas, más
+  // reciente primero.
+  const competicionesFutbolDisponibles = useMemo(() => {
+    const vistos = new Set<string>();
+    const lista: string[] = [];
+    for (const j of jugadores) {
+      if (j.deporte !== 'futbol') continue;
+      if (vistos.has(j.competicion)) continue;
+      vistos.add(j.competicion);
+      lista.push(j.competicion);
+    }
+    return lista.sort().reverse();
+  }, [jugadores]);
+
   async function cargarTodo() {
     const [{ data: salasData }, { data: porrasData }, { data: jugadoresData }, { count }, { data: inscripcionesData, error: inscripcionesError }, { data: movimientosData, error: movimientosError }] =
       await Promise.all([
@@ -271,6 +346,16 @@ export default function AdminPage() {
     });
   }
 
+  async function cargarCargasValorMercado() {
+    const { data } = await supabase.from('cargas_valor_mercado_futbol').select('liga, cargado_en, jugadores_actualizados');
+    const filas = (data as { liga: LigaFutbol; cargado_en: string; jugadores_actualizados: number }[] | null) ?? [];
+    setCargasValorMercado((prev) => {
+      const siguiente = { ...prev };
+      for (const f of filas) siguiente[f.liga] = { cargadoEn: f.cargado_en, jugadoresActualizados: f.jugadores_actualizados };
+      return siguiente;
+    });
+  }
+
   useEffect(() => {
     let activo = true;
 
@@ -300,7 +385,7 @@ export default function AdminPage() {
 
       setPerfil(p);
       setAutorizado(true);
-      await Promise.all([cargarTodo(), cargarRankings()]);
+      await Promise.all([cargarTodo(), cargarRankings(), cargarCargasValorMercado()]);
     }
 
     verificarAcceso();
@@ -392,6 +477,240 @@ export default function AdminPage() {
       setErrorFutbol('No se ha podido conectar con el servidor. Inténtalo de nuevo.');
     }
     setSincronizandoFutbol(false);
+  }
+
+  // --- Valor de mercado de fútbol (ENCARGO A.4) ---
+
+  async function previsualizarValorMercado() {
+    setResultadoValorMercado(null);
+    setErrorValorMercado(null);
+    setPreviewValorMercado(null);
+    setCalculandoPreviewValor(true);
+
+    const { filas, avisos } = parsearValoresMercado(textoValorMercado);
+    setAvisosValorMercado(avisos);
+
+    const prefijo = LIGA_FUTBOL_PREFIJO[ligaValorMercado];
+    const { data, error: fetchError } = await supabase
+      .from('jugadores')
+      .select('id, nombre, equipo_real, posicion, valor_mercado, competicion')
+      .eq('deporte', 'futbol')
+      .ilike('competicion', `${prefijo}%`);
+
+    setCalculandoPreviewValor(false);
+
+    if (fetchError) {
+      setErrorValorMercado('No se han podido cargar los jugadores de esta competición. Inténtalo de nuevo.');
+      return;
+    }
+
+    const jugadoresDb = (data as JugadorFutbolDb[] | null) ?? [];
+    if (jugadoresDb.length === 0) {
+      setErrorValorMercado(
+        `No hay ningún jugador de ${LIGA_FUTBOL_LABEL[ligaValorMercado]} sincronizado todavía — sincroniza primero una jornada de esta competición ("Automatizar jornada de fútbol", más arriba).`
+      );
+      return;
+    }
+
+    const equiposCandidatos = Array.from(new Set(jugadoresDb.map((j) => j.equipo_real).filter((e): e is string => !!e)));
+
+    const emparejados: FilaValorEmparejada[] = [];
+    const noEmparejados: FilaValorNoEmparejada[] = [];
+    const usados = new Set<string>();
+
+    for (const fila of filas) {
+      const equipoDb = emparejarEquipo(fila.equipo, equiposCandidatos);
+      if (!equipoDb) {
+        noEmparejados.push({ ...fila, motivo: `Equipo "${fila.equipo}" no reconocido en ${LIGA_FUTBOL_LABEL[ligaValorMercado]}` });
+        continue;
+      }
+      const jugadoresDelEquipo = jugadoresDb.filter((j) => j.equipo_real === equipoDb);
+      const candidatosNombre = jugadoresDelEquipo.map((j) => j.nombre);
+      const nombreNormalizado = normalizarNombre(fila.jugador);
+      const apodoNormalizado = fila.apodo ? normalizarNombre(fila.apodo) : null;
+      let jugadorDb = jugadoresDelEquipo.find((j) => normalizarNombre(j.nombre) === nombreNormalizado);
+      if (!jugadorDb && apodoNormalizado) {
+        jugadorDb = jugadoresDelEquipo.find((j) => normalizarNombre(j.nombre) === apodoNormalizado);
+      }
+      if (!jugadorDb) {
+        noEmparejados.push({ ...fila, motivo: `"${fila.jugador}" no está en la plantilla de ${equipoDb} (¿fichaje reciente, o nombre distinto? candidatos: ${candidatosNombre.join(', ') || 'ninguno'})` });
+        continue;
+      }
+      emparejados.push({
+        jugadorId: jugadorDb.id,
+        nombreDb: jugadorDb.nombre,
+        equipoDb,
+        equipoOrigen: fila.equipo,
+        jugadorOrigen: fila.jugador,
+        valor: fila.valor,
+        probabilidadTitular: fila.probabilidadTitular,
+      });
+      usados.add(jugadorDb.id);
+    }
+
+    const sinValorEnPlantilla = jugadoresDb.filter((j) => !usados.has(j.id)).map((j) => ({ id: j.id, nombre: j.nombre, equipo: j.equipo_real }));
+
+    setPreviewValorMercado({ emparejados, noEmparejados, sinValorEnPlantilla });
+  }
+
+  async function guardarValorMercado() {
+    if (!previewValorMercado || previewValorMercado.emparejados.length === 0) return;
+    setGuardandoValorMercado(true);
+    setErrorValorMercado(null);
+    setResultadoValorMercado(null);
+
+    const { emparejados } = previewValorMercado;
+
+    const { error: errorValores } = await supabase
+      .from('jugadores')
+      .upsert(emparejados.map((f) => ({ id: f.jugadorId, valor_mercado: f.valor })), { onConflict: 'id' });
+
+    if (errorValores) {
+      setGuardandoValorMercado(false);
+      setErrorValorMercado('No se han podido guardar los valores. Inténtalo de nuevo.');
+      return;
+    }
+
+    const conProbabilidad = emparejados.filter((f) => f.probabilidadTitular !== null);
+    if (conProbabilidad.length > 0) {
+      await supabase
+        .from('jugadores')
+        .upsert(conProbabilidad.map((f) => ({ id: f.jugadorId, probabilidad_titular: f.probabilidadTitular })), { onConflict: 'id' });
+    }
+
+    await supabase
+      .from('cargas_valor_mercado_futbol')
+      .upsert({ liga: ligaValorMercado, cargado_en: new Date().toISOString(), jugadores_actualizados: emparejados.length }, { onConflict: 'liga' });
+
+    setGuardandoValorMercado(false);
+    setResultadoValorMercado(`Valores de ${LIGA_FUTBOL_LABEL[ligaValorMercado]} actualizados: ${emparejados.length} jugadores.`);
+    setTextoValorMercado('');
+    setPreviewValorMercado(null);
+    setAvisosValorMercado([]);
+    await cargarCargasValorMercado();
+  }
+
+  // --- Cuotas 1X2 de la jornada de fútbol (ENCARGO A.4) ---
+
+  async function previsualizarCuotas() {
+    setResultadoCuotas(null);
+    setErrorCuotas(null);
+    setPreviewCuotas(null);
+    if (!competicionCuotas) {
+      setErrorCuotas('Elige primero de qué jornada son estas cuotas.');
+      return;
+    }
+    setCalculandoPreviewCuotas(true);
+
+    const { partidos, avisos } = parsearCuotasPartidosFutbol(textoCuotas);
+
+    const { data, error: fetchError } = await supabase
+      .from('jugadores')
+      .select('id, nombre, equipo_real, posicion, valor_mercado, competicion')
+      .eq('deporte', 'futbol')
+      .eq('competicion', competicionCuotas);
+
+    setCalculandoPreviewCuotas(false);
+
+    if (fetchError) {
+      setErrorCuotas('No se han podido cargar los jugadores de esta jornada. Inténtalo de nuevo.');
+      return;
+    }
+
+    const jugadoresDb = (data as JugadorFutbolDb[] | null) ?? [];
+    if (jugadoresDb.length === 0) {
+      setErrorCuotas('No hay jugadores sincronizados para esta jornada.');
+      return;
+    }
+
+    const equiposDeLaJornada = Array.from(new Set(jugadoresDb.map((j) => j.equipo_real).filter((e): e is string => !!e)));
+
+    // Emparejar cada línea pegada contra los equipos reales de ESTA jornada
+    // (no toda la competición — así "Madrid" en una jornada sin Atlético ni
+    // Rayo solo puede ser el Real Madrid, sin ambigüedad).
+    const partidosResueltos: { equipoLocal: string; equipoVisitante: string; cuota1: number; cuotaX: number; cuota2: number }[] = [];
+    const partidosNoEmparejados: string[] = [];
+    for (const p of partidos) {
+      const local = emparejarEquipo(p.equipoLocal, equiposDeLaJornada);
+      const visitante = emparejarEquipo(p.equipoVisitante, equiposDeLaJornada);
+      if (!local || !visitante) {
+        partidosNoEmparejados.push(`${p.equipoLocal} - ${p.equipoVisitante}${!local ? ` (no se reconoce "${p.equipoLocal}")` : ''}${!visitante ? ` (no se reconoce "${p.equipoVisitante}")` : ''}`);
+        continue;
+      }
+      partidosResueltos.push({ equipoLocal: local, equipoVisitante: visitante, cuota1: p.cuota1, cuotaX: p.cuotaX, cuota2: p.cuota2 });
+    }
+
+    const equiposConCuota = new Set(partidosResueltos.flatMap((p) => [p.equipoLocal, p.equipoVisitante]));
+    const partidosSinCuota = equiposDeLaJornada.filter((e) => !equiposConCuota.has(e));
+
+    const fuerzaEquipo = fuerzaPorEquipo(partidosResueltos);
+
+    const jugadoresSinPosicion = jugadoresDb.filter((j) => !j.posicion);
+    const entrada = jugadoresDb
+      .filter((j): j is JugadorFutbolDb & { posicion: PosicionFutbol } => !!j.posicion)
+      .map((j) => {
+        const fuerza = j.equipo_real ? fuerzaEquipo.get(j.equipo_real) : undefined;
+        const factor = fuerza !== undefined ? factorPosicion(fuerza, j.posicion) : 1;
+        return { id: j.id, posicion: j.posicion, valorMercado: j.valor_mercado, factorPartido: factor };
+      });
+
+    const resultado = calcularPreciosFutbolDetallado(entrada);
+    const porId = new Map(jugadoresDb.map((j) => [j.id, j]));
+    const precios = resultado.precios.map((p) => ({ ...p, nombre: porId.get(p.id)?.nombre ?? '?', equipoReal: porId.get(p.id)?.equipo_real ?? null }));
+
+    const avisosTotales = [...avisos];
+    if (jugadoresSinPosicion.length > 0) {
+      avisosTotales.push(`${jugadoresSinPosicion.length} jugador(es) sin posición conocida, no se les ha calculado precio: ${jugadoresSinPosicion.map((j) => j.nombre).join(', ')}`);
+    }
+    setAvisosCuotasFutbol(avisosTotales);
+    setPreviewCuotas({
+      precios,
+      partidosSinCuota,
+      partidosNoEmparejados,
+      topeUsado: resultado.topeUsado,
+      gammaUsado: resultado.gammaUsado,
+      reglasCumplidas: resultado.reglasCumplidas,
+    });
+  }
+
+  async function guardarCuotas() {
+    if (!previewCuotas || previewCuotas.precios.length === 0) return;
+    setGuardandoCuotas(true);
+    setErrorCuotas(null);
+    setResultadoCuotas(null);
+
+    const { error: errorPrecios } = await supabase.from('jugadores').upsert(
+      previewCuotas.precios.map((p) => ({ id: p.id, precio: p.precio, valor_a_revisar: p.sinValor })),
+      { onConflict: 'id' }
+    );
+
+    if (errorPrecios) {
+      setGuardandoCuotas(false);
+      setErrorCuotas('No se han podido guardar los precios. Inténtalo de nuevo.');
+      return;
+    }
+
+    const { partidos } = parsearCuotasPartidosFutbol(textoCuotas);
+    const equiposDeLaJornada = Array.from(new Set(previewCuotas.precios.map((p) => p.equipoReal).filter((e): e is string => !!e)));
+    const filasCuotas = partidos
+      .map((p) => {
+        const local = emparejarEquipo(p.equipoLocal, equiposDeLaJornada);
+        const visitante = emparejarEquipo(p.equipoVisitante, equiposDeLaJornada);
+        if (!local || !visitante) return null;
+        return { competicion: competicionCuotas, equipo_local: local, equipo_visitante: visitante, cuota_1: p.cuota1, cuota_x: p.cuotaX, cuota_2: p.cuota2 };
+      })
+      .filter((f): f is NonNullable<typeof f> => f !== null);
+
+    if (filasCuotas.length > 0) {
+      await supabase.from('cuotas_partido_futbol').upsert(filasCuotas, { onConflict: 'competicion,equipo_local,equipo_visitante' });
+    }
+
+    setGuardandoCuotas(false);
+    setResultadoCuotas(`Precios de ${competicionCuotas} actualizados: ${previewCuotas.precios.length} jugadores (TOPE ${previewCuotas.topeUsado} €, γ ${previewCuotas.gammaUsado}).`);
+    setTextoCuotas('');
+    setPreviewCuotas(null);
+    setAvisosCuotasFutbol([]);
+    await cargarTodo();
   }
 
   async function previsualizarTorneo() {
@@ -896,6 +1215,211 @@ export default function AdminPage() {
                   ))}
                 </div>
               )}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <span style={S.sectionLabel}>Valor de mercado de fútbol</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 14 }}>
+              <p style={{ fontSize: 12.5, color: S.MUTED_2, margin: 0, lineHeight: 1.5 }}>
+                Pega la tabla de valores del fantasy oficial de cada competición (una línea por jugador:
+                <code style={{ background: S.BG, padding: '1px 5px', borderRadius: 4 }}>Equipo · Jugador · Valor</code>, separados por tabulador) para
+                cargarla la primera vez o actualizarla más adelante. Se empareja siempre por equipo + nombre, nunca solo
+                por nombre, para no confundir jugadores homónimos de equipos distintos.
+              </p>
+
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {LIGAS_FUTBOL.map((l) => (
+                  <button key={l} type="button" onClick={() => { setLigaValorMercado(l); setPreviewValorMercado(null); setResultadoValorMercado(null); setErrorValorMercado(null); }} style={S.pill(ligaValorMercado === l)}>
+                    {LIGA_FUTBOL_LABEL[l]}
+                  </button>
+                ))}
+              </div>
+              <span style={{ fontSize: 11, color: S.MUTED_3 }}>
+                {cargasValorMercado[ligaValorMercado].cargadoEn
+                  ? `Valores de ${LIGA_FUTBOL_LABEL[ligaValorMercado]} cargados el ${new Date(cargasValorMercado[ligaValorMercado].cargadoEn!).toLocaleDateString('es-ES')} (${cargasValorMercado[ligaValorMercado].jugadoresActualizados} jugadores).`
+                  : `Todavía no se han cargado valores de ${LIGA_FUTBOL_LABEL[ligaValorMercado]}.`}
+              </span>
+
+              <div style={S.field}>
+                <span style={S.label}>Tabla de valores pegada</span>
+                <textarea
+                  value={textoValorMercado}
+                  onChange={(e) => setTextoValorMercado(e.target.value)}
+                  placeholder={'Barcelona\tLamine Yamal\t158.927.883\nReal Madrid\tKylian Mbappé\t153.400.000\nSevilla\tRafa Garrido (Rafita)\t1.200.000'}
+                  rows={6}
+                  style={{ ...S.input, fontFamily: 'monospace', fontSize: 12.5, resize: 'vertical' }}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={previsualizarValorMercado}
+                disabled={!textoValorMercado.trim() || calculandoPreviewValor}
+                style={{ ...S.secondaryLinkButton, opacity: textoValorMercado.trim() && !calculandoPreviewValor ? 1 : 0.5 }}
+              >
+                {calculandoPreviewValor ? 'Comprobando...' : 'Previsualizar'}
+              </button>
+
+              {avisosValorMercado.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  {avisosValorMercado.map((a, i) => (
+                    <span key={i} style={{ fontSize: 11, color: S.MUTED_3 }}>⚠ {a}</span>
+                  ))}
+                </div>
+              )}
+
+              {previewValorMercado && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <span style={{ fontSize: 12, color: S.TEXT, fontWeight: 600 }}>
+                      Emparejados: {previewValorMercado.emparejados.length}
+                    </span>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 200, overflowY: 'auto' }}>
+                      {previewValorMercado.emparejados.map((f, i) => (
+                        <div key={i} style={{ fontSize: 11.5, color: S.MUTED_2 }}>
+                          {f.nombreDb} <span style={{ color: S.MUTED_3 }}>({f.equipoDb})</span> — {f.valor.toLocaleString('es-ES')} €
+                          {f.probabilidadTitular !== null ? ` · ${f.probabilidadTitular}% titular` : ''}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {previewValorMercado.noEmparejados.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <span style={{ fontSize: 12, color: S.ERROR, fontWeight: 600 }}>
+                        No emparejados: {previewValorMercado.noEmparejados.length} (corrígelos en el texto pegado y vuelve a previsualizar)
+                      </span>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 160, overflowY: 'auto' }}>
+                        {previewValorMercado.noEmparejados.map((f, i) => (
+                          <div key={i} style={{ fontSize: 11.5, color: S.MUTED_2 }}>
+                            {f.equipo} — {f.jugador}{f.apodo ? ` (${f.apodo})` : ''}: <span style={{ color: S.MUTED_3 }}>{f.motivo}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {previewValorMercado.sinValorEnPlantilla.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <span style={{ fontSize: 12, color: S.MUTED_2, fontWeight: 600 }}>
+                        Jugadores de la plantilla sin valor en esta tabla: {previewValorMercado.sinValorEnPlantilla.length}
+                      </span>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 120, overflowY: 'auto' }}>
+                        {previewValorMercado.sinValorEnPlantilla.map((j) => (
+                          <div key={j.id} style={{ fontSize: 11.5, color: S.MUTED_3 }}>{j.nombre} ({j.equipo ?? '?'})</div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={guardarValorMercado}
+                    disabled={guardandoValorMercado || previewValorMercado.emparejados.length === 0}
+                    style={{ ...S.primaryButton, marginTop: 0, opacity: guardandoValorMercado ? 0.7 : 1 }}
+                  >
+                    {guardandoValorMercado ? 'Guardando...' : `Guardar valores (${previewValorMercado.emparejados.length} jugadores)`}
+                  </button>
+                </div>
+              )}
+              {errorValorMercado && <p style={S.errorText}>{errorValorMercado}</p>}
+              {resultadoValorMercado && <p style={S.infoText}>{resultadoValorMercado}</p>}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <span style={S.sectionLabel}>Cuotas 1X2 de la jornada de fútbol</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 14 }}>
+              <p style={{ fontSize: 12.5, color: S.MUTED_2, margin: 0, lineHeight: 1.5 }}>
+                Con el valor de mercado ya cargado (arriba), pega aquí las cuotas 1X2 de cada partido de la jornada
+                para calcular y guardar el precio final de cada jugador. Recalcular después de que alguien ya haya
+                fichado no le cambia el gasto a quien ya esté inscrito — mejor hacerlo antes de abrir las salas.
+              </p>
+
+              <div style={S.field}>
+                <span style={S.label}>Jornada</span>
+                <select value={competicionCuotas} onChange={(e) => { setCompeticionCuotas(e.target.value); setPreviewCuotas(null); setResultadoCuotas(null); setErrorCuotas(null); }} style={S.input}>
+                  <option value="">— Elige una jornada —</option>
+                  {competicionesFutbolDisponibles.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={S.field}>
+                <span style={S.label}>Cuotas 1X2 pegadas (una línea por partido)</span>
+                <textarea
+                  value={textoCuotas}
+                  onChange={(e) => setTextoCuotas(e.target.value)}
+                  placeholder={'Real Madrid - Osasuna 1,25 6,50 11,00\nCelta - Girona 2,10 3,30 3,60'}
+                  rows={5}
+                  style={{ ...S.input, fontFamily: 'monospace', fontSize: 12.5, resize: 'vertical' }}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={previsualizarCuotas}
+                disabled={!textoCuotas.trim() || !competicionCuotas || calculandoPreviewCuotas}
+                style={{ ...S.secondaryLinkButton, opacity: textoCuotas.trim() && competicionCuotas && !calculandoPreviewCuotas ? 1 : 0.5 }}
+              >
+                {calculandoPreviewCuotas ? 'Calculando...' : 'Previsualizar precios'}
+              </button>
+
+              {avisosCuotasFutbol.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  {avisosCuotasFutbol.map((a, i) => (
+                    <span key={i} style={{ fontSize: 11, color: S.MUTED_3 }}>⚠ {a}</span>
+                  ))}
+                </div>
+              )}
+
+              {previewCuotas && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <span style={{ fontSize: 11.5, color: previewCuotas.reglasCumplidas ? S.MUTED_2 : S.ERROR }}>
+                    TOPE {previewCuotas.topeUsado.toLocaleString('es-ES')} € · γ {previewCuotas.gammaUsado}
+                    {previewCuotas.reglasCumplidas ? ' · reglas de seguridad cumplidas.' : ' · aviso: ninguna combinación probada cumple del todo las dos reglas de seguridad — revisa los precios.'}
+                  </span>
+
+                  {previewCuotas.partidosSinCuota.length > 0 && (
+                    <span style={{ fontSize: 11.5, color: S.MUTED_3 }}>
+                      Sin cuota cargada (factor neutro ×1): {previewCuotas.partidosSinCuota.join(', ')}
+                    </span>
+                  )}
+                  {previewCuotas.partidosNoEmparejados.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <span style={{ fontSize: 11.5, color: S.ERROR }}>Partidos pegados sin emparejar:</span>
+                      {previewCuotas.partidosNoEmparejados.map((p, i) => (
+                        <span key={i} style={{ fontSize: 11, color: S.MUTED_3 }}>{p}</span>
+                      ))}
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 320, overflowY: 'auto' }}>
+                    {[...previewCuotas.precios]
+                      .sort((a, b) => b.precio - a.precio)
+                      .map((p) => (
+                        <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11.5, color: p.sinValor ? S.MUTED_3 : S.MUTED_2 }}>
+                          <span>
+                            {p.nombre} <span style={{ color: S.MUTED_3 }}>({p.equipoReal ?? '?'} · {p.posicion})</span>
+                            {p.sinValor ? ' — sin valor, precio mediano' : ''}
+                          </span>
+                          <span style={{ color: S.TEXT, flexShrink: 0 }}>{p.precio.toLocaleString('es-ES')} €</span>
+                        </div>
+                      ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={guardarCuotas}
+                    disabled={guardandoCuotas}
+                    style={{ ...S.primaryButton, marginTop: 0, opacity: guardandoCuotas ? 0.7 : 1 }}
+                  >
+                    {guardandoCuotas ? 'Guardando...' : `Guardar precios (${previewCuotas.precios.length} jugadores)`}
+                  </button>
+                </div>
+              )}
+              {errorCuotas && <p style={S.errorText}>{errorCuotas}</p>}
+              {resultadoCuotas && <p style={S.infoText}>{resultadoCuotas}</p>}
             </div>
           </div>
 
