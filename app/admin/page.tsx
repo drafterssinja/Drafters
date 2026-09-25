@@ -758,7 +758,16 @@ export default function AdminPage() {
         return { id: j.id, posicion: j.posicion, valorMercado: j.valor_mercado, factorPartido: factor };
       });
 
-    const resultado = calcularPreciosFutbolDetallado(entrada);
+    // El nivel de cada jugador (lib/precioFutbol.ts) se calcula sobre el
+    // valor mín/máx de TODA la liga ya cargada (jugadoresLiga), no solo de
+    // los equipos que juegan esta jornada en concreto (jugadoresDb) — así el
+    // precio de un jugador no depende de qué otros equipos juegan esa
+    // semana. Corrección del 25/09 tras el aviso de Iñi de que un equipo
+    // hecho solo con jugadores de equipos flojos no llegaba a completarse.
+    const valoresLiga = jugadoresLiga.map((j) => j.valor_mercado).filter((v): v is number => typeof v === 'number' && v > 0);
+    const rangoNivel = valoresLiga.length > 0 ? { valorMin: Math.min(...valoresLiga), valorMax: Math.max(...valoresLiga) } : undefined;
+
+    const resultado = calcularPreciosFutbolDetallado(entrada, {}, rangoNivel);
     const porId = new Map(jugadoresDb.map((j) => [j.id, j]));
     const precios = resultado.precios.map((p) => ({ ...p, nombre: porId.get(p.id)?.nombre ?? '?', equipoReal: porId.get(p.id)?.equipo_real ?? null }));
 

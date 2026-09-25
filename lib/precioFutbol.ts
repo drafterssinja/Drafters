@@ -7,13 +7,31 @@
  * Sustituye (salvo como respaldo, ver A.5 y lib/pricing.ts) al precio fijo
  * por posición.
  *
+ * Corregido el 25/09 (continuación) tras las dos quejas reales de Iñi con
+ * la primera jornada de 639 jugadores: (1) los porteros se comían demasiado
+ * presupuesto para lo poco que puntúan comparados con un delantero; (2) un
+ * equipo hecho solo con jugadores de dos equipos flojos (Málaga y Español)
+ * no llegaba ni a completarse por presupuesto. Ver el punto 6 más abajo.
+ *
  * 1. Nivel base (0-1) dentro de la competición, en escala logarítmica —
  *    porque el rango de valores es muy distinto según la competición (en
  *    LaLiga Fantasy hay de 0,4 M a 159 M, casi 400 veces; en el FPL de
  *    £4m a £15,5m, unas 4 veces):
  *      nivel = (ln(valor) − ln(valor_mín)) / (ln(valor_máx) − ln(valor_mín))
- *    (valor_mín/valor_máx son los de la tabla de valores cargada para esa
- *    competición, no de toda la jornada).
+ *    valor_mín/valor_máx son los de TODA la tabla de valores de mercado
+ *    cargada para esa competición (todos los equipos, jueguen o no esta
+ *    jornada) — NUNCA los del subconjunto de equipos que juegan esta
+ *    jornada en concreto. Antes del 25/09 el llamante (app/admin/page.tsx)
+ *    pasaba por error solo los jugadores de la jornada, así que si una
+ *    jornada no incluía a los equipos grandes de referencia (p. ej. se pegan
+ *    las cuotas de solo unos pocos partidos), el "techo" de la escala pasaba
+ *    a ser el jugador más caro de ESE grupo reducido — y dentro de un grupo
+ *    de equipos flojos, hasta un jugador mediocre podía salir con nivel
+ *    cercano a 1 (carísimo). Ahora el rango se calcula siempre sobre toda la
+ *    tabla de valor de mercado de la competición (ver calcularPreciosFutbolDetallado,
+ *    parámetro rangoNivel, y su uso en app/admin/page.tsx) — así el precio de
+ *    un jugador no depende de qué otros equipos juegan esa semana en
+ *    concreto, y un equipo flojo sigue teniendo jugadores baratos de verdad.
  *
  * 2. Ajuste por partido, con las cuotas 1X2 (quitando el margen de la
  *    casa):
@@ -26,26 +44,58 @@
  *    ya resuelto el factor de cada jugador, ver factoresPorEquipo()).
  *
  * 3. Precio, misma forma de curva que golf/tenis (lib/precioPorCuota.ts):
- *      precio = MÍN + (TOPE − MÍN) × (nivel_ajustado / nivel_ajustado_máx) ^ γ
+ *      precio = MÍN + (TOPE_línea − MÍN) × (nivel_ajustado / nivel_ajustado_máx) ^ γ
  *      (redondeado a centenas)
+ *    TOPE_línea es el TOPE normal para defensas/centrocampistas/delanteros,
+ *    pero para PORTEROS es solo una fracción de ese TOPE (ver punto 6.1) —
+ *    así el portero más caro de la jornada nunca se acerca al precio de un
+ *    delantero estrella, aunque su valor de mercado bruto sea alto.
  *
- * 4. Dos reglas de seguridad, sobre las 4 alineaciones válidas de la app
+ * 4. Tres reglas de seguridad, sobre las 4 alineaciones válidas de la app
  *    (4-3-3, 4-4-2, 3-5-2, 4-2-3-1 — ver FORMACIONES_FUTBOL):
  *      Regla 1: el once más caro posible (la alineación que más cueste)
  *               debe costar >= 110% del presupuesto.
  *      Regla 2: los 3 jugadores más caros, completados con los más baratos
  *               que formen una alineación válida, deben caber en el
  *               presupuesto.
+ *      Regla 3 (nueva, 25/09): el once más BARATO posible (la alineación
+ *               que menos cueste, con los jugadores más baratos de cada
+ *               línea) no debe superar el 50% del presupuesto — para que
+ *               SIEMPRE quepa un equipo completo con margen de sobra, sea
+ *               cual sea la combinación de equipos elegida (incluso solo
+ *               con equipos flojos), y para que sobre presupuesto real para
+ *               elegir entre "muchos jugadores de la parte media/alta" o
+ *               "pocas estrellas + relleno barato" (pedido de Iñi, 25/09).
  *
- * 5. Búsqueda automática de (TOPE, γ) que cumplan las dos reglas, moviéndose
- *    lo mínimo posible de los valores de partida (TOPE = 20% del
- *    presupuesto, γ = 1,0) — mismo método que golf/tenis: TOPE se mueve
- *    entre el 15% y el 25% del presupuesto, γ entre 0,5 y 3,0, minimizando
+ * 5. Búsqueda automática de (TOPE, γ) que cumplan las tres reglas,
+ *    moviéndose lo mínimo posible de los valores de partida (TOPE = 20% del
+ *    presupuesto, γ = 2,0 — antes 1,0, ver punto 6.2) — mismo método que
+ *    golf/tenis: TOPE se mueve entre el 15% y el 25% del presupuesto, γ
+ *    entre 1,2 y 3,0 (antes 0,5 a 3,0, ver 6.2), minimizando
  *    coste = 10 × |fracción_TOPE_objetivo − fracción_TOPE| + |γ − γ_objetivo|.
  *
- * Los valores de partida (MÍN=2.500€, TOPE=20.000€, γ=1,0) están pendientes
- * de calibrar con datos reales (ENCARGO, A.8.1) — enseñar a Iñi el reparto
- * de precios de la primera jornada real antes de darlos por buenos.
+ * 6. Qué cambió el 25/09 y por qué, punto por punto:
+ *    6.1. Tope reducido para porteros — `porteroFraccionTope` (0,45): el
+ *         portero más caro de la jornada cuesta como mucho MÍN + 45% de lo
+ *         que cuesta el TOPE normal por encima de MÍN (aprox. la mitad del
+ *         delantero más caro), en vez de poder llegar al mismo TOPE que
+ *         cualquier otra posición.
+ *    6.2. Curva de partida más pronunciada — γ de partida sube de 1,0 a 2,0,
+ *         y el rango de búsqueda de γ sube su mínimo de 0,5 a 1,2. Con
+ *         γ=1 (recta) demasiados jugadores "normales" quedaban cerca de la
+ *         mitad de la escala de precio; con γ más alto (curva convexa) el
+ *         precio se hunde mucho más rápido para los jugadores de nivel
+ *         medio/bajo, dejando solo a las auténticas estrellas cerca del
+ *         TOPE — así hay más margen real para elegir entre "muchos buenos"
+ *         o "pocas estrellas + relleno".
+ *    6.3. Rango de valor de mercado estable — ver el punto 1 de arriba.
+ *    6.4. Regla 3 nueva — ver el punto 4 de arriba: una garantía dura
+ *         (no solo una esperanza de que la curva salga bien) de que
+ *         siempre habrá un equipo completo asequible.
+ *
+ * Los valores de partida (MÍN=2.500€, TOPE=20.000€, γ=2,0) siguen
+ * pendientes de un último ajuste fino con más jornadas reales (ENCARGO,
+ * A.8.1) — pero ya corrigen los dos problemas concretos que reportó Iñi.
  *
  * Caso especial (A.5): un jugador sin valor de mercado (fichaje de última
  * hora, canterano) recibe el precio MEDIANO de su posición en esa jornada,
@@ -60,19 +110,32 @@ export type PosicionFutbol = 'portero' | 'defensa' | 'centrocampista' | 'delante
 export const PRECIO_FUTBOL_CONFIG = {
   /** Precio del jugador con menos nivel (y de cualquiera sin valor de mercado, antes de la mediana). */
   minimo: 2_500,
-  /** TOPE de partida: lo que cuesta el jugador con más nivel ajustado de la jornada. */
+  /** TOPE de partida: lo que cuesta el jugador con más nivel ajustado de la jornada (defensa/centrocampista/delantero). */
   topeInicial: 20_000,
   /** Rango de búsqueda de TOPE, como fracción del presupuesto. */
   topeMinimoFraccion: 0.15,
   topeMaximoFraccion: 0.25,
   /** Paso de la búsqueda de TOPE (como fracción del presupuesto). */
   pasoTopeFraccion: 0.005,
+  /**
+   * Fracción del TOPE (por encima de MÍN) que puede alcanzar un portero —
+   * 25/09, corrección de Iñi: los porteros se comían demasiado presupuesto.
+   * Con 0,45, el portero más caro de la jornada cuesta MÍN + 45% × (TOPE − MÍN),
+   * aprox. la mitad de lo que cuesta el jugador de campo más caro.
+   */
+  porteroFraccionTope: 0.45,
   /** Rango y paso de la búsqueda de γ. */
-  gammaMinima: 0.5,
+  gammaMinima: 1.2,
   gammaMaxima: 3.0,
   pasoGamma: 0.01,
   /** γ de partida — el coste de la búsqueda mide cuánto nos alejamos de aquí. */
-  gammaInicial: 1.0,
+  gammaInicial: 2.0,
+  /**
+   * Regla 3 (25/09): el once más barato posible no puede superar esta
+   * fracción del presupuesto — garantiza que siempre se pueda completar un
+   * equipo con margen de sobra, sea cual sea la combinación de equipos.
+   */
+  fraccionMaxOnceBarato: 0.5,
   /** Los precios se redondean a este múltiplo. */
   redondeo: 100,
 } as const;
@@ -84,10 +147,12 @@ export type ConfigPrecioFutbol = {
   topeMinimoFraccion: number;
   topeMaximoFraccion: number;
   pasoTopeFraccion: number;
+  porteroFraccionTope: number;
   gammaMinima: number;
   gammaMaxima: number;
   pasoGamma: number;
   gammaInicial: number;
+  fraccionMaxOnceBarato: number;
   redondeo: number;
 };
 
@@ -170,21 +235,33 @@ function sumaTop(lista: number[], n: number): number {
 function cumpleReglasFutbol(jugadores: JugadorParaReglas[], cfg: ConfigPrecioFutbol): boolean {
   const porLinea: Record<LineaFutbol, number[]> = { POR: [], DEF: [], MED: [], DEL: [] };
   for (const j of jugadores) porLinea[lineaDePosicionFutbol(j.posicion)].push(j.precio);
+  // Copia ascendente (los más baratos primero) para la Regla 3, antes de ordenar porLinea descendente para la Regla 1.
+  const porLineaAsc: Record<LineaFutbol, number[]> = {
+    POR: [...porLinea.POR].sort((a, b) => a - b),
+    DEF: [...porLinea.DEF].sort((a, b) => a - b),
+    MED: [...porLinea.MED].sort((a, b) => a - b),
+    DEL: [...porLinea.DEL].sort((a, b) => a - b),
+  };
   (Object.keys(porLinea) as LineaFutbol[]).forEach((k) => porLinea[k].sort((a, b) => b - a));
 
   // Regla 1: el once más caro posible (la alineación que más cueste) >= 110% del presupuesto.
   let algunaFormacionFactible = false;
   let maxOnceMasCaro = -Infinity;
+  let minOnceMasBarato = Infinity;
   for (const f of FORMACIONES_FUTBOL) {
     const h = huecosPorLinea(f.alineacion);
     if (porLinea.POR.length < h.POR || porLinea.DEF.length < h.DEF || porLinea.MED.length < h.MED || porLinea.DEL.length < h.DEL) continue;
     algunaFormacionFactible = true;
-    const coste = sumaTop(porLinea.POR, h.POR) + sumaTop(porLinea.DEF, h.DEF) + sumaTop(porLinea.MED, h.MED) + sumaTop(porLinea.DEL, h.DEL);
-    if (coste > maxOnceMasCaro) maxOnceMasCaro = coste;
+    const costeMax = sumaTop(porLinea.POR, h.POR) + sumaTop(porLinea.DEF, h.DEF) + sumaTop(porLinea.MED, h.MED) + sumaTop(porLinea.DEL, h.DEL);
+    if (costeMax > maxOnceMasCaro) maxOnceMasCaro = costeMax;
+    const costeMin = sumaAscendente(porLineaAsc.POR, h.POR) + sumaAscendente(porLineaAsc.DEF, h.DEF) + sumaAscendente(porLineaAsc.MED, h.MED) + sumaAscendente(porLineaAsc.DEL, h.DEL);
+    if (costeMin < minOnceMasBarato) minOnceMasBarato = costeMin;
   }
   // Plantilla demasiado pequeña para formar ninguna alineación (jornada de prueba, pool minúsculo) — no bloquea.
   if (!algunaFormacionFactible) return true;
   const regla1 = maxOnceMasCaro >= cfg.presupuesto * 1.1;
+  // Regla 3 (25/09): el once más barato posible no debe superar esta fracción del presupuesto.
+  const regla3 = minOnceMasBarato <= cfg.presupuesto * cfg.fraccionMaxOnceBarato;
 
   // Regla 2: los 3 más caros + los más baratos que completen una alineación válida, caben en el presupuesto.
   const ordenados = [...jugadores].sort((a, b) => b.precio - a.precio);
@@ -224,9 +301,9 @@ function cumpleReglasFutbol(jugadores: JugadorParaReglas[], cfg: ConfigPrecioFut
     if (mejorCompletado === null || total < mejorCompletado) mejorCompletado = total;
   }
   // Ninguna alineación cabe con estos 3 jugadores concretos (posiciones raras en un pool pequeño) — no bloquea esta regla.
-  if (mejorCompletado === null) return regla1;
+  if (mejorCompletado === null) return regla1 && regla3;
   const regla2 = mejorCompletado <= cfg.presupuesto;
-  return regla1 && regla2;
+  return regla1 && regla2 && regla3;
 }
 
 function sumaAscendente(lista: number[], n: number): number {
@@ -266,10 +343,13 @@ function preciosParaFutbol(
   cfg: ConfigPrecioFutbol
 ): Interno[] {
   const redondear = (v: number) => Math.round(v / cfg.redondeo) * cfg.redondeo;
+  // Tope reducido para porteros (25/09) — ver cabecera del archivo, punto 6.1.
+  const topePortero = cfg.minimo + (tope - cfg.minimo) * cfg.porteroFraccionTope;
 
   const preciosValidos: Interno[] = validos.map((j) => {
     const ratio = nivelAjustadoMax > 0 ? Math.max(0, j.nivelAjustado) / nivelAjustadoMax : 0;
-    const precio = redondear(cfg.minimo + (tope - cfg.minimo) * Math.pow(ratio, gamma));
+    const topeJugador = j.posicion === 'portero' ? topePortero : tope;
+    const precio = redondear(cfg.minimo + (topeJugador - cfg.minimo) * Math.pow(ratio, gamma));
     return { id: j.id, posicion: j.posicion, nivel: j.nivel, nivelAjustado: j.nivelAjustado, precio, sinValor: false };
   });
 
@@ -354,13 +434,24 @@ export type ResultadoPreciosFutbol = {
   precios: JugadorConPrecioFutbol[];
   topeUsado: number;
   gammaUsado: number;
-  /** false si ni siquiera la mejor combinación del grid cumple las dos reglas de seguridad. */
+  /** false si ni siquiera la mejor combinación del grid cumple las tres reglas de seguridad. */
   reglasCumplidas: boolean;
 };
 
 export function calcularPreciosFutbolDetallado(
   jugadores: JugadorParaPrecioFutbol[],
-  config: Partial<ConfigPrecioFutbol> = {}
+  config: Partial<ConfigPrecioFutbol> = {},
+  /**
+   * Rango de valor de mercado (mín/máx) a usar para el nivel base — 25/09,
+   * ver cabecera del archivo, punto 1 y 6.3. Cuando se pasa (recomendado:
+   * el mín/máx de TODA la tabla de valores de mercado cargada para la
+   * competición, no solo de los equipos que juegan esta jornada), el nivel
+   * de cada jugador queda estable jornada a jornada, sin depender de qué
+   * otros equipos juegan esa semana en concreto. Si se omite, se calcula
+   * (como antes) a partir de la propia lista `jugadores` recibida — pensado
+   * solo para pruebas o para cuando de verdad no hay más tabla que esa.
+   */
+  rangoNivel?: { valorMin: number; valorMax: number }
 ): ResultadoPreciosFutbol {
   const cfg: ConfigPrecioFutbol = {
     presupuesto: EQUIPO_PRESUPUESTO,
@@ -384,8 +475,8 @@ export function calcularPreciosFutbolDetallado(
   }
 
   const valores = conValorInput.map((j) => j.valorMercado as number);
-  const valorMin = Math.min(...valores);
-  const valorMax = Math.max(...valores);
+  const valorMin = rangoNivel && rangoNivel.valorMin > 0 ? Math.min(rangoNivel.valorMin, ...valores) : Math.min(...valores);
+  const valorMax = rangoNivel && rangoNivel.valorMax > 0 ? Math.max(rangoNivel.valorMax, ...valores) : Math.max(...valores);
 
   const validos = conValorInput.map((j) => {
     const nivel = nivelBase(j.valorMercado as number, valorMin, valorMax);
@@ -417,6 +508,10 @@ export function calcularPreciosFutbolDetallado(
 }
 
 /** Atajo para quien solo necesita los precios (uso habitual en la vista previa de /admin). */
-export function calcularPreciosFutbol(jugadores: JugadorParaPrecioFutbol[], config: Partial<ConfigPrecioFutbol> = {}): JugadorConPrecioFutbol[] {
-  return calcularPreciosFutbolDetallado(jugadores, config).precios;
+export function calcularPreciosFutbol(
+  jugadores: JugadorParaPrecioFutbol[],
+  config: Partial<ConfigPrecioFutbol> = {},
+  rangoNivel?: { valorMin: number; valorMax: number }
+): JugadorConPrecioFutbol[] {
+  return calcularPreciosFutbolDetallado(jugadores, config, rangoNivel).precios;
 }

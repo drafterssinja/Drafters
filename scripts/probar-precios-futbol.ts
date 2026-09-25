@@ -101,7 +101,7 @@ const entrada = jugadores.map((j) => {
 const resultado = calcularPreciosFutbolDetallado(entrada);
 
 console.log(`TOPE elegido: ${resultado.topeUsado} € | γ elegido: ${resultado.gammaUsado} | reglas cumplidas: ${resultado.reglasCumplidas}`);
-assert.equal(resultado.reglasCumplidas, true, 'con una plantilla realista, la búsqueda automática debe encontrar un (TOPE, γ) que cumpla las dos reglas');
+assert.equal(resultado.reglasCumplidas, true, 'con una plantilla realista, la búsqueda automática debe encontrar un (TOPE, γ) que cumpla las tres reglas');
 
 const porId = new Map(resultado.precios.map((p) => [p.id, p]));
 
@@ -123,11 +123,34 @@ for (const p of resultado.precios) {
 assert.ok(idMejorNivelAjustado !== null);
 assert.equal(porId.get(idMejorNivelAjustado!)!.precio, resultado.topeUsado, 'quien tenga el nivel ajustado más alto cuesta justo el TOPE');
 
-// Y el de más valor de mercado en bruto (aunque no sea el más caro) debe
-// seguir estando cerca del TOPE, no barato — su nivel base ya es 1.
+// El de más valor de mercado en bruto es un portero (jugadores[0]: primer
+// portero de Equipo A, el de más valor de toda la plantilla sintética) —
+// desde el 25/09 los porteros tienen un TOPE reducido (porteroFraccionTope,
+// ver cabecera de precioFutbol.ts), así que YA NO debe acercarse al TOPE
+// general: debe quedar cerca de su propio tope reducido, no del de un
+// delantero. Antes de esta corrección se esperaba justo lo contrario (que
+// quedara cerca del TOPE general) — ese era el problema que reportó Iñi.
 const masValioso = jugadores[0];
 assert.equal(masValioso.valorMercado, VALOR_MAX);
-assert.ok(porId.get(masValioso.id)!.precio >= resultado.topeUsado * 0.85, 'el de más valor de mercado, aunque el TOPE lo alcance otro, tiene que quedar cerca de él');
+assert.equal(masValioso.posicion, 'portero', 'este dataset sintético pone al portero de más valor primero en el índice');
+const topePorteroEsperado = PRECIO_FUTBOL_CONFIG.minimo + (resultado.topeUsado - PRECIO_FUTBOL_CONFIG.minimo) * PRECIO_FUTBOL_CONFIG.porteroFraccionTope;
+assert.ok(
+  porId.get(masValioso.id)!.precio <= topePorteroEsperado + 1e-6,
+  'un portero, por muy alto que sea su valor de mercado bruto, nunca debe superar el tope reducido para porteros'
+);
+assert.ok(
+  porId.get(masValioso.id)!.precio < resultado.topeUsado * 0.85,
+  'el portero de más valor debe quedar claramente por debajo del TOPE general (no comerse presupuesto como un jugador de campo)'
+);
+
+// El jugador de campo (no portero) de más valor de mercado en bruto sí debe
+// seguir estando cerca del TOPE general, no barato — su nivel base ya es 1
+// y no tiene el tope reducido de los porteros.
+const masValiosoDeCampo = jugadores.filter((j) => j.posicion !== 'portero').sort((a, b) => b.valorMercado - a.valorMercado)[0];
+assert.ok(
+  porId.get(masValiosoDeCampo.id)!.precio >= resultado.topeUsado * 0.7,
+  'el jugador de campo de más valor de mercado tiene que quedar cerca del TOPE general (aunque el TOPE exacto lo alcance otro por el factor de partido)'
+);
 
 // El jugador de menos valor: nivel base 0, así que nivel_ajustado también 0 salvo
 // que el factor de partido lo cambiara (nivel 0 × cualquier factor = 0) -> precio mínimo.
@@ -172,7 +195,30 @@ const top3 = [...preciosConPosicion].sort((a, b) => b.precio - a.precio).slice(0
 console.log(`Regla 2 — 3 más caros: ${top3.map((j) => j.precio).join(' + ')} = ${top3.reduce((s, j) => s + j.precio, 0)} €`);
 assert.ok(top3.reduce((s, j) => s + j.precio, 0) <= EQUIPO_PRESUPUESTO, 'los 3 más caros por sí solos ya deben caber de sobra en el presupuesto');
 
-console.log('OK: jornada sintética — TOPE/γ encontrados cumplen las dos reglas de seguridad');
+// Regla 3 (25/09): el once más BARATO posible no debe superar el
+// fraccionMaxOnceBarato del presupuesto — para que siempre quepa un equipo
+// completo con margen de sobra, sea cual sea la combinación de equipos.
+const porLineaAsc = {
+  POR: [...porLinea.POR].sort((a, b) => a - b),
+  DEF: [...porLinea.DEF].sort((a, b) => a - b),
+  MED: [...porLinea.MED].sort((a, b) => a - b),
+  DEL: [...porLinea.DEL].sort((a, b) => a - b),
+};
+let minOnce = Infinity;
+for (const alineacion of ALINEACIONES) {
+  const h = huecos(alineacion);
+  const coste =
+    porLineaAsc.POR.slice(0, h.POR).reduce((s, p) => s + p, 0) +
+    porLineaAsc.DEF.slice(0, h.DEF).reduce((s, p) => s + p, 0) +
+    porLineaAsc.MED.slice(0, h.MED).reduce((s, p) => s + p, 0) +
+    porLineaAsc.DEL.slice(0, h.DEL).reduce((s, p) => s + p, 0);
+  if (coste < minOnce) minOnce = coste;
+}
+const topeBarato = EQUIPO_PRESUPUESTO * PRECIO_FUTBOL_CONFIG.fraccionMaxOnceBarato;
+console.log(`Regla 3 — once más barato posible: ${minOnce} € (<= ${topeBarato} € permitidos, ${((minOnce / EQUIPO_PRESUPUESTO) * 100).toFixed(1)}% del presupuesto)`);
+assert.ok(minOnce <= topeBarato, 'Regla 3: el once más barato posible no debe superar la mitad del presupuesto — siempre debe quedar margen para completar un equipo');
+
+console.log('OK: jornada sintética — TOPE/γ encontrados cumplen las tres reglas de seguridad');
 
 // ----------------------------------------------------------------------------
 // Caso especial A.5: jugador sin valor de mercado -> mediana de su posición.
