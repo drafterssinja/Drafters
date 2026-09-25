@@ -176,10 +176,22 @@ export default function SalaDetallePage() {
   const estadoInfo = estadoSalaInfo(sala.estado, sala.aforo, signedUp);
   const tipoLabel = TIPO_SALA_LABELS[sala.tipo as TipoSala] ?? sala.tipo;
   // Bote real = lo que aporta cada inscripción a premios (90% del buy-in,
-  // sin la comisión de la casa) × inscritos — corregido el 25/09 (tercera
-  // vuelta): antes multiplicaba el buy-in completo, incluyendo el 10% de
-  // comisión, así que el bote mostrado salía inflado un 10% de más.
-  const bote = parteParaPremios(sala.buy_in) * signedUp;
+  // sin la comisión de la casa) — corregido el 25/09 (tercera vuelta): antes
+  // multiplicaba el buy-in completo, incluyendo el 10% de comisión, así que
+  // el bote mostrado salía inflado un 10% de más.
+  //
+  // Bote y premio del 1º con la sala LLENA (25/09, quinta vuelta): antes se
+  // multiplicaba por signedUp (inscritos ahora mismo), así que en una sala a
+  // medio llenar el bote y los premios se veían más pequeños de lo que
+  // realmente van a ser — pedido de Iñi: "no esperes a que haya dinero
+  // dentro para ver cuál es el bote total. Tú pon cuál es el bote total en
+  // el caso de que la sala esté llena... y cuánto se llevaría el primero en
+  // caso de que la sala esté llena". Ahora se multiplica por el aforo (la
+  // capacidad fija de estos 4 tipos de sala), no por los inscritos reales;
+  // como el reparto por tramos (calcularReparto) ya usa el aforo y no los
+  // inscritos, el premio del 1º (primer tramo) sale automáticamente
+  // calculado también "a sala llena".
+  const bote = parteParaPremios(sala.buy_in) * (sala.aforo ?? signedUp);
   const tramos = calcularReparto(sala.tipo as TipoSala, sala.aforo, signedUp);
   const cierraEn = closesInLabel(sala.fecha_limite_inscripcion);
   const isFull = sala.estado === 'completa';
@@ -406,9 +418,16 @@ export default function SalaDetallePage() {
 
           {tab === 'info' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {/* Desglose del buy-in (25/09, quinta vuelta): antes mostraba el
+                  total + el desglose + la palabra "comisión" ("10 € · 9 € + 1
+                  € comisión") — pedido de Iñi viendo la sala de 10 €: "solo
+                  pon 9 euros más 1 euro. No hace falta que pongas ni que el
+                  total es 10, ni que... el 1 euro es de comisión... ya se
+                  entiende". Ahora solo el desglose en sí (9 € + 1 €; 4,50 €
+                  + 0,50 € en la de 5 €), sin el total delante ni la etiqueta. */}
               <InfoRow
                 label="Buy-in"
-                value={`${formatEuros(sala.buy_in)} · ${formatEuros(parteParaPremios(sala.buy_in))} + ${formatEuros(parteComision(sala.buy_in))} comisión`}
+                value={`${formatEuros(parteParaPremios(sala.buy_in))} + ${formatEuros(parteComision(sala.buy_in))}`}
                 accent
               />
               <InfoRow label="Tipo de sala" value={tipoLabel} />

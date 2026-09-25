@@ -61,6 +61,17 @@ export function nivelBuyIn(buyIn: number): NivelBuyIn {
 export function formatEuros(importe: number): string {
   const esEntero = Math.abs(importe - Math.round(importe)) < 0.005;
   const formateado = new Intl.NumberFormat('es-ES', {
+    // useGrouping explícito (25/09, sexta vuelta): sin esto, el propio
+    // Intl.NumberFormat('es-ES') de Node/el navegador NO añade el punto de
+    // miles en números de exactamente 4 cifras (3200 salía "3200", no
+    // "3.200") — es un comportamiento real de los datos CLDR del idioma
+    // español, que solo agrupa a partir de 5 cifras salvo que se pida
+    // explícitamente. Pedido de Iñi viendo los precios de jugadores (que
+    // rondan las 4 cifras, p.ej. 3.200€): "cuando la cifra es de cuatro
+    // números... tampoco me pones el punto que separa los miles... el
+    // 3200, por ejemplo... inclúyemelo". Con useGrouping: true, los números
+    // de 5+ cifras (22.000, 100.000) siguen exactamente igual que antes.
+    useGrouping: true,
     minimumFractionDigits: esEntero ? 0 : 2,
     maximumFractionDigits: esEntero ? 0 : 2,
   }).format(importe);

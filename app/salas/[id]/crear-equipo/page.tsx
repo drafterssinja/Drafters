@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase, Perfil } from '@/lib/supabaseClient';
@@ -45,6 +45,10 @@ type PartidoRow = { equipo_local: string; equipo_visitante: string; cuota_1: num
 
 const AVATAR_POR_LINEA: Record<LineaFutbol, string> = { POR: '#FF7A45', DEF: '#8FB6FF', MED: '#F0B94D', DEL: '#3DDC84' };
 const LINEAS_ORDEN: LineaFutbol[] = ['DEL', 'MED', 'DEF', 'POR'];
+// Orden visual real en pantalla (de arriba a abajo, tras el .reverse() de
+// LINEAS_ORDEN al pintar la lista): portero, defensas, centrocampistas,
+// delanteros. Se usa para el autoscroll de más abajo (25/09, sexta vuelta).
+const LINEAS_ORDEN_VISUAL: LineaFutbol[] = ['POR', 'DEF', 'MED', 'DEL'];
 const POSICION_LABEL: Record<LineaFutbol, string> = { POR: 'Portero', DEF: 'Defensa', MED: 'Centrocampista', DEL: 'Delantero' };
 const POSICION_LABEL_PLURAL: Record<LineaFutbol, string> = { POR: 'Porteros', DEF: 'Defensas', MED: 'Centrocampistas', DEL: 'Delanteros' };
 
@@ -237,6 +241,33 @@ export default function CrearEquipoPage() {
     });
     return mapa;
   }, [seleccionados]);
+
+  // Autoscroll al completar una línea (nuevo, 25/09 sexta vuelta) — pedido
+  // de Iñi: "para no liar al usuario, cuando el portero ya se haya elegido
+  // que en la parte de jugadores baje automáticamente hasta el punto donde
+  // están los defensas; cuando ya se han elegido todos los defensas, que
+  // bajen hasta los centrocampistas; y lo mismo luego para los delanteros".
+  // `lineaRefs` guarda el elemento de cada bloque de línea para poder
+  // desplazarse hasta él; `lineasCompletadasRef` recuerda si cada línea
+  // estaba ya completa en el render anterior, para detectar el momento
+  // exacto en que se acaba de rellenar (y no disparar el scroll de nuevo en
+  // cada render mientras ya estaba completa, ni al quitar un jugador).
+  const lineaRefs = useRef<Record<LineaFutbol, HTMLDivElement | null>>({ POR: null, DEF: null, MED: null, DEL: null });
+  const lineasCompletadasRef = useRef<Record<LineaFutbol, boolean>>({ POR: false, DEF: false, MED: false, DEL: false });
+
+  useEffect(() => {
+    if (!isFutbol) return;
+    LINEAS_ORDEN_VISUAL.forEach((linea, i) => {
+      const completaAhora = huecos[linea] > 0 && seleccionadosPorLinea[linea] >= huecos[linea];
+      const completaAntes = lineasCompletadasRef.current[linea];
+      if (completaAhora && !completaAntes) {
+        const siguiente = LINEAS_ORDEN_VISUAL.slice(i + 1).find((l) => huecos[l] > 0);
+        const el = siguiente ? lineaRefs.current[siguiente] : null;
+        el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      lineasCompletadasRef.current[linea] = completaAhora;
+    });
+  }, [isFutbol, huecos, seleccionadosPorLinea]);
 
   function cambiarFormacion(nuevaAlineacion: string) {
     const nuevosHuecos = huecosPorLinea(nuevaAlineacion);
@@ -477,7 +508,13 @@ export default function CrearEquipoPage() {
                         const filas = mostrarTodas ? filasTodas : filasTodas.slice(0, tope);
                         const restantes = filasTodas.length - filas.length;
                         return (
-                          <div key={linea} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <div
+                            key={linea}
+                            ref={(el) => {
+                              lineaRefs.current[linea] = el;
+                            }}
+                            style={{ display: 'flex', flexDirection: 'column', gap: 6, scrollMarginTop: 140 }}
+                          >
                             <button
                               type="button"
                               onClick={() => setLineasAbiertas((prev) => ({ ...prev, [linea]: !prev[linea] }))}
