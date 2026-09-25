@@ -8,6 +8,7 @@ import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
 import { EQUIPO_PRESUPUESTO, TAMANO_EQUIPO_GOLF_TENIS, FORMACIONES_FUTBOL, colorPresupuesto } from '@/lib/draftConfig';
 import { formatEuros, inicialesJugador, huecosPorLinea, lineaDePosicion, type LineaFutbol } from '@/lib/salaShared';
+import { tablaPuntuacionPorDeporte } from '@/lib/puntuaciones';
 
 // ============================================================================
 // CREAR EQUIPO EN UNA SALA (isCrearEquipo + isConfirmarEquipo de Main.dc.html,
@@ -45,9 +46,31 @@ type PartidoRow = { equipo_local: string; equipo_visitante: string; cuota_1: num
 const AVATAR_POR_LINEA: Record<LineaFutbol, string> = { POR: '#FF7A45', DEF: '#8FB6FF', MED: '#F0B94D', DEL: '#3DDC84' };
 const LINEAS_ORDEN: LineaFutbol[] = ['DEL', 'MED', 'DEF', 'POR'];
 const POSICION_LABEL: Record<LineaFutbol, string> = { POR: 'Portero', DEF: 'Defensa', MED: 'Centrocampista', DEL: 'Delantero' };
+const POSICION_LABEL_PLURAL: Record<LineaFutbol, string> = { POR: 'Porteros', DEF: 'Defensas', MED: 'Centrocampistas', DEL: 'Delanteros' };
+
+// Cuántos jugadores se ven por defecto en cada línea antes del botón
+// "Mostrar más" (pedido de Iñi, 25/09 tercera vuelta: "en porteros que se
+// vean los 20 con más valor... en defensas pues los 50 mejores"). Solo dio
+// ejemplos explícitos de porteros y defensas — se aplica el mismo criterio
+// de "50" al resto de líneas por consistencia (son igual de numerosas).
+const MOSTRAR_TOP_N: Record<LineaFutbol, number> = { POR: 20, DEF: 50, MED: 50, DEL: 50 };
+
+// Mismo patrón para golf/tenis, que no se agrupan por posición (inferencia
+// propia, no pedida explícitamente por Iñi para estos dos deportes — solo
+// describió posiciones de fútbol — pero mantiene consistente la pantalla
+// cuando hay muchos jugadores en el listado plano).
+const MOSTRAR_TOP_N_FLAT = 50;
 
 function partidoKey(p: { equipo_local: string; equipo_visitante: string }): string {
   return `${p.equipo_local}|||${p.equipo_visitante}`;
+}
+
+function normalizarBusqueda(texto: string): string {
+  return texto
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .trim();
 }
 
 export default function CrearEquipoPage() {
@@ -62,11 +85,29 @@ export default function CrearEquipoPage() {
   const [partidosSeleccionados, setPartidosSeleccionados] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<string[]>([]);
   const [alineacion, setAlineacion] = useState<string>('4-3-3');
-  const [step, setStep] = useState<'draft' | 'confirm'>('draft');
+  // 'info' (25/09, tercera vuelta): pantalla previa "cómo puntúan los
+  // jugadores" que se ve siempre antes de la selección — pedido de Iñi
+  // "para que la gente se vaya conociéndolo" — con un botón "Entendido" que
+  // lleva a 'draft'. Se muestra en los tres deportes.
+  const [step, setStep] = useState<'info' | 'draft' | 'confirm'>('info');
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
   const [errorEnvio, setErrorEnvio] = useState<string | null>(null);
+
+  // Buscador de nombre de jugador (25/09, tercera vuelta) — "para todos los
+  // deportes... incluir un buscador... que se vaya filtrando según lo que
+  // escribes".
+  const [busqueda, setBusqueda] = useState('');
+
+  // Desplegables por línea (fútbol) — abiertas por defecto, y con un tope de
+  // jugadores visibles hasta pulsar "Mostrar más" (pedido de Iñi, ver
+  // MOSTRAR_TOP_N arriba).
+  const [lineasAbiertas, setLineasAbiertas] = useState<Record<LineaFutbol, boolean>>({ POR: true, DEF: true, MED: true, DEL: true });
+  const [lineasExpandidas, setLineasExpandidas] = useState<Record<LineaFutbol, boolean>>({ POR: false, DEF: false, MED: false, DEL: false });
+
+  // Mismo tope para el listado plano de golf/tenis.
+  const [mostrarTodosFlat, setMostrarTodosFlat] = useState(false);
 
   useEffect(() => {
     let activo = true;
@@ -151,10 +192,21 @@ export default function CrearEquipoPage() {
     return equipos;
   }, [partidos, partidosSeleccionados]);
 
+  const terminoBusqueda = useMemo(() => normalizarBusqueda(busqueda), [busqueda]);
+  const busquedaActiva = terminoBusqueda.length > 0;
+
   const jugadoresFiltrados = useMemo(() => {
-    if (equiposVisibles === null) return jugadores;
-    return jugadores.filter((j) => j.equipo_real && equiposVisibles.has(j.equipo_real));
-  }, [jugadores, equiposVisibles]);
+    const base = equiposVisibles === null ? jugadores : jugadores.filter((j) => j.equipo_real && equiposVisibles.has(j.equipo_real));
+    if (!busquedaActiva) return base;
+    return base.filter((j) => normalizarBusqueda(j.nombre).includes(terminoBusqueda));
+  }, [jugadores, equiposVisibles, busquedaActiva, terminoBusqueda]);
+
+  // Mismo buscador para el listado plano de golf/tenis (no pasa por el
+  // filtro de partidos, que es exclusivo de fútbol).
+  const jugadoresGolfTenisFiltrados = useMemo(() => {
+    if (!busquedaActiva) return jugadores;
+    return jugadores.filter((j) => normalizarBusqueda(j.nombre).includes(terminoBusqueda));
+  }, [jugadores, busquedaActiva, terminoBusqueda]);
 
   function togglePartido(key: string) {
     setPartidosSeleccionados((prev) => {
@@ -278,18 +330,33 @@ export default function CrearEquipoPage() {
       <div style={S.pageFrame}>
         <DraftersHeader saldoLabel={saldoLabel} accountInitials={initials} />
 
-        {step === 'draft' ? (
+        <style jsx>{`
+          .partidos-scroll::-webkit-scrollbar {
+            width: 5px;
+          }
+          .partidos-scroll::-webkit-scrollbar-track {
+            background: transparent;
+          }
+          .partidos-scroll::-webkit-scrollbar-thumb {
+            background: #2a3733;
+            border-radius: 999px;
+          }
+          .partidos-scroll::-webkit-scrollbar-thumb:hover {
+            background: #3ddc84;
+          }
+        `}</style>
+
+        {step === 'info' ? (
+          <PuntuacionInfoScreen deporte={sala.deporte} competicion={sala.competicion} onEntendido={() => setStep('draft')} onVolver={() => router.push(`/salas/${salaId}`)} />
+        ) : step === 'draft' ? (
           <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '20px 20px 24px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '14px 20px 18px' }}>
               <button type="button" onClick={() => router.push(`/salas/${salaId}`)} style={backArrowStyle}>
                 ←
               </button>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#F0B94D' }}>{sala.competicion}</span>
-                <h1 style={{ fontSize: 24, fontWeight: 800, color: S.TEXT }}>Crea tu equipo</h1>
-                <p style={{ fontSize: 13, color: S.MUTED_2 }}>
-                  {isFutbol ? 'Elige la alineación y completa cada línea del campo' : `Elige ${TAMANO_EQUIPO_GOLF_TENIS} jugadores`} dentro de {formatEuros(EQUIPO_PRESUPUESTO)}.
-                </p>
+                <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT }}>Crea tu equipo</h1>
               </div>
 
               <div style={{ position: 'sticky', top: 0, zIndex: 5, background: S.BG, paddingTop: 2, paddingBottom: 6, margin: '0 -20px', paddingLeft: 20, paddingRight: 20 }}>
@@ -313,10 +380,39 @@ export default function CrearEquipoPage() {
                 </div>
               )}
 
+              <div style={{ position: 'relative' }}>
+                <input
+                  type="text"
+                  value={busqueda}
+                  onChange={(e) => setBusqueda(e.target.value)}
+                  placeholder="Buscar jugador por nombre..."
+                  style={{
+                    width: '100%',
+                    fontFamily: "'Manrope', sans-serif",
+                    fontSize: 13,
+                    color: S.TEXT,
+                    background: S.PANEL,
+                    border: `1px solid ${busqueda ? '#3DDC84' : S.BORDER}`,
+                    borderRadius: 10,
+                    padding: '10px 34px 10px 12px',
+                  }}
+                />
+                {busqueda && (
+                  <button
+                    type="button"
+                    onClick={() => setBusqueda('')}
+                    aria-label="Borrar búsqueda"
+                    style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', width: 24, height: 24, border: 'none', background: 'transparent', color: S.MUTED_3, fontSize: 16, cursor: 'pointer' }}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+
               {isFutbol ? (
                 <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                   {partidos.length > 0 && (
-                    <div style={{ flexShrink: 0, width: 90, display: 'flex', flexDirection: 'column', gap: 6, position: 'sticky', top: 128, maxHeight: 'calc(100vh - 160px)', overflowY: 'auto' }}>
+                    <div className="partidos-scroll" style={{ flexShrink: 0, width: 90, display: 'flex', flexDirection: 'column', gap: 6, position: 'sticky', top: 128, maxHeight: 'calc(100vh - 160px)', overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: '#2A3733 transparent' } as React.CSSProperties}>
                       <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3, textAlign: 'center' }}>Partidos</span>
                       <button
                         type="button"
@@ -373,30 +469,63 @@ export default function CrearEquipoPage() {
                     {LINEAS_ORDEN.slice()
                       .reverse()
                       .map((linea) => {
-                        const filas = jugadoresFiltrados.filter((j) => lineaDePosicion(j.posicion) === linea);
-                        if (filas.length === 0) return null;
+                        const filasTodas = jugadoresFiltrados.filter((j) => lineaDePosicion(j.posicion) === linea);
+                        if (filasTodas.length === 0) return null;
+                        const abierta = lineasAbiertas[linea];
+                        const mostrarTodas = busquedaActiva || lineasExpandidas[linea];
+                        const tope = MOSTRAR_TOP_N[linea];
+                        const filas = mostrarTodas ? filasTodas : filasTodas.slice(0, tope);
+                        const restantes = filasTodas.length - filas.length;
                         return (
                           <div key={linea} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                            <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>
-                              {POSICION_LABEL[linea]} · {seleccionadosPorLinea[linea]}/{huecos[linea]}
-                            </span>
-                            {filas.map((j) => (
-                              <PlayerRow key={j.id} jugador={j} selected={selected.includes(j.id)} disabled={!selected.includes(j.id) && seleccionadosPorLinea[linea] >= huecos[linea]} onToggle={() => toggleJugador(j)} />
-                            ))}
+                            <button
+                              type="button"
+                              onClick={() => setLineasAbiertas((prev) => ({ ...prev, [linea]: !prev[linea] }))}
+                              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'transparent', border: 'none', padding: '2px 0', cursor: 'pointer' }}
+                            >
+                              <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>
+                                {POSICION_LABEL_PLURAL[linea]} · {seleccionadosPorLinea[linea]}/{huecos[linea]} · {filasTodas.length}
+                              </span>
+                              <span style={{ fontSize: 11, color: S.MUTED_3 }}>{abierta ? '▾' : '▸'}</span>
+                            </button>
+                            {abierta && (
+                              <>
+                                {filas.map((j) => (
+                                  <PlayerRow key={j.id} jugador={j} selected={selected.includes(j.id)} disabled={!selected.includes(j.id) && seleccionadosPorLinea[linea] >= huecos[linea]} onToggle={() => toggleJugador(j)} />
+                                ))}
+                                {restantes > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setLineasExpandidas((prev) => ({ ...prev, [linea]: true }))}
+                                    style={mostrarMasButtonStyle}
+                                  >
+                                    Mostrar {restantes} más
+                                  </button>
+                                )}
+                              </>
+                            )}
                           </div>
                         );
                       })}
                     {jugadoresFiltrados.length === 0 && (
-                      <p style={{ fontSize: 12, color: S.MUTED_3, margin: 0 }}>Ningún jugador de los partidos marcados.</p>
+                      <p style={{ fontSize: 12, color: S.MUTED_3, margin: 0 }}>{busquedaActiva ? 'Ningún jugador coincide con esa búsqueda.' : 'Ningún jugador de los partidos marcados.'}</p>
                     )}
                   </div>
                 </div>
               ) : (
                 <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                   <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 7 }}>
-                    {jugadores.map((j) => (
+                    {(busquedaActiva || mostrarTodosFlat ? jugadoresGolfTenisFiltrados : jugadoresGolfTenisFiltrados.slice(0, MOSTRAR_TOP_N_FLAT)).map((j) => (
                       <PlayerRow key={j.id} jugador={j} selected={selected.includes(j.id)} disabled={!selected.includes(j.id) && selected.length >= TAMANO_EQUIPO_GOLF_TENIS} onToggle={() => toggleJugador(j)} />
                     ))}
+                    {!busquedaActiva && !mostrarTodosFlat && jugadoresGolfTenisFiltrados.length > MOSTRAR_TOP_N_FLAT && (
+                      <button type="button" onClick={() => setMostrarTodosFlat(true)} style={mostrarMasButtonStyle}>
+                        Mostrar {jugadoresGolfTenisFiltrados.length - MOSTRAR_TOP_N_FLAT} más
+                      </button>
+                    )}
+                    {jugadoresGolfTenisFiltrados.length === 0 && (
+                      <p style={{ fontSize: 12, color: S.MUTED_3, margin: 0 }}>Ningún jugador coincide con esa búsqueda.</p>
+                    )}
                   </div>
 
                   <div style={{ flexShrink: 0, width: 96, display: 'flex', flexDirection: 'column', gap: 6, position: 'sticky', top: 128 }}>
@@ -542,6 +671,45 @@ export default function CrearEquipoPage() {
   );
 }
 
+// Pantalla previa "cómo puntúan los jugadores" (25/09, tercera vuelta) — se
+// ve siempre antes de la selección de jugadores, en los tres deportes, con
+// un botón "Entendido" que lleva al draft. Usa las tablas resumen de
+// lib/puntuaciones.ts (más adelante, cuando ya no haga falta mostrarla
+// siempre, Iñi pidió dejar solo un enlace a esta misma tabla).
+function PuntuacionInfoScreen({ deporte, competicion, onEntendido, onVolver }: { deporte: string; competicion: string; onEntendido: () => void; onVolver: () => void }) {
+  const tablas = tablaPuntuacionPorDeporte(deporte);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '14px 20px 100px' }}>
+      <button type="button" onClick={onVolver} style={backArrowStyle}>
+        ←
+      </button>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#F0B94D' }}>{competicion}</span>
+        <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT }}>Cómo puntúan los jugadores</h1>
+        <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>Un resumen rápido antes de elegir tu equipo.</p>
+      </div>
+
+      {tablas.map((tabla) => (
+        <div key={tabla.titulo} style={{ background: S.PANEL, border: `1px solid ${S.BORDER}`, borderRadius: 12, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 12, color: S.TEXT, marginBottom: 4 }}>{tabla.titulo}</span>
+          {tabla.filas.map((fila) => (
+            <div key={fila.accion} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '4px 0', borderTop: `1px solid ${S.BORDER}` }}>
+              <span style={{ fontSize: 12.5, color: S.MUTED }}>{fila.accion}</span>
+              <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 13, color: '#F0B94D' }}>{fila.puntos}</span>
+            </div>
+          ))}
+        </div>
+      ))}
+
+      <div style={{ position: 'sticky', bottom: 0, padding: '8px 0 12px', background: 'linear-gradient(180deg, rgba(11,15,14,0) 0%, #0B0F0E 40%)' }}>
+        <button type="button" onClick={onEntendido} style={submitButtonStyle(true)}>
+          Entendido, elegir jugadores
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function PlayerRow({ jugador, selected, disabled, onToggle }: { jugador: JugadorRow; selected: boolean; disabled: boolean; onToggle: () => void }) {
   return (
     <a
@@ -594,6 +762,21 @@ function PlayerRow({ jugador, selected, disabled, onToggle }: { jugador: Jugador
 }
 
 const backArrowStyle: React.CSSProperties = { width: 34, height: 34, padding: 0, margin: '0 0 4px', border: 'none', background: 'transparent', color: '#3DDC84', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 20, alignSelf: 'flex-start' };
+
+// Botón "Mostrar N más" bajo cada lista con tope (posiciones de fútbol, y el
+// listado plano de golf/tenis) — pedido de Iñi, 25/09 tercera vuelta.
+const mostrarMasButtonStyle: React.CSSProperties = {
+  fontFamily: "'Manrope', sans-serif",
+  fontWeight: 700,
+  fontSize: 12,
+  color: '#3DDC84',
+  background: 'transparent',
+  border: '1px solid rgba(61,220,132,0.35)',
+  borderRadius: 9,
+  padding: '7px 10px',
+  cursor: 'pointer',
+  textAlign: 'center',
+};
 
 function submitButtonStyle(enabled: boolean): React.CSSProperties {
   return {

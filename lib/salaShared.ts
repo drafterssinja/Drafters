@@ -49,8 +49,39 @@ export function nivelBuyIn(buyIn: number): NivelBuyIn {
   return 'alto';
 }
 
+// Formato de euros (25/09, tercera vuelta): antes siempre mostraba dos
+// decimales ("100000.00 €", sin separador de miles) — pedido de Iñi para el
+// presupuesto de fantasía: "no tiene que haber decimales... falta el punto
+// de separación de los miles". En vez de crear una función aparte solo para
+// el presupuesto, formatEuros se vuelve "inteligente": números enteros
+// (100.000, 5, 20.000...) se muestran sin decimales, y los que de verdad
+// tienen céntimos (4,50 € del desglose de buy-in, por ejemplo) se muestran
+// siempre con los dos decimales — en los dos casos con el punto de miles y
+// la coma decimal españolas (Intl.NumberFormat('es-ES', ...)).
 export function formatEuros(importe: number): string {
-  return `${importe.toFixed(2)} €`;
+  const esEntero = Math.abs(importe - Math.round(importe)) < 0.005;
+  const formateado = new Intl.NumberFormat('es-ES', {
+    minimumFractionDigits: esEntero ? 0 : 2,
+    maximumFractionDigits: esEntero ? 0 : 2,
+  }).format(importe);
+  return `${formateado} €`;
+}
+
+// Comisión de la casa sobre cada inscripción (10%, ya usada en las
+// estadísticas del panel de admin — "Rake ganado (10%)") — centralizada
+// aquí el 25/09 (tercera vuelta) para poder calcular el desglose de buy-in
+// ("4,50 € + 0,50 €") y el bote real (importe que va a premios, sin la
+// comisión) en las pantallas de sala/porra, no solo en las estadísticas.
+export const RAKE_FRACCION = 0.1;
+
+/** Parte de un buy-in que va al bote de premios (90%), redondeada a céntimos. */
+export function parteParaPremios(buyIn: number): number {
+  return Math.round(buyIn * (1 - RAKE_FRACCION) * 100) / 100;
+}
+
+/** Parte de un buy-in que se queda la casa como comisión (10%), redondeada a céntimos. */
+export function parteComision(buyIn: number): number {
+  return Math.round(buyIn * RAKE_FRACCION * 100) / 100;
 }
 
 export function estadoSalaInfo(estado: string, aforo: number | null, signedUp: number): { label: string; color: string } {

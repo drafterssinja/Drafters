@@ -93,9 +93,32 @@
  *         (no solo una esperanza de que la curva salga bien) de que
  *         siempre habrá un equipo completo asequible.
  *
- * Los valores de partida (MÍN=2.500€, TOPE=20.000€, γ=2,0) siguen
+ * Corregido de nuevo el 25/09 (tercera vuelta), tras probar una jornada real
+ * ya con el algoritmo anterior: Iñi pudo montar un equipo de 11 jugadores
+ * "bastante buenos" sin apenas apretar el presupuesto — la corrección previa
+ * (goleros más baratos + curva más pronunciada) resolvió bien los dos
+ * problemas originales, pero dejó el nivel de precios EN GENERAL demasiado
+ * bajo: incluso jugadores bastante buenos (no solo los flojos) quedaban
+ * comprimidos cerca de MÍN por la curva convexa, así que un once entero de
+ * "buenos, sin ser estrellas" salía barato de sobra. Pedido explícito de
+ * Iñi: "los valores... tienen que ser un poquito más caros en general...
+ * que si coges buenos, tengas que coger a malos". Se sube MÍN de 2.500€ a
+ * 3.200€ (+28%) y el TOPE de partida de 20.000€ a 22.000€ (+10%) — sube el
+ * SUELO de precio más que el TECHO, así que el efecto es sobre todo que
+ * los jugadores medios/buenos (no las estrellas, que ya estaban bien
+ * separadas) cuestan más en términos absolutos, apretando el presupuesto de
+ * cualquier equipo con muchos jugadores decentes. La γ de partida (2,0) no
+ * se toca — la separación estrella/resto ya funcionaba bien, el problema
+ * era solo el nivel general. La Regla 3 (once más barato ≤ 50% del
+ * presupuesto) se mantiene tal cual: con MÍN=3.200€, el once más barato
+ * posible (11 × 3.200€ = 35.200€, 35,2%) sigue con margen de sobra por
+ * debajo del 50%, así que la garantía de "siempre se puede completar un
+ * equipo" no corre peligro con la subida.
+ *
+ * Los valores de partida (MÍN=3.200€, TOPE=22.000€, γ=2,0) siguen
  * pendientes de un último ajuste fino con más jornadas reales (ENCARGO,
- * A.8.1) — pero ya corrigen los dos problemas concretos que reportó Iñi.
+ * A.8.1) — pero ya corrigen los tres problemas concretos que ha reportado
+ * Iñi hasta ahora.
  *
  * Caso especial (A.5): un jugador sin valor de mercado (fichaje de última
  * hora, canterano) recibe el precio MEDIANO de su posición en esa jornada,
@@ -108,10 +131,16 @@ import { huecosPorLinea, lineaDePosicion, LineaFutbol } from './salaShared';
 export type PosicionFutbol = 'portero' | 'defensa' | 'centrocampista' | 'delantero';
 
 export const PRECIO_FUTBOL_CONFIG = {
-  /** Precio del jugador con menos nivel (y de cualquiera sin valor de mercado, antes de la mediana). */
-  minimo: 2_500,
-  /** TOPE de partida: lo que cuesta el jugador con más nivel ajustado de la jornada (defensa/centrocampista/delantero). */
-  topeInicial: 20_000,
+  /**
+   * Precio del jugador con menos nivel (y de cualquiera sin valor de
+   * mercado, antes de la mediana). Subido de 2.500€ a 3.200€ el 25/09
+   * (tercera vuelta) — ver cabecera del archivo: el nivel de precios en
+   * general se había quedado demasiado bajo, permitiendo onces de 11
+   * jugadores "bastante buenos" sin apretar el presupuesto.
+   */
+  minimo: 3_200,
+  /** TOPE de partida: lo que cuesta el jugador con más nivel ajustado de la jornada (defensa/centrocampista/delantero). Subido de 20.000€ a 22.000€ el 25/09 (tercera vuelta). */
+  topeInicial: 22_000,
   /** Rango de búsqueda de TOPE, como fracción del presupuesto. */
   topeMinimoFraccion: 0.15,
   topeMaximoFraccion: 0.25,

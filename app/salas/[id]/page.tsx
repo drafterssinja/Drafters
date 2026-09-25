@@ -19,6 +19,9 @@ import {
   inicialesJugador,
   huecosPorLinea,
   lineaDePosicion,
+  closesInLabel,
+  parteParaPremios,
+  parteComision,
   type LineaFutbol,
 } from '@/lib/salaShared';
 
@@ -172,8 +175,13 @@ export default function SalaDetallePage() {
 
   const estadoInfo = estadoSalaInfo(sala.estado, sala.aforo, signedUp);
   const tipoLabel = TIPO_SALA_LABELS[sala.tipo as TipoSala] ?? sala.tipo;
-  const bote = sala.buy_in * signedUp;
+  // Bote real = lo que aporta cada inscripción a premios (90% del buy-in,
+  // sin la comisión de la casa) × inscritos — corregido el 25/09 (tercera
+  // vuelta): antes multiplicaba el buy-in completo, incluyendo el 10% de
+  // comisión, así que el bote mostrado salía inflado un 10% de más.
+  const bote = parteParaPremios(sala.buy_in) * signedUp;
   const tramos = calcularReparto(sala.tipo as TipoSala, sala.aforo, signedUp);
+  const cierraEn = closesInLabel(sala.fecha_limite_inscripcion);
   const isFull = sala.estado === 'completa';
   const isFinalizada = sala.estado === 'finalizada';
   const hasEquipo = !!equipoMio;
@@ -398,12 +406,17 @@ export default function SalaDetallePage() {
 
           {tab === 'info' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <InfoRow label="Buy-in" value={formatEuros(sala.buy_in)} accent />
+              <InfoRow
+                label="Buy-in"
+                value={`${formatEuros(sala.buy_in)} · ${formatEuros(parteParaPremios(sala.buy_in))} + ${formatEuros(parteComision(sala.buy_in))} comisión`}
+                accent
+              />
               <InfoRow label="Tipo de sala" value={tipoLabel} />
               <InfoRow label="Formato" value={tipoLabel} />
               <InfoRow label="Competición" value={sala.competicion} />
               <InfoRow label="Jugadores inscritos" value={`${signedUp}/${capacidadLabel(sala.aforo)}`} />
               <InfoRow label="Reparto de premios" value={repartoResumenLabel(sala.tipo)} />
+              {!isFinalizada && <InfoRow label="Se cierra en" value={cierraEn ?? 'Sin fecha fijada'} />}
             </div>
           )}
 
@@ -417,7 +430,7 @@ export default function SalaDetallePage() {
               {tramos.map((t, i) => (
                 <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '13px 14px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
                   <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14, color: S.TEXT }}>{posicionLabel(t.desde, t.hasta)}</span>
-                  <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 14, color: '#F0B94D' }}>{formatEuros((bote * t.porcentajeCadaUno) / 100)} c/u</span>
+                  <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 14, color: '#F0B94D' }}>{formatEuros((bote * t.porcentajeCadaUno) / 100)}</span>
                 </div>
               ))}
             </div>
