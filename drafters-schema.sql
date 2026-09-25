@@ -915,18 +915,26 @@ drop policy if exists "rankings_mundiales_admin_todo" on public.rankings_mundial
 create policy "rankings_mundiales_admin_todo" on public.rankings_mundiales
   for all using (public.es_admin()) with check (public.es_admin());
 
--- Valor de mercado y cuotas 1x2 de fútbol: mismo caso que rankings_mundiales
--- — datos de trabajo del admin para calcular precios, nunca se muestran tal
--- cual a los usuarios (el resultado ya resuelto sí se ve, en jugadores.precio).
+-- Valor de mercado de fútbol: datos de trabajo del admin para calcular
+-- precios, nunca se muestran tal cual a los usuarios (el resultado ya
+-- resuelto sí se ve, en jugadores.precio) — mismo caso que rankings_mundiales.
 alter table public.cargas_valor_mercado_futbol enable row level security;
 drop policy if exists "cargas_valor_mercado_futbol_admin_todo" on public.cargas_valor_mercado_futbol;
 create policy "cargas_valor_mercado_futbol_admin_todo" on public.cargas_valor_mercado_futbol
   for all using (public.es_admin()) with check (public.es_admin());
 
+-- Cuotas 1x2 de fútbol: a diferencia del valor de mercado, esto SÍ se
+-- muestra a los usuarios (25/09) — el filtro de "partidos de la jornada" en
+-- la pantalla de crear equipo (app/salas/[id]/crear-equipo) lo lee para
+-- pintar la columna de partidos y filtrar la lista de jugadores por equipo.
 alter table public.cuotas_partido_futbol enable row level security;
 drop policy if exists "cuotas_partido_futbol_admin_todo" on public.cuotas_partido_futbol;
 create policy "cuotas_partido_futbol_admin_todo" on public.cuotas_partido_futbol
   for all using (public.es_admin()) with check (public.es_admin());
+
+drop policy if exists "cuotas_partido_futbol_select_publico" on public.cuotas_partido_futbol;
+create policy "cuotas_partido_futbol_select_publico" on public.cuotas_partido_futbol
+  for select using (true);
 
 -- Equipos: cada usuario ve/crea/modifica solo los suyos; el admin ve y
 -- modifica todos (para poder revisar cualquier historial, como pediste).

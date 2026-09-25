@@ -18,11 +18,15 @@ import { formatEuros, inicialesJugador, huecosPorLinea, lineaDePosicion, type Li
 // con estado interno de "paso" (draft/confirm) para no tener que serializar
 // la selección en curso entre dos rutas.
 //
-// Adaptación respecto a la maqueta: la maqueta filtra la lista de fútbol
-// por "partidos de la jornada" (futbolPartidosList) — no existe ese dato en
-// el modelo real (jugadores no tiene un partido/enfrentamiento asociado),
-// así que aquí la lista de fútbol se agrupa por posición en su lugar, que
-// es lo que de verdad limita cada hueco del campo.
+// Adaptación respecto a la maqueta (25/09, ya corregida): la maqueta filtra
+// la lista de fútbol por "partidos de la jornada" (futbolPartidosList) — al
+// principio no existía ese dato en el modelo real, así que la lista se
+// agrupaba solo por posición. Ahora que las cuotas 1X2 de cada jornada se
+// cargan y se guardan en cuotas_partido_futbol (ver "Nuevo torneo o
+// jornada" en /admin), se recupera el filtro de partidos de la maqueta: una
+// columna a la izquierda con los partidos de la jornada para elegir cuáles
+// ver, y la lista de jugadores (agrupada por línea, como antes) a la
+// derecha, filtrada a los equipos de los partidos marcados.
 
 type SalaRow = {
   id: string;
@@ -36,10 +40,15 @@ type SalaRow = {
 };
 
 type JugadorRow = { id: string; nombre: string; posicion: string | null; precio: number; lesionado: boolean; equipo_real: string | null };
+type PartidoRow = { equipo_local: string; equipo_visitante: string; cuota_1: number; cuota_x: number; cuota_2: number };
 
 const AVATAR_POR_LINEA: Record<LineaFutbol, string> = { POR: '#FF7A45', DEF: '#8FB6FF', MED: '#F0B94D', DEL: '#3DDC84' };
 const LINEAS_ORDEN: LineaFutbol[] = ['DEL', 'MED', 'DEF', 'POR'];
 const POSICION_LABEL: Record<LineaFutbol, string> = { POR: 'Portero', DEF: 'Defensa', MED: 'Centrocampista', DEL: 'Delantero' };
+
+function partidoKey(p: { equipo_local: string; equipo_visitante: string }): string {
+  return `${p.equipo_local}|||${p.equipo_visitante}`;
+}
 
 export default function CrearEquipoPage() {
   const router = useRouter();
@@ -49,6 +58,8 @@ export default function CrearEquipoPage() {
   const [perfil, setPerfil] = useState<Perfil | null>(null);
   const [sala, setSala] = useState<SalaRow | null>(null);
   const [jugadores, setJugadores] = useState<JugadorRow[]>([]);
+  const [partidos, setPartidos] = useState<PartidoRow[]>([]);
+  const [partidosSeleccionados, setPartidosSeleccionados] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<string[]>([]);
   const [alineacion, setAlineacion] = useState<string>('4-3-3');
   const [step, setStep] = useState<'draft' | 'confirm'>('draft');
@@ -93,9 +104,12 @@ export default function CrearEquipoPage() {
         return;
       }
 
-      const [{ data: miEquipoData }, { data: jugData }] = await Promise.all([
+      const [{ data: miEquipoData }, { data: jugData }, { data: partidosData }] = await Promise.all([
         supabase.from('equipos').select('id, inscripciones(estado)').eq('sala_id', salaId).eq('usuario_id', session.user.id).maybeSingle(),
         supabase.from('jugadores').select('id,nombre,posicion,precio,lesionado,equipo_real').eq('deporte', salaRow.deporte).eq('competicion', salaRow.competicion).order('precio', { ascending: false }),
+        salaRow.deporte === 'futbol'
+          ? supabase.from('cuotas_partido_futbol').select('equipo_local,equipo_visitante,cuota_1,cuota_x,cuota_2').eq('competicion', salaRow.competicion)
+          : Promise.resolve({ data: [] as PartidoRow[] }),
       ]);
 
       if (!activo) return;
@@ -108,6 +122,7 @@ export default function CrearEquipoPage() {
 
       setSala(salaRow);
       setJugadores((jugData as JugadorRow[]) ?? []);
+      setPartidos((partidosData as PartidoRow[] | null) ?? []);
       setCargando(false);
     }
 
@@ -120,6 +135,35 @@ export default function CrearEquipoPage() {
   const isFutbol = sala?.deporte === 'futbol';
   const huecos = useMemo(() => huecosPorLinea(isFutbol ? alineacion : null), [isFutbol, alineacion]);
   const totalHuecos = huecos.POR + huecos.DEF + huecos.MED + huecos.DEL;
+
+  // Equipos que juegan los partidos marcados en el filtro de la izquierda —
+  // null cuando no hay ninguno marcado ("Todos"), que es como se ve la
+  // plantilla completa de la jornada.
+  const equiposVisibles = useMemo(() => {
+    if (partidosSeleccionados.size === 0) return null;
+    const equipos = new Set<string>();
+    partidos.forEach((p) => {
+      if (partidosSeleccionados.has(partidoKey(p))) {
+        equipos.add(p.equipo_local);
+        equipos.add(p.equipo_visitante);
+      }
+    });
+    return equipos;
+  }, [partidos, partidosSeleccionados]);
+
+  const jugadoresFiltrados = useMemo(() => {
+    if (equiposVisibles === null) return jugadores;
+    return jugadores.filter((j) => j.equipo_real && equiposVisibles.has(j.equipo_real));
+  }, [jugadores, equiposVisibles]);
+
+  function togglePartido(key: string) {
+    setPartidosSeleccionados((prev) => {
+      const siguiente = new Set(prev);
+      if (siguiente.has(key)) siguiente.delete(key);
+      else siguiente.add(key);
+      return siguiente;
+    });
+  }
 
   const jugadoresPorId = useMemo(() => new Map(jugadores.map((j) => [j.id, j])), [jugadores]);
   const seleccionados = selected.map((id) => jugadoresPorId.get(id)).filter((j): j is JugadorRow => !!j);
@@ -270,23 +314,82 @@ export default function CrearEquipoPage() {
               )}
 
               {isFutbol ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {LINEAS_ORDEN.slice()
-                    .reverse()
-                    .map((linea) => {
-                      const filas = jugadores.filter((j) => lineaDePosicion(j.posicion) === linea);
-                      if (filas.length === 0) return null;
-                      return (
-                        <div key={linea} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                          <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>
-                            {POSICION_LABEL[linea]} · {seleccionadosPorLinea[linea]}/{huecos[linea]}
-                          </span>
-                          {filas.map((j) => (
-                            <PlayerRow key={j.id} jugador={j} selected={selected.includes(j.id)} disabled={!selected.includes(j.id) && seleccionadosPorLinea[linea] >= huecos[linea]} onToggle={() => toggleJugador(j)} />
-                          ))}
-                        </div>
-                      );
-                    })}
+                <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                  {partidos.length > 0 && (
+                    <div style={{ flexShrink: 0, width: 90, display: 'flex', flexDirection: 'column', gap: 6, position: 'sticky', top: 128, maxHeight: 'calc(100vh - 160px)', overflowY: 'auto' }}>
+                      <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3, textAlign: 'center' }}>Partidos</span>
+                      <button
+                        type="button"
+                        onClick={() => setPartidosSeleccionados(new Set())}
+                        style={{
+                          fontFamily: "'Barlow Condensed', sans-serif",
+                          fontWeight: 700,
+                          fontSize: 11,
+                          padding: '6px 4px',
+                          borderRadius: 8,
+                          border: `1px solid ${partidosSeleccionados.size === 0 ? '#3DDC84' : S.BORDER}`,
+                          background: partidosSeleccionados.size === 0 ? 'rgba(61,220,132,0.12)' : 'transparent',
+                          color: partidosSeleccionados.size === 0 ? '#3DDC84' : S.MUTED,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Todos
+                      </button>
+                      {partidos.map((p) => {
+                        const key = partidoKey(p);
+                        const activo = partidosSeleccionados.has(key);
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => togglePartido(key)}
+                            style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: 1,
+                              fontFamily: "'Manrope', sans-serif",
+                              fontWeight: 700,
+                              fontSize: 9.5,
+                              lineHeight: 1.25,
+                              padding: '6px 5px',
+                              borderRadius: 8,
+                              textAlign: 'center',
+                              border: `1px solid ${activo ? '#3DDC84' : S.BORDER}`,
+                              background: activo ? 'rgba(61,220,132,0.12)' : S.PANEL,
+                              color: activo ? '#3DDC84' : S.MUTED_2,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <span>{p.equipo_local}</span>
+                            <span style={{ color: S.MUTED_3, fontSize: 8, fontWeight: 600 }}>vs</span>
+                            <span>{p.equipo_visitante}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {LINEAS_ORDEN.slice()
+                      .reverse()
+                      .map((linea) => {
+                        const filas = jugadoresFiltrados.filter((j) => lineaDePosicion(j.posicion) === linea);
+                        if (filas.length === 0) return null;
+                        return (
+                          <div key={linea} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>
+                              {POSICION_LABEL[linea]} · {seleccionadosPorLinea[linea]}/{huecos[linea]}
+                            </span>
+                            {filas.map((j) => (
+                              <PlayerRow key={j.id} jugador={j} selected={selected.includes(j.id)} disabled={!selected.includes(j.id) && seleccionadosPorLinea[linea] >= huecos[linea]} onToggle={() => toggleJugador(j)} />
+                            ))}
+                          </div>
+                        );
+                      })}
+                    {jugadoresFiltrados.length === 0 && (
+                      <p style={{ fontSize: 12, color: S.MUTED_3, margin: 0 }}>Ningún jugador de los partidos marcados.</p>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>

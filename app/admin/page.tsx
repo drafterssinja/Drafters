@@ -7,7 +7,7 @@ import { supabase, Perfil } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
 import { parseListaJugadores, JugadorParseado } from '@/lib/parsePlayerList';
-import { precioPorRanking } from '@/lib/pricing';
+import { precioPorRanking, precioFutbolPorPosicion } from '@/lib/pricing';
 import { parsearListadoCuotas } from '@/lib/parsearCuotas';
 import { calcularPreciosPorCuota, cuotaValida } from '@/lib/precioPorCuota';
 import { generarSalasParaTorneo } from '@/lib/tiposDeSala';
@@ -72,11 +72,37 @@ const LIGA_FUTBOL_PREFIJO: Record<LigaFutbol, string> = { la_liga: 'La Liga', pr
 
 type JugadorFutbolDb = { id: string; nombre: string; equipo_real: string | null; posicion: PosicionFutbol | null; valor_mercado: number | null; competicion: string };
 
-type FilaValorEmparejada = { jugadorId: string; nombreDb: string; equipoDb: string; equipoOrigen: string; jugadorOrigen: string; valor: number; probabilidadTitular: number | null };
-type FilaValorNoEmparejada = FilaValorMercado & { motivo: string };
+// 25/09: ya no hace falta ninguna API para tener el listado de jugadores de
+// fútbol — este cargador de valores de mercado es ahora la única fuente
+// (trae también la posición, ver lib/parsearValoresMercado.ts), así que
+// tiene que poder CREAR jugadores nuevos además de actualizar el valor de
+// los que ya existan. "Actualizados" son los que ya había (mismo equipo +
+// nombre, con posible reescritura de equipo vía lib/aliasEquipos.ts);
+// "nuevos" son altas (fichaje no visto antes, o la primera carga de la
+// competición entera, cuando `jugadores` está vacía y no hay nada contra
+// qué emparejar todavía).
+type FilaValorActualizada = {
+  jugadorId: string;
+  nombreDb: string;
+  equipoDb: string;
+  equipoOrigen: string;
+  jugadorOrigen: string;
+  posicion: PosicionFutbol;
+  valor: number;
+  probabilidadTitular: number | null;
+};
+type FilaValorNueva = {
+  equipo: string;
+  jugador: string;
+  posicion: PosicionFutbol;
+  valor: number;
+  probabilidadTitular: number | null;
+};
+type FilaValorError = FilaValorMercado & { motivo: string };
 type PreviewValorMercado = {
-  emparejados: FilaValorEmparejada[];
-  noEmparejados: FilaValorNoEmparejada[];
+  actualizados: FilaValorActualizada[];
+  nuevos: FilaValorNueva[];
+  errores: FilaValorError[];
   sinValorEnPlantilla: { id: string; nombre: string; equipo: string | null }[];
 };
 
@@ -137,6 +163,11 @@ export default function AdminPage() {
   // cada tipo/buy-in (y la porra, en golf) — así que este formulario se deja
   // oculto de primeras, igual que las listas de mesas/jugadores de abajo.
   const [mostrarCrearMesa, setMostrarCrearMesa] = useState(false);
+  // Sincronización automática de fútbol por API (football-data.org): aparcada
+  // a petición de Iñi el 25/09 (no funcionaba bien y ya no hace falta, la
+  // jornada se crea ahora a mano en "Nuevo torneo o jornada") — se deja el
+  // botón por si hiciera falta alguna vez, pero oculto de entrada.
+  const [mostrarSyncFutbol, setMostrarSyncFutbol] = useState(false);
 
   const [filtroDeporte, setFiltroDeporte] = useState<string>('todos');
   const [filtroTipoSala, setFiltroTipoSala] = useState<string>('todos');
@@ -187,10 +218,15 @@ export default function AdminPage() {
   const [resultadoValorMercado, setResultadoValorMercado] = useState<string | null>(null);
   const [errorValorMercado, setErrorValorMercado] = useState<string | null>(null);
 
-  // Cuotas 1X2 de la jornada de fútbol (ENCARGO A.4) — calcula y guarda el
-  // precio final de cada jugador de esa jornada, a partir del valor de
-  // mercado ya cargado más el ajuste por partido.
-  const [competicionCuotas, setCompeticionCuotas] = useState('');
+  // Cuotas 1X2 de la jornada de fútbol (25/09: se pegan ahora como parte de
+  // "Nuevo torneo o jornada", más abajo, en vez de en un apartado aparte —
+  // calculan y guardan el precio final de cada jugador de esa jornada, a
+  // partir del valor de mercado ya cargado más el ajuste por partido, y la
+  // jornada ya no se elige de una lista de jornadas sincronizadas antes: se
+  // crea aquí mismo, con el nombre que le da Iñi (torneoNombre) sobre la
+  // liga elegida (ligaJornadaFutbol) — ver previsualizarJornadaFutbol() /
+  // confirmarJornadaFutbol()).
+  const [ligaJornadaFutbol, setLigaJornadaFutbol] = useState<LigaFutbol>('la_liga');
   const [textoCuotas, setTextoCuotas] = useState('');
   const [calculandoPreviewCuotas, setCalculandoPreviewCuotas] = useState(false);
   const [previewCuotas, setPreviewCuotas] = useState<PreviewCuotasFutbol | null>(null);
@@ -199,9 +235,12 @@ export default function AdminPage() {
   const [resultadoCuotas, setResultadoCuotas] = useState<string | null>(null);
   const [errorCuotas, setErrorCuotas] = useState<string | null>(null);
 
-  // Automatización: torneo de golf/tenis pegado a mano (sin API disponible)
+  // Automatización: torneo de golf/tenis, o jornada de fútbol, pegado a mano
+  // (25/09: fútbol se ha unido a este mismo panel — antes de esa fecha solo
+  // admitía golf/tenis, y fútbol se sincronizaba solo por API — ver
+  // "Automatizar jornada de fútbol", ahora aparcado más abajo).
   const [torneoNombre, setTorneoNombre] = useState('');
-  const [torneoDeporte, setTorneoDeporte] = useState<'golf' | 'tenis'>('golf');
+  const [torneoDeporte, setTorneoDeporte] = useState<'futbol' | 'golf' | 'tenis'>('futbol');
   const [torneoTexto, setTorneoTexto] = useState('');
   const [torneoFechaLimite, setTorneoFechaLimite] = useState('');
   // Checks separados para crear mesas/porra al importar (pedido de Iñi,
@@ -287,21 +326,6 @@ export default function AdminPage() {
     });
     return puestos;
   }, [previewJugadores, mapaRankingActual]);
-
-  // Jornadas de fútbol ya sincronizadas (para el desplegable del cargador de
-  // cuotas 1X2) — mismo valor que competicion en jugadores/salas, más
-  // reciente primero.
-  const competicionesFutbolDisponibles = useMemo(() => {
-    const vistos = new Set<string>();
-    const lista: string[] = [];
-    for (const j of jugadores) {
-      if (j.deporte !== 'futbol') continue;
-      if (vistos.has(j.competicion)) continue;
-      vistos.add(j.competicion);
-      lista.push(j.competicion);
-    }
-    return lista.sort().reverse();
-  }, [jugadores]);
 
   async function cargarTodo() {
     const [{ data: salasData }, { data: porrasData }, { data: jugadoresData }, { count }, { data: inscripcionesData, error: inscripcionesError }, { data: movimientosData, error: movimientosError }] =
@@ -488,7 +512,6 @@ export default function AdminPage() {
     setCalculandoPreviewValor(true);
 
     const { filas, avisos } = parsearValoresMercado(textoValorMercado);
-    setAvisosValorMercado(avisos);
 
     const prefijo = LIGA_FUTBOL_PREFIJO[ligaValorMercado];
     const { data, error: fetchError } = await supabase
@@ -504,135 +527,190 @@ export default function AdminPage() {
       return;
     }
 
+    // Ya no hace falta ninguna sincronización previa por API: si esta liga
+    // no tiene todavía ningún jugador guardado, es la primera carga — todas
+    // las filas pegadas se crean como jugadores nuevos (25/09).
     const jugadoresDb = (data as JugadorFutbolDb[] | null) ?? [];
-    if (jugadoresDb.length === 0) {
-      setErrorValorMercado(
-        `No hay ningún jugador de ${LIGA_FUTBOL_LABEL[ligaValorMercado]} sincronizado todavía — sincroniza primero una jornada de esta competición ("Automatizar jornada de fútbol", más arriba).`
-      );
-      return;
-    }
-
     const equiposCandidatos = Array.from(new Set(jugadoresDb.map((j) => j.equipo_real).filter((e): e is string => !!e)));
 
-    const emparejados: FilaValorEmparejada[] = [];
-    const noEmparejados: FilaValorNoEmparejada[] = [];
+    const actualizados: FilaValorActualizada[] = [];
+    const nuevos: FilaValorNueva[] = [];
+    const errores: FilaValorError[] = [];
     const usados = new Set<string>();
+    const avisosPosicion: string[] = [];
 
     for (const fila of filas) {
-      const equipoDb = emparejarEquipo(fila.equipo, equiposCandidatos);
-      if (!equipoDb) {
-        noEmparejados.push({ ...fila, motivo: `Equipo "${fila.equipo}" no reconocido en ${LIGA_FUTBOL_LABEL[ligaValorMercado]}` });
+      if (!fila.posicion) {
+        errores.push({ ...fila, motivo: `Posición "${fila.posicionOrigen}" no reconocida — usa portero/defensa/centrocampista/delantero.` });
         continue;
       }
-      const jugadoresDelEquipo = jugadoresDb.filter((j) => j.equipo_real === equipoDb);
-      const candidatosNombre = jugadoresDelEquipo.map((j) => j.nombre);
+      // Si el equipo ya se conocía (partidas anteriores de esta liga), se
+      // emparejan nombres distintos del mismo equipo real (lib/aliasEquipos.ts,
+      // p.ej. "Atlético" = "Club Atlético de Madrid"). Si el equipo es nuevo
+      // del todo (primera carga de la liga, o un equipo recién visto), se da
+      // por bueno tal cual está escrito — a partir de ahora es su nombre
+      // canónico.
+      const equipoDb = equiposCandidatos.length > 0 ? emparejarEquipo(fila.equipo, equiposCandidatos) : null;
+      const equipoFinal = equipoDb ?? fila.equipo;
+
+      const jugadoresDelEquipo = equipoDb ? jugadoresDb.filter((j) => j.equipo_real === equipoDb) : [];
       const nombreNormalizado = normalizarNombre(fila.jugador);
       const apodoNormalizado = fila.apodo ? normalizarNombre(fila.apodo) : null;
       let jugadorDb = jugadoresDelEquipo.find((j) => normalizarNombre(j.nombre) === nombreNormalizado);
       if (!jugadorDb && apodoNormalizado) {
         jugadorDb = jugadoresDelEquipo.find((j) => normalizarNombre(j.nombre) === apodoNormalizado);
       }
-      if (!jugadorDb) {
-        noEmparejados.push({ ...fila, motivo: `"${fila.jugador}" no está en la plantilla de ${equipoDb} (¿fichaje reciente, o nombre distinto? candidatos: ${candidatosNombre.join(', ') || 'ninguno'})` });
-        continue;
+
+      if (jugadorDb) {
+        actualizados.push({
+          jugadorId: jugadorDb.id,
+          nombreDb: jugadorDb.nombre,
+          equipoDb: equipoFinal,
+          equipoOrigen: fila.equipo,
+          jugadorOrigen: fila.jugador,
+          posicion: fila.posicion,
+          valor: fila.valor,
+          probabilidadTitular: fila.probabilidadTitular,
+        });
+        usados.add(jugadorDb.id);
+      } else {
+        nuevos.push({
+          equipo: equipoFinal,
+          jugador: fila.jugador,
+          posicion: fila.posicion,
+          valor: fila.valor,
+          probabilidadTitular: fila.probabilidadTitular,
+        });
       }
-      emparejados.push({
-        jugadorId: jugadorDb.id,
-        nombreDb: jugadorDb.nombre,
-        equipoDb,
-        equipoOrigen: fila.equipo,
-        jugadorOrigen: fila.jugador,
-        valor: fila.valor,
-        probabilidadTitular: fila.probabilidadTitular,
-      });
-      usados.add(jugadorDb.id);
     }
 
     const sinValorEnPlantilla = jugadoresDb.filter((j) => !usados.has(j.id)).map((j) => ({ id: j.id, nombre: j.nombre, equipo: j.equipo_real }));
 
-    setPreviewValorMercado({ emparejados, noEmparejados, sinValorEnPlantilla });
+    setAvisosValorMercado([...avisos, ...avisosPosicion]);
+    setPreviewValorMercado({ actualizados, nuevos, errores, sinValorEnPlantilla });
   }
 
   async function guardarValorMercado() {
-    if (!previewValorMercado || previewValorMercado.emparejados.length === 0) return;
+    if (!previewValorMercado || (previewValorMercado.actualizados.length === 0 && previewValorMercado.nuevos.length === 0)) return;
     setGuardandoValorMercado(true);
     setErrorValorMercado(null);
     setResultadoValorMercado(null);
 
-    const { emparejados } = previewValorMercado;
+    const { actualizados, nuevos } = previewValorMercado;
 
-    const { error: errorValores } = await supabase
-      .from('jugadores')
-      .upsert(emparejados.map((f) => ({ id: f.jugadorId, valor_mercado: f.valor })), { onConflict: 'id' });
-
-    if (errorValores) {
-      setGuardandoValorMercado(false);
-      setErrorValorMercado('No se han podido guardar los valores. Inténtalo de nuevo.');
-      return;
+    if (actualizados.length > 0) {
+      const { error: errorValores } = await supabase.from('jugadores').upsert(
+        actualizados.map((f) => ({ id: f.jugadorId, valor_mercado: f.valor, posicion: f.posicion, equipo_real: f.equipoDb })),
+        { onConflict: 'id' }
+      );
+      if (errorValores) {
+        setGuardandoValorMercado(false);
+        setErrorValorMercado('No se han podido guardar los valores. Inténtalo de nuevo.');
+        return;
+      }
+      const conProbabilidad = actualizados.filter((f) => f.probabilidadTitular !== null);
+      if (conProbabilidad.length > 0) {
+        await supabase
+          .from('jugadores')
+          .upsert(conProbabilidad.map((f) => ({ id: f.jugadorId, probabilidad_titular: f.probabilidadTitular })), { onConflict: 'id' });
+      }
     }
 
-    const conProbabilidad = emparejados.filter((f) => f.probabilidadTitular !== null);
-    if (conProbabilidad.length > 0) {
-      await supabase
-        .from('jugadores')
-        .upsert(conProbabilidad.map((f) => ({ id: f.jugadorId, probabilidad_titular: f.probabilidadTitular })), { onConflict: 'id' });
+    if (nuevos.length > 0) {
+      const { error: errorNuevos } = await supabase.from('jugadores').insert(
+        nuevos.map((f) => ({
+          nombre: f.jugador,
+          deporte: 'futbol',
+          // Etiqueta de partida (sin jornada todavía) — al crear una jornada
+          // para esta liga (ver "Nuevo torneo o jornada" más abajo) se
+          // sustituye por "<Liga> - <nombre de la jornada>" para los
+          // jugadores cuyo equipo juegue esa jornada.
+          competicion: LIGA_FUTBOL_PREFIJO[ligaValorMercado],
+          equipo_real: f.equipo,
+          posicion: f.posicion,
+          valor_mercado: f.valor,
+          probabilidad_titular: f.probabilidadTitular,
+          precio: precioFutbolPorPosicion(f.posicion),
+        }))
+      );
+      if (errorNuevos) {
+        setGuardandoValorMercado(false);
+        setErrorValorMercado('Los valores existentes se han guardado, pero no se han podido crear los jugadores nuevos. Inténtalo de nuevo.');
+        return;
+      }
     }
 
+    const totalGuardados = actualizados.length + nuevos.length;
     await supabase
       .from('cargas_valor_mercado_futbol')
-      .upsert({ liga: ligaValorMercado, cargado_en: new Date().toISOString(), jugadores_actualizados: emparejados.length }, { onConflict: 'liga' });
+      .upsert({ liga: ligaValorMercado, cargado_en: new Date().toISOString(), jugadores_actualizados: totalGuardados }, { onConflict: 'liga' });
 
     setGuardandoValorMercado(false);
-    setResultadoValorMercado(`Valores de ${LIGA_FUTBOL_LABEL[ligaValorMercado]} actualizados: ${emparejados.length} jugadores.`);
+    setResultadoValorMercado(
+      `Valores de ${LIGA_FUTBOL_LABEL[ligaValorMercado]} guardados: ${actualizados.length} actualizados, ${nuevos.length} jugadores nuevos.`
+    );
     setTextoValorMercado('');
     setPreviewValorMercado(null);
     setAvisosValorMercado([]);
     await cargarCargasValorMercado();
+    await cargarTodo();
   }
 
-  // --- Cuotas 1X2 de la jornada de fútbol (ENCARGO A.4) ---
+  // --- Nueva jornada de fútbol (25/09: ya no depende de football-data.org —
+  // Iñi le pone él mismo el nombre a la jornada, sobre la liga elegida, y
+  // pega las cuotas 1X2 de sus partidos; eso calcula el precio final de cada
+  // jugador de esos equipos a partir del valor de mercado ya cargado (ver
+  // "Valor de mercado de fútbol") y, al confirmar, abre las mesas — mismo
+  // papel que "Nuevo torneo" cumple para golf/tenis. Ver confirmarJornadaFutbol()
+  // y la rama torneoDeporte === 'futbol' de "Nuevo torneo o jornada" en el JSX. ---
 
-  async function previsualizarCuotas() {
+  function nombreJornadaFutbolCompleto() {
+    return `${LIGA_FUTBOL_PREFIJO[ligaJornadaFutbol]} - ${torneoNombre.trim()}`;
+  }
+
+  async function previsualizarJornadaFutbol() {
     setResultadoCuotas(null);
     setErrorCuotas(null);
     setPreviewCuotas(null);
-    if (!competicionCuotas) {
-      setErrorCuotas('Elige primero de qué jornada son estas cuotas.');
+    if (!torneoNombre.trim()) {
+      setErrorCuotas('Ponle primero un nombre a la jornada (p.ej. "Jornada 9").');
       return;
     }
     setCalculandoPreviewCuotas(true);
 
     const { partidos, avisos } = parsearCuotasPartidosFutbol(textoCuotas);
 
+    // Todos los jugadores de esta liga con valor de mercado ya cargado (no
+    // solo los de una jornada concreta — la jornada todavía no existe, se
+    // crea al confirmar). Los equipos que no aparezcan en las cuotas pegadas
+    // simplemente no entran en esta jornada — se quedan como estaban.
+    const prefijo = LIGA_FUTBOL_PREFIJO[ligaJornadaFutbol];
     const { data, error: fetchError } = await supabase
       .from('jugadores')
       .select('id, nombre, equipo_real, posicion, valor_mercado, competicion')
       .eq('deporte', 'futbol')
-      .eq('competicion', competicionCuotas);
+      .ilike('competicion', `${prefijo}%`);
 
     setCalculandoPreviewCuotas(false);
 
     if (fetchError) {
-      setErrorCuotas('No se han podido cargar los jugadores de esta jornada. Inténtalo de nuevo.');
+      setErrorCuotas('No se han podido cargar los jugadores de esta liga. Inténtalo de nuevo.');
       return;
     }
 
-    const jugadoresDb = (data as JugadorFutbolDb[] | null) ?? [];
-    if (jugadoresDb.length === 0) {
-      setErrorCuotas('No hay jugadores sincronizados para esta jornada.');
+    const jugadoresLiga = (data as JugadorFutbolDb[] | null) ?? [];
+    if (jugadoresLiga.length === 0) {
+      setErrorCuotas(`Todavía no hay ningún jugador de ${LIGA_FUTBOL_LABEL[ligaJornadaFutbol]} cargado — pega antes su valor de mercado ("Valor de mercado de fútbol", más arriba).`);
       return;
     }
 
-    const equiposDeLaJornada = Array.from(new Set(jugadoresDb.map((j) => j.equipo_real).filter((e): e is string => !!e)));
+    const equiposDeLaLiga = Array.from(new Set(jugadoresLiga.map((j) => j.equipo_real).filter((e): e is string => !!e)));
 
-    // Emparejar cada línea pegada contra los equipos reales de ESTA jornada
-    // (no toda la competición — así "Madrid" en una jornada sin Atlético ni
-    // Rayo solo puede ser el Real Madrid, sin ambigüedad).
     const partidosResueltos: { equipoLocal: string; equipoVisitante: string; cuota1: number; cuotaX: number; cuota2: number }[] = [];
     const partidosNoEmparejados: string[] = [];
     for (const p of partidos) {
-      const local = emparejarEquipo(p.equipoLocal, equiposDeLaJornada);
-      const visitante = emparejarEquipo(p.equipoVisitante, equiposDeLaJornada);
+      const local = emparejarEquipo(p.equipoLocal, equiposDeLaLiga);
+      const visitante = emparejarEquipo(p.equipoVisitante, equiposDeLaLiga);
       if (!local || !visitante) {
         partidosNoEmparejados.push(`${p.equipoLocal} - ${p.equipoVisitante}${!local ? ` (no se reconoce "${p.equipoLocal}")` : ''}${!visitante ? ` (no se reconoce "${p.equipoVisitante}")` : ''}`);
         continue;
@@ -640,8 +718,16 @@ export default function AdminPage() {
       partidosResueltos.push({ equipoLocal: local, equipoVisitante: visitante, cuota1: p.cuota1, cuotaX: p.cuotaX, cuota2: p.cuota2 });
     }
 
-    const equiposConCuota = new Set(partidosResueltos.flatMap((p) => [p.equipoLocal, p.equipoVisitante]));
-    const partidosSinCuota = equiposDeLaJornada.filter((e) => !equiposConCuota.has(e));
+    // Solo entran en esta jornada los jugadores cuyo equipo aparece en un
+    // partido con cuota reconocida — el resto de la plantilla de la liga se
+    // queda fuera (no se les toca el precio ni la competición).
+    const equiposDeLaJornada = new Set(partidosResueltos.flatMap((p) => [p.equipoLocal, p.equipoVisitante]));
+    const jugadoresDb = jugadoresLiga.filter((j) => j.equipo_real && equiposDeLaJornada.has(j.equipo_real));
+
+    if (jugadoresDb.length === 0) {
+      setErrorCuotas('Ninguno de los equipos de las cuotas pegadas se ha podido emparejar con jugadores ya cargados de esta liga — revisa los nombres de equipo.');
+      return;
+    }
 
     const fuerzaEquipo = fuerzaPorEquipo(partidosResueltos);
 
@@ -665,7 +751,7 @@ export default function AdminPage() {
     setAvisosCuotasFutbol(avisosTotales);
     setPreviewCuotas({
       precios,
-      partidosSinCuota,
+      partidosSinCuota: [], // ya no aplica: solo entran equipos con cuota, ver partidosNoEmparejados para lo que sí faltó
       partidosNoEmparejados,
       topeUsado: resultado.topeUsado,
       gammaUsado: resultado.gammaUsado,
@@ -673,14 +759,22 @@ export default function AdminPage() {
     });
   }
 
-  async function guardarCuotas() {
+  async function confirmarJornadaFutbol() {
     if (!previewCuotas || previewCuotas.precios.length === 0) return;
     setGuardandoCuotas(true);
     setErrorCuotas(null);
     setResultadoCuotas(null);
 
+    const nombreJornada = nombreJornadaFutbolCompleto();
+
+    // Fija el precio, marca la jornada (competicion) de cada jugador que
+    // juega esta jornada, y le pone al día su equipo (por si vino de un
+    // alias distinto). Antes de esto estos jugadores podían pertenecer a la
+    // jornada anterior de la misma liga (o a ninguna, si es su primera
+    // jornada) — sustituye ese valor sin más, igual que hacía la
+    // sincronización automática por API.
     const { error: errorPrecios } = await supabase.from('jugadores').upsert(
-      previewCuotas.precios.map((p) => ({ id: p.id, precio: p.precio, valor_a_revisar: p.sinValor })),
+      previewCuotas.precios.map((p) => ({ id: p.id, precio: p.precio, valor_a_revisar: p.sinValor, competicion: nombreJornada })),
       { onConflict: 'id' }
     );
 
@@ -697,7 +791,7 @@ export default function AdminPage() {
         const local = emparejarEquipo(p.equipoLocal, equiposDeLaJornada);
         const visitante = emparejarEquipo(p.equipoVisitante, equiposDeLaJornada);
         if (!local || !visitante) return null;
-        return { competicion: competicionCuotas, equipo_local: local, equipo_visitante: visitante, cuota_1: p.cuota1, cuota_x: p.cuotaX, cuota_2: p.cuota2 };
+        return { competicion: nombreJornada, equipo_local: local, equipo_visitante: visitante, cuota_1: p.cuota1, cuota_x: p.cuotaX, cuota_2: p.cuota2 };
       })
       .filter((f): f is NonNullable<typeof f> => f !== null);
 
@@ -705,9 +799,31 @@ export default function AdminPage() {
       await supabase.from('cuotas_partido_futbol').upsert(filasCuotas, { onConflict: 'competicion,equipo_local,equipo_visitante' });
     }
 
+    // Igual que al abrir un torneo de golf/tenis: crea las mesas de esta
+    // jornada si todavía no existían (nunca duplica si se confirma dos
+    // veces por error).
+    let salasCreadas = 0;
+    if (crearMesas) {
+      const fechaLimiteIso = torneoFechaLimite ? new Date(torneoFechaLimite).toISOString() : null;
+      const { count: salasExistentes } = await supabase
+        .from('salas')
+        .select('id', { count: 'exact', head: true })
+        .eq('competicion', nombreJornada);
+      if (!salasExistentes) {
+        const nuevasSalas = generarSalasParaTorneo({ competicionLabel: nombreJornada, deporte: 'futbol', fechaLimiteIso });
+        const { error: salasError } = await supabase.from('salas').insert(nuevasSalas);
+        if (!salasError) salasCreadas = nuevasSalas.length;
+      }
+    }
+
     setGuardandoCuotas(false);
-    setResultadoCuotas(`Precios de ${competicionCuotas} actualizados: ${previewCuotas.precios.length} jugadores (TOPE ${previewCuotas.topeUsado} €, γ ${previewCuotas.gammaUsado}).`);
+    setResultadoCuotas(
+      `"${nombreJornada}" creada: ${previewCuotas.precios.length} jugadores con precio (TOPE ${previewCuotas.topeUsado} €, γ ${previewCuotas.gammaUsado}).` +
+        (crearMesas ? ` ${salasCreadas} salas nuevas creadas.` : ' Mesas de Drafters no marcadas para crear.')
+    );
     setTextoCuotas('');
+    setTorneoNombre('');
+    setTorneoFechaLimite('');
     setPreviewCuotas(null);
     setAvisosCuotasFutbol([]);
     await cargarTodo();
@@ -1186,13 +1302,42 @@ export default function AdminPage() {
           {error && <p style={S.errorText}>{error}</p>}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <span style={S.sectionLabel}>Automatizar jornada de fútbol</span>
+            <button
+              type="button"
+              onClick={() => setMostrarSyncFutbol((v) => !v)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+                background: 'transparent',
+                border: 'none',
+                padding: 0,
+                cursor: 'pointer',
+                textAlign: 'left',
+              }}
+            >
+              <span style={S.sectionLabel}>Automatizar jornada de fútbol (aparcado)</span>
+              <span
+                style={{
+                  fontSize: 13,
+                  color: S.MUTED_2,
+                  transform: mostrarSyncFutbol ? 'rotate(180deg)' : 'rotate(0deg)',
+                  transition: 'transform 0.15s ease',
+                  flexShrink: 0,
+                }}
+              >
+                ▾
+              </span>
+            </button>
+            {mostrarSyncFutbol && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 14 }}>
               <p style={{ fontSize: 12.5, color: S.MUTED_2, margin: 0, lineHeight: 1.5 }}>
                 Trae la próxima jornada real de La Liga, Premier League y Champions League (football-data.org), sincroniza
                 los jugadores de los equipos que juegan, fija la fecha límite de inscripción al inicio del primer
                 partido y abre 2 salas de cada variante (Doble o Nada, Triple o Nada, Oro y Plata, Tridente) más el
-                Maratón, si esa jornada no las tenía ya.
+                Maratón, si esa jornada no las tenía ya. De momento no se usa — la jornada se crea a mano en
+                &quot;Nuevo torneo o jornada&quot;, más abajo.
               </p>
               <button
                 type="button"
@@ -1216,6 +1361,7 @@ export default function AdminPage() {
                 </div>
               )}
             </div>
+            )}
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1242,14 +1388,18 @@ export default function AdminPage() {
               </span>
 
               <div style={S.field}>
-                <span style={S.label}>Tabla de valores pegada</span>
+                <span style={S.label}>Tabla de valores pegada (Equipo · Jugador · Posición · Valor · % titular opcional)</span>
                 <textarea
                   value={textoValorMercado}
                   onChange={(e) => setTextoValorMercado(e.target.value)}
-                  placeholder={'Barcelona\tLamine Yamal\t158.927.883\nReal Madrid\tKylian Mbappé\t153.400.000\nSevilla\tRafa Garrido (Rafita)\t1.200.000'}
+                  placeholder={'Barcelona\tLamine Yamal\tDelantero\t158.927.883\nReal Madrid\tKylian Mbappé\tDelantero\t153.400.000\nSevilla\tRafa Garrido (Rafita)\tDefensa\t1.200.000\t62%'}
                   rows={6}
                   style={{ ...S.input, fontFamily: 'monospace', fontSize: 12.5, resize: 'vertical' }}
                 />
+                <span style={{ fontSize: 11, color: S.MUTED_3 }}>
+                  Posición: portero/defensa/centrocampista/delantero (también valen POR/DEF/MED/DEL). No hace falta haber
+                  sincronizado nada antes — si un jugador o un equipo no existía todavía, se crea al guardar.
+                </span>
               </div>
               <button
                 type="button"
@@ -1272,25 +1422,41 @@ export default function AdminPage() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     <span style={{ fontSize: 12, color: S.TEXT, fontWeight: 600 }}>
-                      Emparejados: {previewValorMercado.emparejados.length}
+                      Se actualizan: {previewValorMercado.actualizados.length}
                     </span>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 200, overflowY: 'auto' }}>
-                      {previewValorMercado.emparejados.map((f, i) => (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 180, overflowY: 'auto' }}>
+                      {previewValorMercado.actualizados.map((f, i) => (
                         <div key={i} style={{ fontSize: 11.5, color: S.MUTED_2 }}>
-                          {f.nombreDb} <span style={{ color: S.MUTED_3 }}>({f.equipoDb})</span> — {f.valor.toLocaleString('es-ES')} €
+                          {f.nombreDb} <span style={{ color: S.MUTED_3 }}>({f.equipoDb} · {f.posicion})</span> — {f.valor.toLocaleString('es-ES')} €
                           {f.probabilidadTitular !== null ? ` · ${f.probabilidadTitular}% titular` : ''}
                         </div>
                       ))}
                     </div>
                   </div>
 
-                  {previewValorMercado.noEmparejados.length > 0 && (
+                  {previewValorMercado.nuevos.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <span style={{ fontSize: 12, color: '#F0B94D', fontWeight: 600 }}>
+                        Se crean como jugadores nuevos: {previewValorMercado.nuevos.length} (revisa que el equipo esté bien escrito, sobre todo si ya tenías otros jugadores de ese mismo equipo)
+                      </span>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 180, overflowY: 'auto' }}>
+                        {previewValorMercado.nuevos.map((f, i) => (
+                          <div key={i} style={{ fontSize: 11.5, color: S.MUTED_2 }}>
+                            {f.jugador} <span style={{ color: S.MUTED_3 }}>({f.equipo} · {f.posicion})</span> — {f.valor.toLocaleString('es-ES')} €
+                            {f.probabilidadTitular !== null ? ` · ${f.probabilidadTitular}% titular` : ''}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {previewValorMercado.errores.length > 0 && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                       <span style={{ fontSize: 12, color: S.ERROR, fontWeight: 600 }}>
-                        No emparejados: {previewValorMercado.noEmparejados.length} (corrígelos en el texto pegado y vuelve a previsualizar)
+                        Con error: {previewValorMercado.errores.length} (corrígelos en el texto pegado y vuelve a previsualizar — no se guardan)
                       </span>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 160, overflowY: 'auto' }}>
-                        {previewValorMercado.noEmparejados.map((f, i) => (
+                        {previewValorMercado.errores.map((f, i) => (
                           <div key={i} style={{ fontSize: 11.5, color: S.MUTED_2 }}>
                             {f.equipo} — {f.jugador}{f.apodo ? ` (${f.apodo})` : ''}: <span style={{ color: S.MUTED_3 }}>{f.motivo}</span>
                           </div>
@@ -1302,7 +1468,7 @@ export default function AdminPage() {
                   {previewValorMercado.sinValorEnPlantilla.length > 0 && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                       <span style={{ fontSize: 12, color: S.MUTED_2, fontWeight: 600 }}>
-                        Jugadores de la plantilla sin valor en esta tabla: {previewValorMercado.sinValorEnPlantilla.length}
+                        Jugadores ya guardados que no aparecen en esta tabla: {previewValorMercado.sinValorEnPlantilla.length} (conservan su valor anterior)
                       </span>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 120, overflowY: 'auto' }}>
                         {previewValorMercado.sinValorEnPlantilla.map((j) => (
@@ -1315,111 +1481,17 @@ export default function AdminPage() {
                   <button
                     type="button"
                     onClick={guardarValorMercado}
-                    disabled={guardandoValorMercado || previewValorMercado.emparejados.length === 0}
+                    disabled={guardandoValorMercado || (previewValorMercado.actualizados.length === 0 && previewValorMercado.nuevos.length === 0)}
                     style={{ ...S.primaryButton, marginTop: 0, opacity: guardandoValorMercado ? 0.7 : 1 }}
                   >
-                    {guardandoValorMercado ? 'Guardando...' : `Guardar valores (${previewValorMercado.emparejados.length} jugadores)`}
+                    {guardandoValorMercado
+                      ? 'Guardando...'
+                      : `Guardar (${previewValorMercado.actualizados.length + previewValorMercado.nuevos.length} jugadores)`}
                   </button>
                 </div>
               )}
               {errorValorMercado && <p style={S.errorText}>{errorValorMercado}</p>}
               {resultadoValorMercado && <p style={S.infoText}>{resultadoValorMercado}</p>}
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <span style={S.sectionLabel}>Cuotas 1X2 de la jornada de fútbol</span>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 14 }}>
-              <p style={{ fontSize: 12.5, color: S.MUTED_2, margin: 0, lineHeight: 1.5 }}>
-                Con el valor de mercado ya cargado (arriba), pega aquí las cuotas 1X2 de cada partido de la jornada
-                para calcular y guardar el precio final de cada jugador. Recalcular después de que alguien ya haya
-                fichado no le cambia el gasto a quien ya esté inscrito — mejor hacerlo antes de abrir las salas.
-              </p>
-
-              <div style={S.field}>
-                <span style={S.label}>Jornada</span>
-                <select value={competicionCuotas} onChange={(e) => { setCompeticionCuotas(e.target.value); setPreviewCuotas(null); setResultadoCuotas(null); setErrorCuotas(null); }} style={S.input}>
-                  <option value="">— Elige una jornada —</option>
-                  {competicionesFutbolDisponibles.map((c) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div style={S.field}>
-                <span style={S.label}>Cuotas 1X2 pegadas (una línea por partido)</span>
-                <textarea
-                  value={textoCuotas}
-                  onChange={(e) => setTextoCuotas(e.target.value)}
-                  placeholder={'Real Madrid - Osasuna 1,25 6,50 11,00\nCelta - Girona 2,10 3,30 3,60'}
-                  rows={5}
-                  style={{ ...S.input, fontFamily: 'monospace', fontSize: 12.5, resize: 'vertical' }}
-                />
-              </div>
-              <button
-                type="button"
-                onClick={previsualizarCuotas}
-                disabled={!textoCuotas.trim() || !competicionCuotas || calculandoPreviewCuotas}
-                style={{ ...S.secondaryLinkButton, opacity: textoCuotas.trim() && competicionCuotas && !calculandoPreviewCuotas ? 1 : 0.5 }}
-              >
-                {calculandoPreviewCuotas ? 'Calculando...' : 'Previsualizar precios'}
-              </button>
-
-              {avisosCuotasFutbol.length > 0 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  {avisosCuotasFutbol.map((a, i) => (
-                    <span key={i} style={{ fontSize: 11, color: S.MUTED_3 }}>⚠ {a}</span>
-                  ))}
-                </div>
-              )}
-
-              {previewCuotas && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <span style={{ fontSize: 11.5, color: previewCuotas.reglasCumplidas ? S.MUTED_2 : S.ERROR }}>
-                    TOPE {previewCuotas.topeUsado.toLocaleString('es-ES')} € · γ {previewCuotas.gammaUsado}
-                    {previewCuotas.reglasCumplidas ? ' · reglas de seguridad cumplidas.' : ' · aviso: ninguna combinación probada cumple del todo las dos reglas de seguridad — revisa los precios.'}
-                  </span>
-
-                  {previewCuotas.partidosSinCuota.length > 0 && (
-                    <span style={{ fontSize: 11.5, color: S.MUTED_3 }}>
-                      Sin cuota cargada (factor neutro ×1): {previewCuotas.partidosSinCuota.join(', ')}
-                    </span>
-                  )}
-                  {previewCuotas.partidosNoEmparejados.length > 0 && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      <span style={{ fontSize: 11.5, color: S.ERROR }}>Partidos pegados sin emparejar:</span>
-                      {previewCuotas.partidosNoEmparejados.map((p, i) => (
-                        <span key={i} style={{ fontSize: 11, color: S.MUTED_3 }}>{p}</span>
-                      ))}
-                    </div>
-                  )}
-
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 320, overflowY: 'auto' }}>
-                    {[...previewCuotas.precios]
-                      .sort((a, b) => b.precio - a.precio)
-                      .map((p) => (
-                        <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11.5, color: p.sinValor ? S.MUTED_3 : S.MUTED_2 }}>
-                          <span>
-                            {p.nombre} <span style={{ color: S.MUTED_3 }}>({p.equipoReal ?? '?'} · {p.posicion})</span>
-                            {p.sinValor ? ' — sin valor, precio mediano' : ''}
-                          </span>
-                          <span style={{ color: S.TEXT, flexShrink: 0 }}>{p.precio.toLocaleString('es-ES')} €</span>
-                        </div>
-                      ))}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={guardarCuotas}
-                    disabled={guardandoCuotas}
-                    style={{ ...S.primaryButton, marginTop: 0, opacity: guardandoCuotas ? 0.7 : 1 }}
-                  >
-                    {guardandoCuotas ? 'Guardando...' : `Guardar precios (${previewCuotas.precios.length} jugadores)`}
-                  </button>
-                </div>
-              )}
-              {errorCuotas && <p style={S.errorText}>{errorCuotas}</p>}
-              {resultadoCuotas && <p style={S.infoText}>{resultadoCuotas}</p>}
             </div>
           </div>
 
@@ -1502,31 +1574,77 @@ export default function AdminPage() {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <span style={S.sectionLabel}>Nuevo torneo de golf o tenis</span>
+            <span style={S.sectionLabel}>Nuevo torneo o jornada</span>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 14 }}>
-              <p style={{ fontSize: 12.5, color: S.MUTED_2, margin: 0, lineHeight: 1.5 }}>
-                No hay ninguna API gratuita (ni forma fiable/legal de hacer scraping) de las webs de PGA Tour, DP World
-                Tour, ATP o WTA. Pega aquí el listado de INSCRITOS de este torneo — una línea por jugador, en
-                cualquier orden. Si cada línea lleva también la cuota de &quot;Ganador&quot; de la casa de apuestas
-                (p. ej. <code>Aaberg, Ludvig 8,50</code>), el precio de cada jugador sale de esa cuota — el favorito
-                cuesta el 38% del presupuesto y el resto en proporción, para que no quepan dos o tres favoritos en el
-                mismo equipo. La misma cuota decide también el grupo de color de la porra clásica: Amarillo son los
-                15 favoritos de este torneo, Verde del 16 al 35, y así — nunca hace falta el ranking mundial guardado
-                más abajo si pegas cuotas. Si pegas solo nombres, sin cuotas, tanto el precio como el grupo de la
-                porra se calculan por el ranking mundial guardado, pero siempre en relación a este torneo: Amarillo
-                son los 15 jugadores mejor clasificados que juegan este torneo, no los jugadores cuyo puesto mundial
-                sea 1-15 (si el nº1 del mundo no juega, el mejor clasificado que sí juega puede ser Amarillo).
-              </p>
-              <div style={S.field}>
-                <span style={S.label}>Nombre del torneo</span>
-                <input value={torneoNombre} onChange={(e) => setTorneoNombre(e.target.value)} placeholder="PGA Tour · The Open, ATP 500 Hamburgo..." style={S.input} />
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {(['futbol', 'golf', 'tenis'] as const).map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => {
+                      setTorneoDeporte(d);
+                      setTorneoNombre('');
+                      setTorneoTexto('');
+                      setTextoCuotas('');
+                      setPreviewJugadores([]);
+                      setPreviewCuotas(null);
+                      setAvisosCuotasFutbol([]);
+                      setResultadoTorneo(null);
+                      setResultadoCuotas(null);
+                      setErrorCuotas(null);
+                    }}
+                    style={S.pill(torneoDeporte === d)}
+                  >
+                    {d === 'futbol' ? 'Fútbol' : d === 'golf' ? 'Golf' : 'Tenis'}
+                  </button>
+                ))}
               </div>
+
+              {torneoDeporte === 'futbol' ? (
+                <p style={{ fontSize: 12.5, color: S.MUTED_2, margin: 0, lineHeight: 1.5 }}>
+                  Con el valor de mercado ya cargado (arriba, por liga), elige la liga y ponle nombre a la jornada
+                  (p. ej. &quot;Jornada 9&quot;) y pega las cuotas 1X2 de cada partido — eso calcula el precio final
+                  de cada jugador de los equipos que juegan, y al confirmar se abren las mesas de esa jornada, igual
+                  que en un torneo de golf o tenis. Solo entran en la jornada los equipos que aparezcan en las
+                  cuotas pegadas; el resto de la plantilla de la liga se queda como estaba.
+                </p>
+              ) : (
+                <p style={{ fontSize: 12.5, color: S.MUTED_2, margin: 0, lineHeight: 1.5 }}>
+                  No hay ninguna API gratuita (ni forma fiable/legal de hacer scraping) de las webs de PGA Tour, DP World
+                  Tour, ATP o WTA. Pega aquí el listado de INSCRITOS de este torneo — una línea por jugador, en
+                  cualquier orden. Si cada línea lleva también la cuota de &quot;Ganador&quot; de la casa de apuestas
+                  (p. ej. <code>Aaberg, Ludvig 8,50</code>), el precio de cada jugador sale de esa cuota — el favorito
+                  cuesta el 38% del presupuesto y el resto en proporción, para que no quepan dos o tres favoritos en el
+                  mismo equipo. La misma cuota decide también el grupo de color de la porra clásica: Amarillo son los
+                  15 favoritos de este torneo, Verde del 16 al 35, y así — nunca hace falta el ranking mundial guardado
+                  más abajo si pegas cuotas. Si pegas solo nombres, sin cuotas, tanto el precio como el grupo de la
+                  porra se calculan por el ranking mundial guardado, pero siempre en relación a este torneo: Amarillo
+                  son los 15 jugadores mejor clasificados que juegan este torneo, no los jugadores cuyo puesto mundial
+                  sea 1-15 (si el nº1 del mundo no juega, el mejor clasificado que sí juega puede ser Amarillo).
+                </p>
+              )}
+
+              {torneoDeporte === 'futbol' && (
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {LIGAS_FUTBOL.map((l) => (
+                    <button key={l} type="button" onClick={() => { setLigaJornadaFutbol(l); setPreviewCuotas(null); setResultadoCuotas(null); setErrorCuotas(null); }} style={S.pill(ligaJornadaFutbol === l)}>
+                      {LIGA_FUTBOL_LABEL[l]}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               <div style={S.field}>
-                <span style={S.label}>Deporte</span>
-                <select value={torneoDeporte} onChange={(e) => setTorneoDeporte(e.target.value as typeof torneoDeporte)} style={S.selectInput}>
-                  <option value="golf">Golf</option>
-                  <option value="tenis">Tenis</option>
-                </select>
+                <span style={S.label}>{torneoDeporte === 'futbol' ? 'Nombre de la jornada' : 'Nombre del torneo'}</span>
+                <input
+                  value={torneoNombre}
+                  onChange={(e) => setTorneoNombre(e.target.value)}
+                  placeholder={torneoDeporte === 'futbol' ? 'Jornada 9' : 'PGA Tour · The Open, ATP 500 Hamburgo...'}
+                  style={S.input}
+                />
+                {torneoDeporte === 'futbol' && torneoNombre.trim() && (
+                  <span style={{ fontSize: 11, color: S.MUTED_3 }}>Se guardará como &quot;{nombreJornadaFutbolCompleto()}&quot;.</span>
+                )}
               </div>
               <div style={S.field}>
                 <span style={S.label}>Fecha y hora límite de inscripción</span>
@@ -1560,6 +1678,80 @@ export default function AdminPage() {
                   </label>
                 )}
               </div>
+
+              {torneoDeporte === 'futbol' ? (
+                <>
+                  <div style={S.field}>
+                    <span style={S.label}>Cuotas 1X2 pegadas (una línea por partido)</span>
+                    <textarea
+                      value={textoCuotas}
+                      onChange={(e) => setTextoCuotas(e.target.value)}
+                      placeholder={'Real Madrid - Osasuna 1,25 6,50 11,00\nCelta - Girona 2,10 3,30 3,60'}
+                      rows={5}
+                      style={{ ...S.input, fontFamily: 'monospace', fontSize: 12.5, resize: 'vertical' }}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={previsualizarJornadaFutbol}
+                    disabled={!textoCuotas.trim() || !torneoNombre.trim() || calculandoPreviewCuotas}
+                    style={{ ...S.secondaryLinkButton, opacity: textoCuotas.trim() && torneoNombre.trim() && !calculandoPreviewCuotas ? 1 : 0.5 }}
+                  >
+                    {calculandoPreviewCuotas ? 'Calculando...' : 'Previsualizar precios'}
+                  </button>
+
+                  {avisosCuotasFutbol.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      {avisosCuotasFutbol.map((a, i) => (
+                        <span key={i} style={{ fontSize: 11, color: S.MUTED_3 }}>⚠ {a}</span>
+                      ))}
+                    </div>
+                  )}
+
+                  {previewCuotas && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <span style={{ fontSize: 11.5, color: previewCuotas.reglasCumplidas ? S.MUTED_2 : S.ERROR }}>
+                        TOPE {previewCuotas.topeUsado.toLocaleString('es-ES')} € · γ {previewCuotas.gammaUsado}
+                        {previewCuotas.reglasCumplidas ? ' · reglas de seguridad cumplidas.' : ' · aviso: ninguna combinación probada cumple del todo las dos reglas de seguridad — revisa los precios.'}
+                      </span>
+
+                      {previewCuotas.partidosNoEmparejados.length > 0 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          <span style={{ fontSize: 11.5, color: S.ERROR }}>Partidos pegados sin emparejar:</span>
+                          {previewCuotas.partidosNoEmparejados.map((p, i) => (
+                            <span key={i} style={{ fontSize: 11, color: S.MUTED_3 }}>{p}</span>
+                          ))}
+                        </div>
+                      )}
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 320, overflowY: 'auto' }}>
+                        {[...previewCuotas.precios]
+                          .sort((a, b) => b.precio - a.precio)
+                          .map((p) => (
+                            <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11.5, color: p.sinValor ? S.MUTED_3 : S.MUTED_2 }}>
+                              <span>
+                                {p.nombre} <span style={{ color: S.MUTED_3 }}>({p.equipoReal ?? '?'} · {p.posicion})</span>
+                                {p.sinValor ? ' — sin valor, precio mediano' : ''}
+                              </span>
+                              <span style={{ color: S.TEXT, flexShrink: 0 }}>{p.precio.toLocaleString('es-ES')} €</span>
+                            </div>
+                          ))}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={confirmarJornadaFutbol}
+                        disabled={guardandoCuotas}
+                        style={{ ...S.primaryButton, marginTop: 0, opacity: guardandoCuotas ? 0.7 : 1 }}
+                      >
+                        {guardandoCuotas ? 'Guardando...' : `Confirmar jornada (${previewCuotas.precios.length} jugadores)`}
+                      </button>
+                    </div>
+                  )}
+                  {errorCuotas && <p style={S.errorText}>{errorCuotas}</p>}
+                  {resultadoCuotas && <p style={S.infoText}>{resultadoCuotas}</p>}
+                </>
+              ) : (
               <div style={S.field}>
                 <span style={S.label}>Listado pegado de la web del circuito</span>
                 <textarea
@@ -1570,11 +1762,14 @@ export default function AdminPage() {
                   style={{ ...S.input, fontFamily: 'monospace', fontSize: 13, resize: 'vertical' }}
                 />
               </div>
+              )}
+              {torneoDeporte !== 'futbol' && (
               <button type="button" onClick={previsualizarTorneo} disabled={!torneoTexto.trim()} style={{ ...S.secondaryLinkButton, opacity: torneoTexto.trim() ? 1 : 0.5 }}>
                 Previsualizar listado
               </button>
+              )}
 
-              {previewJugadores.length > 0 && (
+              {torneoDeporte !== 'futbol' && previewJugadores.length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <span style={{ fontSize: 11, color: S.MUTED_3 }}>
                     {previewJugadores.length} jugadores detectados{usandoCuotas ? ' · precio calculado por cuota' : ' · precio calculado por ranking (sin cuotas en el listado)'} —
