@@ -149,8 +149,8 @@ export default function CrearEquipoPage() {
         return;
       }
 
-      const [{ data: miEquipoData }, { data: jugData }, { data: partidosData }] = await Promise.all([
-        supabase.from('equipos').select('id, inscripciones(estado)').eq('sala_id', salaId).eq('usuario_id', session.user.id).maybeSingle(),
+      const [{ data: misEquiposData }, { data: jugData }, { data: partidosData }] = await Promise.all([
+        supabase.from('equipos').select('id, inscripciones(estado)').eq('sala_id', salaId).eq('usuario_id', session.user.id),
         supabase.from('jugadores').select('id,nombre,posicion,precio,lesionado,equipo_real').eq('deporte', salaRow.deporte).eq('competicion', salaRow.competicion).order('precio', { ascending: false }),
         salaRow.deporte === 'futbol'
           ? supabase.from('cuotas_partido_futbol').select('equipo_local,equipo_visitante,cuota_1,cuota_x,cuota_2').eq('competicion', salaRow.competicion)
@@ -159,8 +159,16 @@ export default function CrearEquipoPage() {
 
       if (!activo) return;
 
-      const miEquipo = miEquipoData as { id: string; inscripciones: { estado: string }[] } | null;
-      if (miEquipo && miEquipo.inscripciones.some((i) => i.estado !== 'reembolsada')) {
+      // Antes era .maybeSingle() (esperaba 0 o 1 fila) y redirigía siempre
+      // que ya hubiera un equipo — correcto para el resto de tipos de sala,
+      // donde solo se permite uno, pero .maybeSingle() rompía en Maratón en
+      // cuanto un usuario tenía 2+ equipos ahí. Maratón permite varios
+      // equipos por usuario (nuevo, 26/09 novena vuelta, ver
+      // inscribirse_en_sala() en drafters-schema.sql) — así que aquí se lee
+      // como lista y solo se bloquea el reingreso para el resto de tipos.
+      const misEquipos = (misEquiposData as { id: string; inscripciones: { estado: string }[] }[]) ?? [];
+      const tieneEquipoActivo = misEquipos.some((e) => e.inscripciones.some((i) => i.estado !== 'reembolsada'));
+      if (salaRow.tipo !== 'maraton' && tieneEquipoActivo) {
         router.replace(`/salas/${salaId}`);
         return;
       }
@@ -176,6 +184,45 @@ export default function CrearEquipoPage() {
       activo = false;
     };
   }, [router, salaId]);
+
+  // Flechas de "volver" bien ordenadas entre info → draft → confirm (nuevo,
+  // 26/09 novena vuelta) — pedido de Iñi: "los botones de ir para atrás
+  // tienen que estar más ordenadas... si le doy a la flecha atrás [del
+  // dispositivo] me lleva a la sala de información del torneo, [pero] si le
+  // doy a la flecha de atrás de lo de drafters, me lleva otra vez a donde
+  // están cómo puntúan los jugadores". La causa: la pantalla de "info"
+  // tenía DOS flechas de volver que hacían cosas distintas — la de la
+  // cabecera (DraftersHeader) usaba `router.back()` (el historial de
+  // verdad), pero la flecha propia de esa pantalla usaba `router.push(...)`,
+  // que en vez de "volver" añadía una entrada nueva al historial — con eso,
+  // la siguiente vez que se pulsaba "atrás" (desde cualquier sitio) se
+  // rebotaba de vuelta a esta pantalla en lugar de salir. Además, el paso
+  // "draft" no tenía ninguna flecha propia (solo la de la cabecera), así
+  // que desde ahí "atrás" saltaba directamente a la sala, saltándose el
+  // paso "info" — mientras que desde "confirm" sí había una flecha propia
+  // que volvía a "draft" correctamente.
+  //
+  // Arreglo: cada vez que se avanza de paso (info→draft, draft→confirm) se
+  // añade una entrada al historial del navegador con `history.pushState`
+  // (misma URL, solo cambia el estado interno), y un único listener de
+  // `popstate` es quien decide a qué paso volver. Así, "atrás" significa
+  // siempre lo mismo, sea la flecha de la cabecera, la flecha propia de
+  // cada pantalla o el gesto de "atrás" del propio dispositivo — los tres
+  // acaban llamando a `router.back()`/el historial del navegador, nunca a
+  // un `push` ni a un `setStep` suelto por su cuenta.
+  useEffect(() => {
+    function onPopState(event: PopStateEvent) {
+      const paso = (event.state as { paso?: 'draft' | 'confirm' } | null)?.paso;
+      setStep(paso === 'confirm' ? 'confirm' : paso === 'draft' ? 'draft' : 'info');
+    }
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  function avanzarPaso(siguiente: 'draft' | 'confirm') {
+    window.history.pushState({ paso: siguiente }, '', window.location.href);
+    setStep(siguiente);
+  }
 
   const isFutbol = sala?.deporte === 'futbol';
   const huecos = useMemo(() => huecosPorLinea(isFutbol ? alineacion : null), [isFutbol, alineacion]);
@@ -268,6 +315,37 @@ export default function CrearEquipoPage() {
       lineasCompletadasRef.current[linea] = completaAhora;
     });
   }, [isFutbol, huecos, seleccionadosPorLinea]);
+
+  // Scroll independiente entre partidos y jugadores (26/09, séptima vuelta)
+  // — pedido de Iñi: "la barra de los partidos... y luego a la derecha...
+  // que sea independiente lo de los jugadores... no tenga que bajar hasta
+  // abajo del todo de todos los jugadores para poder ver todos los
+  // partidos... la forma de verlo... que siga exactamente igual". Antes
+  // solo la columna de partidos tenía su propio scroll (sticky + maxHeight
+  // + overflowY:auto); la de jugadores formaba parte del scroll normal de
+  // toda la página, así que al bajarla, sus últimas filas quedaban tapadas
+  // por la barra inferior fija (alineación + campo + botón), y con ellas
+  // los últimos partidos de la columna de al lado (solo se liberaban al
+  // llegar al final absoluto de la página). Ahora las dos columnas son
+  // paneles independientes con su propio scroll, acotados al mismo hueco
+  // vertical libre entre la tarjeta de presupuesto (arriba) y la barra
+  // inferior (abajo) — se mide la altura real de esa barra (en vez de un
+  // número fijo a ojo) para que el cálculo se ajuste solo si cambia.
+  const barraInferiorRef = useRef<HTMLDivElement | null>(null);
+  const [altoBarraInferior, setAltoBarraInferior] = useState(230);
+
+  useEffect(() => {
+    if (!isFutbol || step !== 'draft') return;
+    const el = barraInferiorRef.current;
+    if (!el) return;
+    const medir = () => setAltoBarraInferior(el.offsetHeight);
+    medir();
+    const observer = new ResizeObserver(medir);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isFutbol, step]);
+
+  const altoColumnas = `calc(100vh - 160px - ${altoBarraInferior}px)`;
 
   function cambiarFormacion(nuevaAlineacion: string) {
     const nuevosHuecos = huecosPorLinea(nuevaAlineacion);
@@ -378,7 +456,7 @@ export default function CrearEquipoPage() {
         `}</style>
 
         {step === 'info' ? (
-          <PuntuacionInfoScreen deporte={sala.deporte} competicion={sala.competicion} onEntendido={() => setStep('draft')} onVolver={() => router.push(`/salas/${salaId}`)} />
+          <PuntuacionInfoScreen deporte={sala.deporte} competicion={sala.competicion} onEntendido={() => avanzarPaso('draft')} onVolver={() => router.back()} />
         ) : step === 'draft' ? (
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '14px 20px 18px' }}>
@@ -443,7 +521,7 @@ export default function CrearEquipoPage() {
               {isFutbol ? (
                 <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                   {partidos.length > 0 && (
-                    <div className="partidos-scroll" style={{ flexShrink: 0, width: 90, display: 'flex', flexDirection: 'column', gap: 6, position: 'sticky', top: 128, maxHeight: 'calc(100vh - 160px)', overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: '#2A3733 transparent' } as React.CSSProperties}>
+                    <div className="partidos-scroll" style={{ flexShrink: 0, width: 90, display: 'flex', flexDirection: 'column', gap: 6, position: 'sticky', top: 128, maxHeight: altoColumnas, overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: '#2A3733 transparent' } as React.CSSProperties}>
                       <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3, textAlign: 'center' }}>Partidos</span>
                       <button
                         type="button"
@@ -496,7 +574,22 @@ export default function CrearEquipoPage() {
                     </div>
                   )}
 
-                  <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div
+                    className="partidos-scroll"
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 10,
+                      position: 'sticky',
+                      top: 128,
+                      maxHeight: altoColumnas,
+                      overflowY: 'auto',
+                      scrollbarWidth: 'thin',
+                      scrollbarColor: '#2A3733 transparent',
+                    } as React.CSSProperties}
+                  >
                     {LINEAS_ORDEN.slice()
                       .reverse()
                       .map((linea) => {
@@ -513,7 +606,7 @@ export default function CrearEquipoPage() {
                             ref={(el) => {
                               lineaRefs.current[linea] = el;
                             }}
-                            style={{ display: 'flex', flexDirection: 'column', gap: 6, scrollMarginTop: 140 }}
+                            style={{ display: 'flex', flexDirection: 'column', gap: 6, scrollMarginTop: 8 }}
                           >
                             <button
                               type="button"
@@ -597,7 +690,7 @@ export default function CrearEquipoPage() {
             </div>
 
             {isFutbol && (
-              <div style={{ position: 'sticky', bottom: 0, zIndex: 10, background: S.BG, borderTop: '1px solid #1E2723', boxShadow: '0 -10px 24px rgba(0,0,0,0.5)', padding: '7px 20px 9px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div ref={barraInferiorRef} style={{ position: 'sticky', bottom: 0, zIndex: 10, background: S.BG, borderTop: '1px solid #1E2723', boxShadow: '0 -10px 24px rgba(0,0,0,0.5)', padding: '7px 20px 9px', display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, overflowX: 'auto' }}>
                   <span style={{ flexShrink: 0, fontSize: 7.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Alineación</span>
                   <div style={{ display: 'flex', gap: 4 }}>
@@ -643,7 +736,7 @@ export default function CrearEquipoPage() {
                   ))}
                 </div>
 
-                <button type="button" disabled={!puedeConfirmar} onClick={() => setStep('confirm')} style={{ ...submitButtonStyle(puedeConfirmar), fontSize: 12, padding: '7px 20px', minHeight: 28, borderRadius: 8 }}>
+                <button type="button" disabled={!puedeConfirmar} onClick={() => avanzarPaso('confirm')} style={{ ...submitButtonStyle(puedeConfirmar), fontSize: 12, padding: '7px 20px', minHeight: 28, borderRadius: 8 }}>
                   {equipoCompleto ? (overBudget ? 'Supera el presupuesto' : 'Revisar e inscribirme') : `Faltan ${totalHuecos - selected.length} jugadores`}
                 </button>
               </div>
@@ -651,7 +744,7 @@ export default function CrearEquipoPage() {
 
             {!isFutbol && (
               <div style={{ position: 'sticky', bottom: 0, padding: '8px 20px 12px', background: 'linear-gradient(180deg, rgba(11,15,14,0) 0%, #0B0F0E 40%)' }}>
-                <button type="button" disabled={!puedeConfirmar} onClick={() => setStep('confirm')} style={submitButtonStyle(puedeConfirmar)}>
+                <button type="button" disabled={!puedeConfirmar} onClick={() => avanzarPaso('confirm')} style={submitButtonStyle(puedeConfirmar)}>
                   {equipoCompleto ? (overBudget ? 'Supera el presupuesto' : 'Revisar e inscribirme') : `Faltan ${TAMANO_EQUIPO_GOLF_TENIS - selected.length} jugadores`}
                 </button>
               </div>
@@ -659,7 +752,7 @@ export default function CrearEquipoPage() {
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 18, padding: '28px 20px 56px' }}>
-            <button type="button" onClick={() => setStep('draft')} style={backArrowStyle}>
+            <button type="button" onClick={() => router.back()} style={backArrowStyle}>
               ←
             </button>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>

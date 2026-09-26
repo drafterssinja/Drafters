@@ -15,13 +15,13 @@ import {
   estadoSalaInfo,
   capacidadLabel,
   posicionLabel,
-  repartoResumenLabel,
   inicialesJugador,
   huecosPorLinea,
   lineaDePosicion,
   closesInLabel,
   parteParaPremios,
   parteComision,
+  numeroRomano,
   type LineaFutbol,
 } from '@/lib/salaShared';
 
@@ -51,6 +51,7 @@ type EquipoMio = {
   jugadores: string[];
   alineacion: string | null;
   gasto_total: number;
+  created_at: string;
 };
 
 type JugadorRow = { id: string; nombre: string; posicion: string | null; precio: number; lesionado: boolean };
@@ -68,8 +69,13 @@ export default function SalaDetallePage() {
 
   const [perfil, setPerfil] = useState<Perfil | null>(null);
   const [sala, setSala] = useState<SalaRow | null>(null);
-  const [equipoMio, setEquipoMio] = useState<EquipoMio | null>(null);
-  const [jugadoresEquipo, setJugadoresEquipo] = useState<JugadorRow[]>([]);
+  // Antes era un único equipo (equipoMio). En Maratón un mismo usuario puede
+  // tener varios equipos a la vez (nuevo, 26/09 novena vuelta, pedido de
+  // Iñi) — así que ahora es siempre una lista, ordenada por fecha de
+  // inscripción; para el resto de tipos de sala (donde sigue habiendo como
+  // mucho uno) el comportamiento visual no cambia en nada.
+  const [misEquipos, setMisEquipos] = useState<EquipoMio[]>([]);
+  const [jugadoresPorEquipo, setJugadoresPorEquipo] = useState<Record<string, JugadorRow[]>>({});
   const [signedUp, setSignedUp] = useState(0);
   const [participantes, setParticipantes] = useState<ParticipanteRow[]>([]);
   const [tab, setTab] = useState<Tab>('info');
@@ -109,14 +115,18 @@ export default function SalaDetallePage() {
       // las filas propias de cada usuario (correcto — nadie debería poder
       // cotillear el equipo de un rival), pero la lista de "quién está
       // inscrito" (sin su equipo) sí es pública. Ver drafters-schema.sql.
-      const [{ data: participantesData }, { data: miEquipoData }] = await Promise.all([
+      const [{ data: participantesData }, { data: misEquiposData }] = await Promise.all([
         supabase.rpc('participantes_sala', { p_sala_id: salaId }),
+        // Antes era .maybeSingle() (esperaba como mucho un equipo). En
+        // Maratón un usuario puede tener varios (nuevo, 26/09 novena
+        // vuelta) — se lee siempre como lista, ordenada por fecha de
+        // inscripción, y se filtran los reembolsados igual que antes.
         supabase
           .from('equipos')
-          .select('id, nombre_equipo, jugadores, alineacion, gasto_total, inscripciones(estado)')
+          .select('id, nombre_equipo, jugadores, alineacion, gasto_total, created_at, inscripciones(estado)')
           .eq('sala_id', salaId)
           .eq('usuario_id', session.user.id)
-          .maybeSingle(),
+          .order('created_at', { ascending: true }),
       ]);
 
       if (!activo) return;
@@ -125,14 +135,21 @@ export default function SalaDetallePage() {
       setSignedUp(filasParticipantes.length);
       setParticipantes(filasParticipantes.map((p) => ({ equipoId: p.equipo_id, nombre: p.nombre, createdAt: p.created_at })));
 
-      const miEquipo = miEquipoData as (EquipoMio & { inscripciones: { estado: string }[] }) | null;
-      const miEquipoActivo = miEquipo && miEquipo.inscripciones.some((i) => i.estado !== 'reembolsada') ? miEquipo : null;
-      setEquipoMio(miEquipoActivo);
-      setTab(miEquipoActivo ? 'equipo' : 'info');
+      const misEquiposActivos = ((misEquiposData as (EquipoMio & { inscripciones: { estado: string }[] })[]) ?? []).filter((e) =>
+        e.inscripciones.some((i) => i.estado !== 'reembolsada')
+      );
+      setMisEquipos(misEquiposActivos);
+      setTab(misEquiposActivos.length > 0 ? 'equipo' : 'info');
 
-      if (miEquipoActivo && miEquipoActivo.jugadores?.length > 0) {
-        const { data: jugData } = await supabase.from('jugadores').select('id,nombre,posicion,precio,lesionado').in('id', miEquipoActivo.jugadores);
-        if (activo) setJugadoresEquipo((jugData as JugadorRow[]) ?? []);
+      const todosLosIds = Array.from(new Set(misEquiposActivos.flatMap((e) => e.jugadores ?? [])));
+      if (todosLosIds.length > 0) {
+        const { data: jugData } = await supabase.from('jugadores').select('id,nombre,posicion,precio,lesionado').in('id', todosLosIds);
+        const jugadoresPorId = new Map(((jugData as JugadorRow[]) ?? []).map((j) => [j.id, j]));
+        const mapa: Record<string, JugadorRow[]> = {};
+        misEquiposActivos.forEach((e) => {
+          mapa[e.id] = (e.jugadores ?? []).map((id) => jugadoresPorId.get(id)).filter((j): j is JugadorRow => !!j);
+        });
+        if (activo) setJugadoresPorEquipo(mapa);
       }
 
       setCargando(false);
@@ -196,21 +213,22 @@ export default function SalaDetallePage() {
   const cierraEn = closesInLabel(sala.fecha_limite_inscripcion);
   const isFull = sala.estado === 'completa';
   const isFinalizada = sala.estado === 'finalizada';
-  const hasEquipo = !!equipoMio;
+  const hasEquipo = misEquipos.length > 0;
   const isFutbol = sala.deporte === 'futbol';
+  const isMaraton = sala.tipo === 'maraton';
 
-  const huecos = huecosPorLinea(equipoMio?.alineacion ?? null);
-  const porLinea: Record<LineaFutbol, JugadorRow[]> = { POR: [], DEF: [], MED: [], DEL: [] };
-  jugadoresEquipo.forEach((j) => porLinea[lineaDePosicion(j.posicion)].push(j));
-
-  function lineaSlots(linea: LineaFutbol) {
-    const cantidad = huecos[linea];
-    const jugs = porLinea[linea];
-    return Array.from({ length: cantidad }).map((_, i) => jugs[i] ?? null);
-  }
-
-  const showJoinCta = !hasEquipo && !isFinalizada;
-  const joinLabel = isFull ? 'Sala completa' : `Unirse · ${formatEuros(sala.buy_in)}`;
+  // Botón de "Unirse" (nuevo, 26/09 novena vuelta): en el resto de tipos de
+  // sala, en cuanto ya tienes un equipo el botón desaparece (solo se
+  // permite uno). En Maratón, en cambio, se puede seguir creando equipos
+  // nuevos aunque ya tengas alguno — mismo patrón que "Crear otro equipo"
+  // ya usado en las porras clásicas (sección 11.7) — así que ahí el botón
+  // sigue visible y solo cambia de texto.
+  const showJoinCta = (!hasEquipo || isMaraton) && !isFinalizada;
+  const joinLabel = isFull
+    ? 'Sala completa'
+    : hasEquipo && isMaraton
+      ? `Crear otro equipo · ${formatEuros(sala.buy_in)}`
+      : `Unirse · ${formatEuros(sala.buy_in)}`;
   const joinDisabled = isFull;
 
   return (
@@ -275,144 +293,23 @@ export default function SalaDetallePage() {
             </button>
           </div>
 
-          {tab === 'equipo' && equipoMio && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {isFutbol ? (
-                <>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_2 }}>Alineación</span>
-                    <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, color: '#F0B94D' }}>{equipoMio.alineacion ?? '4-3-3'}</span>
-                  </div>
-                  <div
-                    style={{
-                      position: 'relative',
-                      background: 'linear-gradient(180deg, #163A24 0%, #0F2A1A 100%)',
-                      border: '1px solid #1E4A2C',
-                      borderRadius: 14,
-                      padding: '18px 10px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      justifyContent: 'space-between',
-                      gap: 14,
-                      minHeight: 300,
-                      overflow: 'hidden',
-                    }}
-                  >
-                    <div style={{ position: 'absolute', left: '8%', right: '8%', top: '50%', height: 1, background: 'rgba(255,255,255,0.14)' }} />
-                    <div style={{ position: 'absolute', left: '50%', top: '50%', width: 64, height: 64, marginLeft: -32, marginTop: -32, border: '1px solid rgba(255,255,255,0.14)', borderRadius: '50%' }} />
-                    {(['DEL', 'MED', 'DEF', 'POR'] as LineaFutbol[]).map((linea) => (
-                      <div key={linea} style={{ position: 'relative', display: 'flex', gap: 4 }}>
-                        {lineaSlots(linea).map((jug, i) =>
-                          jug ? (
-                            <div key={i} style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'center' }}>
-                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, width: '100%', maxWidth: 66 }}>
-                                <div style={{ position: 'relative', display: 'inline-flex' }}>
-                                  <span
-                                    style={{
-                                      width: 32,
-                                      height: 32,
-                                      borderRadius: '50%',
-                                      background: AVATAR_POR_LINEA[linea],
-                                      color: '#04140B',
-                                      fontFamily: "'Barlow Condensed', sans-serif",
-                                      fontWeight: 800,
-                                      fontSize: 11.5,
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      border: '2px solid #F0B94D',
-                                      boxShadow: '0 2px 6px rgba(0,0,0,0.45)',
-                                    }}
-                                  >
-                                    {inicialesJugador(jug.nombre)}
-                                  </span>
-                                  {jug.lesionado && (
-                                    <span
-                                      style={{
-                                        position: 'absolute',
-                                        top: -3,
-                                        right: -3,
-                                        width: 13,
-                                        height: 13,
-                                        borderRadius: '50%',
-                                        background: '#FF5C5C',
-                                        border: '1.5px solid #0B0F0E',
-                                      }}
-                                    />
-                                  )}
-                                </div>
-                                <span style={{ fontSize: 8, fontWeight: 700, color: S.TEXT, textAlign: 'center', lineHeight: 1.15, width: '100%' }}>{jug.nombre}</span>
-                              </div>
-                            </div>
-                          ) : (
-                            <div key={i} style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'center' }}>
-                              <div style={{ width: 32, height: 32, borderRadius: '50%', border: '1.5px dashed rgba(255,255,255,0.3)' }} />
-                            </div>
-                          )
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                jugadoresEquipo.map((j) => (
-                  <div key={j.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
-                    <span
-                      style={{
-                        flexShrink: 0,
-                        width: 34,
-                        height: 34,
-                        borderRadius: '50%',
-                        background: '#3DDC84',
-                        color: '#04140B',
-                        fontFamily: "'Barlow Condensed', sans-serif",
-                        fontWeight: 800,
-                        fontSize: 13,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        border: '1px solid rgba(255,255,255,0.18)',
-                      }}
-                    >
-                      {inicialesJugador(j.nombre)}
-                    </span>
-                    <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
-                      <span style={{ minWidth: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 13.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {j.nombre}
-                      </span>
-                      {j.lesionado && <span style={{ flexShrink: 0, width: 13, height: 13, borderRadius: '50%', background: '#FF5C5C' }} />}
-                    </div>
-                    <span style={{ flexShrink: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13, color: '#F0B94D' }}>{formatEuros(j.precio)}</span>
-                  </div>
-                ))
-              )}
-
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', background: 'rgba(240,185,77,0.1)', border: '1px solid rgba(240,185,77,0.3)', borderRadius: 10 }}>
-                <span style={{ fontSize: 13, color: '#C9A257' }}>Total gastado</span>
-                <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 14, color: '#F0B94D' }}>{formatEuros(equipoMio.gasto_total)}</span>
-              </div>
-              <span
-                style={{
-                  marginTop: 4,
-                  fontFamily: "'Barlow Condensed', sans-serif",
-                  fontWeight: 700,
-                  fontSize: 14,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.03em',
-                  color: S.MUTED_3,
-                  background: 'transparent',
-                  border: '1px solid rgba(240,185,77,0.25)',
-                  padding: '12px 20px',
-                  borderRadius: 10,
-                  minHeight: 42,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  textAlign: 'center',
-                }}
-              >
-                Modificar equipo (próximamente)
-              </span>
+          {tab === 'equipo' && misEquipos.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+              {misEquipos.map((equipo, i) => (
+                <EquipoPanel
+                  key={equipo.id}
+                  equipo={equipo}
+                  jugadores={jugadoresPorEquipo[equipo.id] ?? []}
+                  isFutbol={isFutbol}
+                  // Título por equipo (nuevo, 26/09 novena vuelta) — solo
+                  // hace falta distinguirlos cuando hay más de uno (siempre
+                  // Maratón, el único tipo de sala que lo permite): mismo
+                  // criterio de numeración que participantes_sala() en
+                  // drafters-schema.sql ("Tu equipo" / "Tu equipo (II)" /
+                  // "Tu equipo (III)"...).
+                  titulo={misEquipos.length > 1 ? (i === 0 ? 'Tu equipo' : `Tu equipo (${numeroRomano(i + 1)})`) : undefined}
+                />
+              ))}
             </div>
           )}
 
@@ -434,7 +331,6 @@ export default function SalaDetallePage() {
               <InfoRow label="Formato" value={tipoLabel} />
               <InfoRow label="Competición" value={sala.competicion} />
               <InfoRow label="Jugadores inscritos" value={`${signedUp}/${capacidadLabel(sala.aforo)}`} />
-              <InfoRow label="Reparto de premios" value={repartoResumenLabel(sala.tipo)} />
               {!isFinalizada && <InfoRow label="Se cierra en" value={cierraEn ?? 'Sin fecha fijada'} />}
             </div>
           )}
@@ -518,6 +414,182 @@ export default function SalaDetallePage() {
         </div>
       </div>
     </main>
+  );
+}
+
+// Un equipo del usuario (campo de fútbol o lista plana + total gastado) —
+// extraído a su propio componente (26/09, novena vuelta) para poder pintar
+// varios seguidos cuando el usuario tiene más de un equipo en la misma sala
+// (solo posible en Maratón, ver arriba). Cada equipo calcula su propia
+// alineación/huecos — antes esto vivía como estado de la página entera,
+// pensado para un único equipo; ahora cada instancia es independiente, así
+// que dos equipos Maratón de fútbol con alineaciones distintas se pintan
+// cada uno con la suya, sin pisarse.
+function EquipoPanel({
+  equipo,
+  jugadores,
+  isFutbol,
+  titulo,
+}: {
+  equipo: EquipoMio;
+  jugadores: JugadorRow[];
+  isFutbol: boolean;
+  titulo?: string;
+}) {
+  const huecos = huecosPorLinea(equipo.alineacion ?? null);
+  const porLinea: Record<LineaFutbol, JugadorRow[]> = { POR: [], DEF: [], MED: [], DEL: [] };
+  jugadores.forEach((j) => porLinea[lineaDePosicion(j.posicion)].push(j));
+
+  function lineaSlots(linea: LineaFutbol) {
+    const cantidad = huecos[linea];
+    const jugs = porLinea[linea];
+    return Array.from({ length: cantidad }).map((_, i) => jugs[i] ?? null);
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {titulo && (
+        <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, textTransform: 'uppercase', letterSpacing: '0.03em', color: S.TEXT }}>
+          {titulo}
+        </span>
+      )}
+      {isFutbol ? (
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_2 }}>Alineación</span>
+            <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, color: '#F0B94D' }}>{equipo.alineacion ?? '4-3-3'}</span>
+          </div>
+          <div
+            style={{
+              position: 'relative',
+              background: 'linear-gradient(180deg, #163A24 0%, #0F2A1A 100%)',
+              border: '1px solid #1E4A2C',
+              borderRadius: 14,
+              padding: '18px 10px',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              gap: 14,
+              minHeight: 300,
+              overflow: 'hidden',
+            }}
+          >
+            <div style={{ position: 'absolute', left: '8%', right: '8%', top: '50%', height: 1, background: 'rgba(255,255,255,0.14)' }} />
+            <div style={{ position: 'absolute', left: '50%', top: '50%', width: 64, height: 64, marginLeft: -32, marginTop: -32, border: '1px solid rgba(255,255,255,0.14)', borderRadius: '50%' }} />
+            {(['DEL', 'MED', 'DEF', 'POR'] as LineaFutbol[]).map((linea) => (
+              <div key={linea} style={{ position: 'relative', display: 'flex', gap: 4 }}>
+                {lineaSlots(linea).map((jug, i) =>
+                  jug ? (
+                    <div key={i} style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'center' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, width: '100%', maxWidth: 66 }}>
+                        <div style={{ position: 'relative', display: 'inline-flex' }}>
+                          <span
+                            style={{
+                              width: 32,
+                              height: 32,
+                              borderRadius: '50%',
+                              background: AVATAR_POR_LINEA[linea],
+                              color: '#04140B',
+                              fontFamily: "'Barlow Condensed', sans-serif",
+                              fontWeight: 800,
+                              fontSize: 11.5,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              border: '2px solid #F0B94D',
+                              boxShadow: '0 2px 6px rgba(0,0,0,0.45)',
+                            }}
+                          >
+                            {inicialesJugador(jug.nombre)}
+                          </span>
+                          {jug.lesionado && (
+                            <span
+                              style={{
+                                position: 'absolute',
+                                top: -3,
+                                right: -3,
+                                width: 13,
+                                height: 13,
+                                borderRadius: '50%',
+                                background: '#FF5C5C',
+                                border: '1.5px solid #0B0F0E',
+                              }}
+                            />
+                          )}
+                        </div>
+                        <span style={{ fontSize: 8, fontWeight: 700, color: S.TEXT, textAlign: 'center', lineHeight: 1.15, width: '100%' }}>{jug.nombre}</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div key={i} style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'center' }}>
+                      <div style={{ width: 32, height: 32, borderRadius: '50%', border: '1.5px dashed rgba(255,255,255,0.3)' }} />
+                    </div>
+                  )
+                )}
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+        jugadores.map((j) => (
+          <div key={j.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
+            <span
+              style={{
+                flexShrink: 0,
+                width: 34,
+                height: 34,
+                borderRadius: '50%',
+                background: '#3DDC84',
+                color: '#04140B',
+                fontFamily: "'Barlow Condensed', sans-serif",
+                fontWeight: 800,
+                fontSize: 13,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: '1px solid rgba(255,255,255,0.18)',
+              }}
+            >
+              {inicialesJugador(j.nombre)}
+            </span>
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ minWidth: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 13.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {j.nombre}
+              </span>
+              {j.lesionado && <span style={{ flexShrink: 0, width: 13, height: 13, borderRadius: '50%', background: '#FF5C5C' }} />}
+            </div>
+            <span style={{ flexShrink: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13, color: '#F0B94D' }}>{formatEuros(j.precio)}</span>
+          </div>
+        ))
+      )}
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', background: 'rgba(240,185,77,0.1)', border: '1px solid rgba(240,185,77,0.3)', borderRadius: 10 }}>
+        <span style={{ fontSize: 13, color: '#C9A257' }}>Total gastado</span>
+        <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 14, color: '#F0B94D' }}>{formatEuros(equipo.gasto_total)}</span>
+      </div>
+      <span
+        style={{
+          marginTop: 4,
+          fontFamily: "'Barlow Condensed', sans-serif",
+          fontWeight: 700,
+          fontSize: 14,
+          textTransform: 'uppercase',
+          letterSpacing: '0.03em',
+          color: S.MUTED_3,
+          background: 'transparent',
+          border: '1px solid rgba(240,185,77,0.25)',
+          padding: '12px 20px',
+          borderRadius: 10,
+          minHeight: 42,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          textAlign: 'center',
+        }}
+      >
+        Modificar equipo (próximamente)
+      </span>
+    </div>
   );
 }
 

@@ -1058,27 +1058,80 @@ $$;
 revoke all on function public.inscritos_por_porra() from public;
 grant execute on function public.inscritos_por_porra() to authenticated;
 
+-- Número romano para distinguir los varios equipos de un mismo usuario en
+-- un torneo Maratón (nuevo, 26/09 novena vuelta) — ver participantes_sala()
+-- más abajo, que es quien lo usa. Pedido de Iñi: "en los torneos maratón
+-- se puede hacer más de un equipo... el nombre de usuario, y el segundo
+-- equipo pondrá entre paréntesis un 2 en número romano... así
+-- consecutivamente".
+create or replace function public.numero_romano(p_numero int)
+returns text
+language plpgsql
+immutable
+as $$
+declare
+  v_valores int[] := array[1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1];
+  v_simbolos text[] := array['M', 'CM', 'D', 'CD', 'C', 'XC', 'L', 'XL', 'X', 'IX', 'V', 'IV', 'I'];
+  v_resultado text := '';
+  v_resto int := p_numero;
+  i int;
+begin
+  if p_numero is null or p_numero < 1 then
+    return '';
+  end if;
+  for i in 1..array_length(v_valores, 1) loop
+    while v_resto >= v_valores[i] loop
+      v_resultado := v_resultado || v_simbolos[i];
+      v_resto := v_resto - v_valores[i];
+    end loop;
+  end loop;
+  return v_resultado;
+end;
+$$;
+
 -- Nombres de los participantes de una sala concreta (pestaña "Jugadores"
 -- del detalle) — nunca expone qué jugadores ha elegido cada uno ni cuánto
 -- se ha gastado, solo quién está inscrito y desde cuándo.
+--
+-- Numeración de equipos repetidos (nuevo, 26/09 novena vuelta): en los
+-- torneos Maratón un mismo usuario puede tener más de un equipo en la misma
+-- sala (ver inscribirse_en_sala() más abajo, que ya no lo bloquea para
+-- tipo='maraton'). Pedido de Iñi: el primer equipo de cada usuario se sigue
+-- viendo con su nombre de usuario tal cual; el segundo, tercero... llevan
+-- detrás " (II)", " (III)"... en número romano, por orden de inscripción.
+-- Para el resto de tipos de sala esto no cambia nada en la práctica, porque
+-- ahí ya está prohibido tener más de un equipo (row_number() siempre da 1).
 create or replace function public.participantes_sala(p_sala_id uuid)
 returns table (equipo_id uuid, nombre text, created_at timestamptz)
 language sql
 security definer set search_path = public
 stable
 as $$
-  -- Nunca se usa p.nombre (nombre real) aquí: si por lo que sea un perfil no
-  -- tiene nombre_usuario, se muestra un identificador provisional derivado
-  -- de su id en vez del nombre real (el relleno de arriba en la tabla
-  -- perfiles ya debería evitar que esto pase, pero se deja como red de
-  -- seguridad porque los nombres reales no pueden aparecer nunca).
-  select e.id, coalesce(p.nombre_usuario, 'jugador-' || replace(p.id::text, '-', '')), e.created_at
-  from public.equipos e
-  join public.inscripciones i on i.equipo_id = e.id
-  join public.perfiles p on p.id = e.usuario_id
-  where e.sala_id = p_sala_id and i.estado <> 'reembolsada'
+  select
+    e.id,
+    case when e.rn = 1 then e.base_nombre else e.base_nombre || ' (' || public.numero_romano(e.rn) || ')' end,
+    e.created_at
+  from (
+    -- Nunca se usa p.nombre (nombre real) aquí: si por lo que sea un perfil
+    -- no tiene nombre_usuario, se muestra un identificador provisional
+    -- derivado de su id en vez del nombre real (el relleno de arriba en la
+    -- tabla perfiles ya debería evitar que esto pase, pero se deja como red
+    -- de seguridad porque los nombres reales no pueden aparecer nunca).
+    select
+      eq.id,
+      eq.created_at,
+      coalesce(p.nombre_usuario, 'jugador-' || replace(p.id::text, '-', '')) as base_nombre,
+      row_number() over (partition by eq.usuario_id order by eq.created_at asc) as rn
+    from public.equipos eq
+    join public.inscripciones i on i.equipo_id = eq.id
+    join public.perfiles p on p.id = eq.usuario_id
+    where eq.sala_id = p_sala_id and i.estado <> 'reembolsada'
+  ) e
   order by e.created_at asc;
 $$;
+
+revoke all on function public.numero_romano(int) from public;
+grant execute on function public.numero_romano(int) to authenticated;
 
 revoke all on function public.participantes_sala(uuid) from public;
 grant execute on function public.participantes_sala(uuid) to authenticated;
@@ -1165,7 +1218,11 @@ begin
     raise exception 'Esta sala ya no admite inscripciones';
   end if;
 
-  if exists (
+  -- Maratón es la excepción: se permite más de un equipo por usuario
+  -- (nuevo, 26/09 novena vuelta, pedido de Iñi: "en los torneos maratón se
+  -- puede hacer más de un equipo") — el resto de tipos de sala se quedan
+  -- exactamente igual, con el límite de uno solo.
+  if v_sala.tipo <> 'maraton' and exists (
     select 1 from public.equipos e
     join public.inscripciones i on i.equipo_id = e.id
     where e.sala_id = p_sala_id and e.usuario_id = auth.uid() and i.estado <> 'reembolsada'

@@ -173,6 +173,34 @@ export function repartoResumenLabel(tipo: string): string {
   }
 }
 
+// Número romano para distinguir los varios equipos de un mismo usuario en
+// un torneo Maratón (nuevo, 26/09 novena vuelta) — pedido de Iñi: "se debe
+// permitir hacer más de un equipo... el nombre de usuario, y el segundo
+// equipo pondrá entre paréntesis un 2 en número romano, el 3 un 3 en número
+// romano, así consecutivamente". Solo se usa para el primer equipo de un
+// usuario en pantalla (sin sufijo); el resto añade " (II)", " (III)"... La
+// misma numeración "de verdad" (para lo que ven los demás participantes) la
+// calcula `participantes_sala()` en drafters-schema.sql — esta versión en
+// TypeScript es solo para pintar los equipos propios del usuario en su
+// propia pantalla, con el mismo criterio.
+export function numeroRomano(numero: number): string {
+  if (!Number.isFinite(numero) || numero < 1) return '';
+  const valores: [number, string][] = [
+    [1000, 'M'], [900, 'CM'], [500, 'D'], [400, 'CD'],
+    [100, 'C'], [90, 'XC'], [50, 'L'], [40, 'XL'],
+    [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I'],
+  ];
+  let resto = Math.floor(numero);
+  let resultado = '';
+  for (const [valor, simbolo] of valores) {
+    while (resto >= valor) {
+      resultado += simbolo;
+      resto -= valor;
+    }
+  }
+  return resultado;
+}
+
 // Posición de fútbol (jugadores.posicion) -> línea del campo del mockup.
 export type LineaFutbol = 'POR' | 'DEF' | 'MED' | 'DEL';
 

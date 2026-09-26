@@ -153,6 +153,30 @@ export default function CrearEquipoPorraPage() {
     };
   }, [router, porraId, equipoEditandoId]);
 
+  // Flechas de "volver" bien ordenadas entre draft → confirm (nuevo, 26/09
+  // novena vuelta) — mismo arreglo que en salas/[id]/crear-equipo/page.tsx
+  // (ver el comentario largo de ahí): la flecha propia del paso "draft"
+  // usaba `router.push('/porras/${porraId}')` en vez de "volver" de verdad,
+  // así que añadía una entrada nueva al historial y la flecha de atrás
+  // podía acabar rebotando entre esta pantalla y la de la porra. Ahora
+  // avanzar de paso añade una entrada al historial con `history.pushState`,
+  // y un único listener de `popstate` decide a qué paso volver — así la
+  // flecha de la cabecera, la flecha propia de cada pantalla y el gesto de
+  // "atrás" del dispositivo hacen siempre lo mismo.
+  useEffect(() => {
+    function onPopState(event: PopStateEvent) {
+      const paso = (event.state as { paso?: 'confirm' } | null)?.paso;
+      setStep(paso === 'confirm' ? 'confirm' : 'draft');
+    }
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  function avanzarAConfirmar() {
+    window.history.pushState({ paso: 'confirm' }, '', window.location.href);
+    setStep('confirm');
+  }
+
   const gruposDisponibles = useMemo(() => ORDEN_GRUPOS.filter((g) => jugadores.some((j) => j.grupo_porra === g)), [jugadores]);
   const jugadoresPorId = useMemo(() => new Map(jugadores.map((j) => [j.id, j])), [jugadores]);
   const seleccionados: { jugador: JugadorRow; esComodin: boolean }[] = [
@@ -253,7 +277,7 @@ export default function CrearEquipoPorraPage() {
         {step === 'draft' ? (
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '20px 20px 24px' }}>
-              <button type="button" onClick={() => router.push(`/porras/${porraId}`)} style={backArrowStyle}>
+              <button type="button" onClick={() => router.back()} style={backArrowStyle}>
                 ←
               </button>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -435,14 +459,14 @@ export default function CrearEquipoPorraPage() {
             </div>
 
             <div style={{ position: 'sticky', bottom: 0, padding: '8px 20px 12px', background: 'linear-gradient(180deg, rgba(11,15,14,0) 0%, #0B0F0E 40%)' }}>
-              <button type="button" disabled={!puedeConfirmar} onClick={() => setStep('confirm')} style={submitButtonStyle(puedeConfirmar, '#3DDC84')}>
+              <button type="button" disabled={!puedeConfirmar} onClick={avanzarAConfirmar} style={submitButtonStyle(puedeConfirmar, '#3DDC84')}>
                 {!nombreValido ? 'Ponle nombre a tu equipo' : equipoCompleto ? (modoEdicion ? 'Revisar cambios' : 'Revisar e inscribirme') : `Faltan ${totalHuecos - huecosRellenos} jugadores`}
               </button>
             </div>
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 18, padding: '28px 20px 56px' }}>
-            <button type="button" onClick={() => setStep('draft')} style={backArrowStyle}>
+            <button type="button" onClick={() => router.back()} style={backArrowStyle}>
               ←
             </button>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>

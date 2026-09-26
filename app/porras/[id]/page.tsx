@@ -283,7 +283,6 @@ export default function PorraDetallePage() {
               <InfoRow label="Precio de entrada" value={formatEuros(porra.precio)} accent />
               <InfoRow label="Competición" value={porra.competicion ?? '—'} />
               <InfoRow label="Jugadores inscritos" value={String(signedUp)} />
-              <InfoRow label="Reparto de premios" value="Por tramos según inscritos" />
             </div>
           )}
 
