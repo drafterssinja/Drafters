@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { supabase, Perfil } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
@@ -81,6 +81,14 @@ export default function CrearEquipoPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const salaId = params.id;
+  const searchParams = useSearchParams();
+  // Con ?equipo=<id> esta misma pantalla edita un equipo ya inscrito, en vez
+  // de crear uno nuevo (nuevo, 27/09, décima vuelta) — mismo patrón que
+  // /porras/[id]/crear-equipo, pedido de Iñi: "habilítalo ya, que se pueda
+  // editar tu equipo y volver a confirmar" (el botón de "Modificar equipo"
+  // del detalle de sala enlaza aquí con este parámetro).
+  const equipoEditandoId = searchParams.get('equipo');
+  const modoEdicion = !!equipoEditandoId;
 
   const [perfil, setPerfil] = useState<Perfil | null>(null);
   const [sala, setSala] = useState<SalaRow | null>(null);
@@ -92,8 +100,10 @@ export default function CrearEquipoPage() {
   // 'info' (25/09, tercera vuelta): pantalla previa "cómo puntúan los
   // jugadores" que se ve siempre antes de la selección — pedido de Iñi
   // "para que la gente se vaya conociéndolo" — con un botón "Entendido" que
-  // lleva a 'draft'. Se muestra en los tres deportes.
-  const [step, setStep] = useState<'info' | 'draft' | 'confirm'>('info');
+  // lleva a 'draft'. Se muestra en los tres deportes, salvo al EDITAR un
+  // equipo ya inscrito (27/09, décima vuelta) — ahí se salta directamente a
+  // 'draft': ya se le mostró esta pantalla la primera vez que se inscribió.
+  const [step, setStep] = useState<'info' | 'draft' | 'confirm'>(modoEdicion ? 'draft' : 'info');
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
@@ -140,7 +150,14 @@ export default function CrearEquipoPage() {
       }
       const salaRow = salaData as SalaRow;
 
-      if (salaRow.estado === 'completa' || salaRow.estado === 'finalizada') {
+      // Al CREAR (no editar) un equipo, una sala llena o finalizada ya no
+      // admite entrar. Al EDITAR uno ya inscrito, en cambio, "llena" no
+      // importa — Iñi, 27/09, décima vuelta: "el botón de modificar equipo
+      // va a estar disponible hasta que finalice la hora de inscripción, da
+      // igual si la sala está llena o no" — así que solo se bloquea si ya
+      // ha finalizado (la fecha límite de inscripción, si la sala tiene una
+      // fijada, se comprueba del lado del servidor en editar_equipo_sala()).
+      if (salaRow.estado === 'finalizada' || (!modoEdicion && salaRow.estado === 'completa')) {
         // replace, no push: esto es un redirect de "no deberías estar aquí",
         // no una navegación del usuario — con push, la flecha "volver" de la
         // cabecera (que usa el historial) rebotaba de vuelta a esta misma
@@ -149,28 +166,58 @@ export default function CrearEquipoPage() {
         return;
       }
 
-      const [{ data: misEquiposData }, { data: jugData }, { data: partidosData }] = await Promise.all([
+      const [{ data: misEquiposData }, { data: jugData }, { data: partidosData }, { data: equipoEditandoData }] = await Promise.all([
         supabase.from('equipos').select('id, inscripciones(estado)').eq('sala_id', salaId).eq('usuario_id', session.user.id),
         supabase.from('jugadores').select('id,nombre,posicion,precio,lesionado,equipo_real').eq('deporte', salaRow.deporte).eq('competicion', salaRow.competicion).order('precio', { ascending: false }),
         salaRow.deporte === 'futbol'
           ? supabase.from('cuotas_partido_futbol').select('equipo_local,equipo_visitante,cuota_1,cuota_x,cuota_2').eq('competicion', salaRow.competicion)
           : Promise.resolve({ data: [] as PartidoRow[] }),
+        // Solo al editar (27/09, décima vuelta): el equipo concreto que se va
+        // a modificar, con sus jugadores/alineación actuales para
+        // precargar la selección — filtrado también por sala_id y
+        // usuario_id, no solo por id, para que nadie pueda editar un equipo
+        // ajeno cambiando el parámetro de la URL a mano (la RLS de
+        // `equipos` ya lo impediría de todos modos, pero así ni siquiera se
+        // llega a intentar).
+        equipoEditandoId
+          ? supabase
+              .from('equipos')
+              .select('id, jugadores, alineacion, usuario_id')
+              .eq('id', equipoEditandoId)
+              .eq('sala_id', salaId)
+              .eq('usuario_id', session.user.id)
+              .maybeSingle()
+          : Promise.resolve({ data: null as { id: string; jugadores: string[]; alineacion: string | null } | null }),
       ]);
 
       if (!activo) return;
 
-      // Antes era .maybeSingle() (esperaba 0 o 1 fila) y redirigía siempre
-      // que ya hubiera un equipo — correcto para el resto de tipos de sala,
-      // donde solo se permite uno, pero .maybeSingle() rompía en Maratón en
-      // cuanto un usuario tenía 2+ equipos ahí. Maratón permite varios
-      // equipos por usuario (nuevo, 26/09 novena vuelta, ver
-      // inscribirse_en_sala() en drafters-schema.sql) — así que aquí se lee
-      // como lista y solo se bloquea el reingreso para el resto de tipos.
-      const misEquipos = (misEquiposData as { id: string; inscripciones: { estado: string }[] }[]) ?? [];
-      const tieneEquipoActivo = misEquipos.some((e) => e.inscripciones.some((i) => i.estado !== 'reembolsada'));
-      if (salaRow.tipo !== 'maraton' && tieneEquipoActivo) {
-        router.replace(`/salas/${salaId}`);
-        return;
+      if (equipoEditandoId) {
+        const equipoEditando = equipoEditandoData as { id: string; jugadores: string[]; alineacion: string | null } | null;
+        if (!equipoEditando) {
+          setError('No se ha encontrado ese equipo, o no es tuyo.');
+          setCargando(false);
+          return;
+        }
+        setSelected(equipoEditando.jugadores ?? []);
+        if (equipoEditando.alineacion) setAlineacion(equipoEditando.alineacion);
+      } else {
+        // Antes era .maybeSingle() (esperaba 0 o 1 fila) y redirigía siempre
+        // que ya hubiera un equipo — correcto para el resto de tipos de sala,
+        // donde solo se permite uno, pero .maybeSingle() rompía en Maratón en
+        // cuanto un usuario tenía 2+ equipos ahí. Maratón permite varios
+        // equipos por usuario (nuevo, 26/09 novena vuelta, ver
+        // inscribirse_en_sala() en drafters-schema.sql) — así que aquí se lee
+        // como lista y solo se bloquea el reingreso para el resto de tipos.
+        // Esta comprobación no aplica al EDITAR (arriba): ahí, por
+        // definición, ya existe un equipo — es precisamente el que se va a
+        // modificar.
+        const misEquipos = (misEquiposData as { id: string; inscripciones: { estado: string }[] }[]) ?? [];
+        const tieneEquipoActivo = misEquipos.some((e) => e.inscripciones.some((i) => i.estado !== 'reembolsada'));
+        if (salaRow.tipo !== 'maraton' && tieneEquipoActivo) {
+          router.replace(`/salas/${salaId}`);
+          return;
+        }
       }
 
       setSala(salaRow);
@@ -183,7 +230,7 @@ export default function CrearEquipoPage() {
     return () => {
       activo = false;
     };
-  }, [router, salaId]);
+  }, [router, salaId, equipoEditandoId]);
 
   // Flechas de "volver" bien ordenadas entre info → draft → confirm (nuevo,
   // 26/09 novena vuelta) — pedido de Iñi: "los botones de ir para atrás
@@ -278,6 +325,10 @@ export default function CrearEquipoPage() {
 
   const equipoCompleto = isFutbol ? selected.length === totalHuecos : selected.length === TAMANO_EQUIPO_GOLF_TENIS;
   const puedeConfirmar = equipoCompleto && !overBudget;
+  // Textos que cambian entre crear e inscribirse por primera vez (con
+  // cobro) y editar un equipo ya inscrito (sin cobro) — 27/09, décima
+  // vuelta.
+  const textoRevisar = modoEdicion ? 'Revisar cambios' : 'Revisar e inscribirme';
 
   // Recuenta cuántos jugadores hay ya elegidos de cada línea (fútbol), para
   // saber si un hueco está lleno.
@@ -387,12 +438,18 @@ export default function CrearEquipoPage() {
   async function confirmarInscripcion() {
     setEnviando(true);
     setErrorEnvio(null);
-    const { error: rpcError } = await supabase.rpc('inscribirse_en_sala', {
-      p_sala_id: salaId,
-      p_jugadores: selected,
-      p_alineacion: isFutbol ? alineacion : null,
-      p_nombre_equipo: null,
-    });
+    const { error: rpcError } = modoEdicion
+      ? await supabase.rpc('editar_equipo_sala', {
+          p_equipo_id: equipoEditandoId,
+          p_jugadores: selected,
+          p_alineacion: isFutbol ? alineacion : null,
+        })
+      : await supabase.rpc('inscribirse_en_sala', {
+          p_sala_id: salaId,
+          p_jugadores: selected,
+          p_alineacion: isFutbol ? alineacion : null,
+          p_nombre_equipo: null,
+        });
     if (rpcError) {
       setErrorEnvio(traducirError(rpcError.message));
       setEnviando(false);
@@ -465,7 +522,7 @@ export default function CrearEquipoPage() {
               </button>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#F0B94D' }}>{sala.competicion}</span>
-                <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT }}>Crea tu equipo</h1>
+                <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT }}>{modoEdicion ? 'Modifica tu equipo' : 'Crea tu equipo'}</h1>
               </div>
 
               <div style={{ position: 'sticky', top: 0, zIndex: 5, background: S.BG, paddingTop: 2, paddingBottom: 6, margin: '0 -20px', paddingLeft: 20, paddingRight: 20 }}>
@@ -737,7 +794,7 @@ export default function CrearEquipoPage() {
                 </div>
 
                 <button type="button" disabled={!puedeConfirmar} onClick={() => avanzarPaso('confirm')} style={{ ...submitButtonStyle(puedeConfirmar), fontSize: 12, padding: '7px 20px', minHeight: 28, borderRadius: 8 }}>
-                  {equipoCompleto ? (overBudget ? 'Supera el presupuesto' : 'Revisar e inscribirme') : `Faltan ${totalHuecos - selected.length} jugadores`}
+                  {equipoCompleto ? (overBudget ? 'Supera el presupuesto' : textoRevisar) : `Faltan ${totalHuecos - selected.length} jugadores`}
                 </button>
               </div>
             )}
@@ -745,7 +802,7 @@ export default function CrearEquipoPage() {
             {!isFutbol && (
               <div style={{ position: 'sticky', bottom: 0, padding: '8px 20px 12px', background: 'linear-gradient(180deg, rgba(11,15,14,0) 0%, #0B0F0E 40%)' }}>
                 <button type="button" disabled={!puedeConfirmar} onClick={() => avanzarPaso('confirm')} style={submitButtonStyle(puedeConfirmar)}>
-                  {equipoCompleto ? (overBudget ? 'Supera el presupuesto' : 'Revisar e inscribirme') : `Faltan ${TAMANO_EQUIPO_GOLF_TENIS - selected.length} jugadores`}
+                  {equipoCompleto ? (overBudget ? 'Supera el presupuesto' : textoRevisar) : `Faltan ${TAMANO_EQUIPO_GOLF_TENIS - selected.length} jugadores`}
                 </button>
               </div>
             )}
@@ -757,9 +814,13 @@ export default function CrearEquipoPage() {
             </button>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#F0B94D' }}>{sala.competicion}</span>
-              <h1 style={{ fontSize: 24, fontWeight: 800, color: S.TEXT }}>Confirma tu inscripción</h1>
+              <h1 style={{ fontSize: 24, fontWeight: 800, color: S.TEXT }}>{modoEdicion ? 'Confirma los cambios' : 'Confirma tu inscripción'}</h1>
               <p style={{ fontSize: 13, color: S.MUTED_2 }}>
-                {sala.nombre} · Buy-in {formatEuros(sala.buy_in)}
+                {/* Sin mención al buy-in al editar (27/09, décima vuelta) — ya
+                    se pagó al inscribirse la primera vez; modificar el
+                    equipo nunca vuelve a cobrar (ver editar_equipo_sala() en
+                    drafters-schema.sql). */}
+                {modoEdicion ? sala.nombre : `${sala.nombre} · Buy-in ${formatEuros(sala.buy_in)}`}
               </p>
             </div>
 
@@ -792,7 +853,7 @@ export default function CrearEquipoPage() {
             {errorEnvio && <p style={S.errorText}>{errorEnvio}</p>}
 
             <button type="button" disabled={enviando} onClick={confirmarInscripcion} style={{ ...submitButtonStyle(true), opacity: enviando ? 0.7 : 1 }}>
-              {enviando ? 'Inscribiendo...' : 'Confirmar inscripción'}
+              {enviando ? (modoEdicion ? 'Guardando...' : 'Inscribiendo...') : modoEdicion ? 'Guardar cambios' : 'Confirmar inscripción'}
             </button>
           </div>
         )}
@@ -803,9 +864,12 @@ export default function CrearEquipoPage() {
 
 // Pantalla previa "cómo puntúan los jugadores" (25/09, tercera vuelta) — se
 // ve siempre antes de la selección de jugadores, en los tres deportes, con
-// un botón "Entendido" que lleva al draft. Usa las tablas resumen de
-// lib/puntuaciones.ts (más adelante, cuando ya no haga falta mostrarla
-// siempre, Iñi pidió dejar solo un enlace a esta misma tabla).
+// un botón "Entendido" que lleva al draft. Usa las tablas de
+// lib/puntuaciones.ts, que desde el 27/09 son el listado COMPLETO de
+// puntuación (antes era un resumen condensado — Iñi pidió no resumir nada,
+// ver el comentario de cabecera de lib/puntuaciones.ts) — más adelante,
+// cuando ya no haga falta mostrarla siempre, Iñi pidió dejar solo un
+// enlace a esta misma tabla.
 function PuntuacionInfoScreen({ deporte, competicion, onEntendido, onVolver }: { deporte: string; competicion: string; onEntendido: () => void; onVolver: () => void }) {
   const tablas = tablaPuntuacionPorDeporte(deporte);
   return (
@@ -816,7 +880,7 @@ function PuntuacionInfoScreen({ deporte, competicion, onEntendido, onVolver }: {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#F0B94D' }}>{competicion}</span>
         <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT }}>Cómo puntúan los jugadores</h1>
-        <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>Un resumen rápido antes de elegir tu equipo.</p>
+        <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>Todas las formas de puntuar, antes de elegir tu equipo.</p>
       </div>
 
       {tablas.map((tabla) => (

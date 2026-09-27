@@ -217,6 +217,16 @@ export default function SalaDetallePage() {
   const isFutbol = sala.deporte === 'futbol';
   const isMaraton = sala.tipo === 'maraton';
 
+  // "Modificar equipo" (27/09, décima vuelta) — corrección de Iñi sobre la
+  // primera versión de esto mismo: "va a estar disponible hasta que
+  // finalice la hora de inscripción, da igual si la sala está llena o no".
+  // Así que, a diferencia del resto de esta pantalla, NO se mira isFull —
+  // solo la fecha límite de inscripción (si no hay ninguna fijada, se puede
+  // editar hasta que la sala finalice) y que la sala no haya finalizado.
+  // Mismo criterio, del lado del servidor, en editar_equipo_sala().
+  const limiteInscripcionPasado = sala.fecha_limite_inscripcion ? new Date(sala.fecha_limite_inscripcion).getTime() <= Date.now() : false;
+  const puedeEditarEquipo = !isFinalizada && !limiteInscripcionPasado;
+
   // Botón de "Unirse" (nuevo, 26/09 novena vuelta): en el resto de tipos de
   // sala, en cuanto ya tienes un equipo el botón desaparece (solo se
   // permite uno). En Maratón, en cambio, se puede seguir creando equipos
@@ -308,6 +318,14 @@ export default function SalaDetallePage() {
                   // drafters-schema.sql ("Tu equipo" / "Tu equipo (II)" /
                   // "Tu equipo (III)"...).
                   titulo={misEquipos.length > 1 ? (i === 0 ? 'Tu equipo' : `Tu equipo (${numeroRomano(i + 1)})`) : undefined}
+                  // "Modificar equipo" habilitado (nuevo, 27/09, décima
+                  // vuelta) — pedido de Iñi: "habilítalo ya, que se pueda
+                  // editar tu equipo y volver a confirmar", y disponible
+                  // hasta que pase la fecha límite de inscripción, "da igual
+                  // si la sala está llena o no" (ver puedeEditarEquipo,
+                  // arriba).
+                  salaId={sala.id}
+                  puedeEditar={puedeEditarEquipo}
                 />
               ))}
             </div>
@@ -430,11 +448,15 @@ function EquipoPanel({
   jugadores,
   isFutbol,
   titulo,
+  salaId,
+  puedeEditar,
 }: {
   equipo: EquipoMio;
   jugadores: JugadorRow[];
   isFutbol: boolean;
   titulo?: string;
+  salaId: string;
+  puedeEditar: boolean;
 }) {
   const huecos = huecosPorLinea(equipo.alineacion ?? null);
   const porLinea: Record<LineaFutbol, JugadorRow[]> = { POR: [], DEF: [], MED: [], DEL: [] };
@@ -567,28 +589,55 @@ function EquipoPanel({
         <span style={{ fontSize: 13, color: '#C9A257' }}>Total gastado</span>
         <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 14, color: '#F0B94D' }}>{formatEuros(equipo.gasto_total)}</span>
       </div>
-      <span
-        style={{
-          marginTop: 4,
-          fontFamily: "'Barlow Condensed', sans-serif",
-          fontWeight: 700,
-          fontSize: 14,
-          textTransform: 'uppercase',
-          letterSpacing: '0.03em',
-          color: S.MUTED_3,
-          background: 'transparent',
-          border: '1px solid rgba(240,185,77,0.25)',
-          padding: '12px 20px',
-          borderRadius: 10,
-          minHeight: 42,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          textAlign: 'center',
-        }}
-      >
-        Modificar equipo (próximamente)
-      </span>
+      {puedeEditar ? (
+        <Link
+          href={`/salas/${salaId}/crear-equipo?equipo=${equipo.id}`}
+          style={{
+            marginTop: 4,
+            fontFamily: "'Barlow Condensed', sans-serif",
+            fontWeight: 700,
+            fontSize: 14,
+            textTransform: 'uppercase',
+            letterSpacing: '0.03em',
+            color: '#F0B94D',
+            background: 'transparent',
+            border: '1px solid rgba(240,185,77,0.4)',
+            padding: '12px 20px',
+            borderRadius: 10,
+            minHeight: 42,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            textAlign: 'center',
+            textDecoration: 'none',
+          }}
+        >
+          Modificar equipo
+        </Link>
+      ) : (
+        <span
+          style={{
+            marginTop: 4,
+            fontFamily: "'Barlow Condensed', sans-serif",
+            fontWeight: 700,
+            fontSize: 14,
+            textTransform: 'uppercase',
+            letterSpacing: '0.03em',
+            color: S.MUTED_3,
+            background: 'transparent',
+            border: '1px solid rgba(240,185,77,0.25)',
+            padding: '12px 20px',
+            borderRadius: 10,
+            minHeight: 42,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            textAlign: 'center',
+          }}
+        >
+          Ya no se puede modificar este equipo
+        </span>
+      )}
     </div>
   );
 }

@@ -62,7 +62,7 @@ create table if not exists public.perfiles (
   apellido text,
   nombre_usuario text,
   fecha_nacimiento date,
-  saldo_simulado numeric(10, 2) not null default 150.00, -- € simulados, sin valor monetario real
+  saldo_simulado numeric(10, 2) not null default 20.00, -- € simulados, sin valor monetario real — 20€ de partida (27/09, décima vuelta; antes 150€, ver ALTER más abajo para cuentas ya existentes en una base de datos previa)
   terminos_aceptados boolean not null default false,
   terminos_aceptados_en timestamptz,
   rol text not null default 'usuario' check (rol in ('usuario', 'admin')),
@@ -76,6 +76,19 @@ comment on table public.perfiles is 'Datos de producto de cada usuario registrad
 -- añaden igualmente aquí.
 alter table public.perfiles add column if not exists apellido text;
 alter table public.perfiles add column if not exists nombre_usuario text;
+
+-- Saldo inicial de cuenta nueva: de 150€ a 20€ (27/09, décima vuelta,
+-- pedido de Iñi: "cada nuevo usuario, cuando entra, solamente va a tener 20
+-- euros de saldo"). Esto solo cambia el DEFAULT de la columna (ver también
+-- la propia definición de la tabla, arriba) — nunca toca el saldo actual de
+-- ninguna cuenta que ya exista, solo aplica a las que se registren a partir
+-- de ahora.
+alter table public.perfiles alter column saldo_simulado set default 20.00;
+
+-- Última vez que este usuario usó la recarga gratuita mensual de 10€ (ver
+-- recargar_gratis_mensual() más abajo) — null hasta que la use por primera
+-- vez.
+alter table public.perfiles add column if not exists ultima_recarga_gratis timestamptz;
 
 comment on column public.perfiles.nombre_usuario is 'Nombre público del usuario: es el que se muestra cuando participa en una sala/MTT. En las porras clásicas el usuario pone en su lugar un nombre de equipo (ver equipos.nombre_equipo).';
 
@@ -1109,7 +1122,7 @@ stable
 as $$
   select
     e.id,
-    case when e.rn = 1 then e.base_nombre else e.base_nombre || ' (' || public.numero_romano(e.rn) || ')' end,
+    case when e.rn = 1 then e.base_nombre else e.base_nombre || ' (' || public.numero_romano(e.rn::int) || ')' end,
     e.created_at
   from (
     -- Nunca se usa p.nombre (nombre real) aquí: si por lo que sea un perfil
@@ -1475,6 +1488,90 @@ $$;
 revoke all on function public.editar_equipo_porra(uuid, jsonb, text) from public;
 grant execute on function public.editar_equipo_porra(uuid, jsonb, text) to authenticated;
 
+-- Editar un equipo YA inscrito en una sala/MTT (nuevo, 27/09, décima vuelta)
+-- — antes el botón de "Modificar equipo" del detalle de sala estaba
+-- deshabilitado ("próximamente"); pedido de Iñi: "habilítalo ya, que se
+-- pueda editar tu equipo y volver a confirmar". Mismo patrón que
+-- editar_equipo_porra() de arriba — cambia los jugadores elegidos y la
+-- alineación (fútbol) SIN volver a cobrar el buy-in (la inscripción y el
+-- importe ya existentes no se tocan).
+--
+-- A diferencia de INSCRIBIRSE (que sí exige que la sala no esté completa),
+-- aquí "completa" NO bloquea — corrección explícita de Iñi el mismo día:
+-- "el botón de modificar equipo va a estar disponible hasta que finalice la
+-- hora de inscripción, da igual si la sala está llena o no". Lo único que
+-- bloquea es que la sala ya haya finalizado, o que ya haya pasado su fecha
+-- límite de inscripción (si tiene una fijada) — mismo momento en el que
+-- tampoco se puede ya entrar a inscribirse.
+create or replace function public.editar_equipo_sala(
+  p_equipo_id uuid,
+  p_jugadores jsonb,
+  p_alineacion text default null
+)
+returns public.equipos
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_equipo public.equipos;
+  v_sala record;
+  v_gasto numeric;
+begin
+  if auth.uid() is null then
+    raise exception 'No autenticado';
+  end if;
+
+  select * into v_equipo from public.equipos where id = p_equipo_id and usuario_id = auth.uid() and modo in ('sala', 'mtt') for update;
+  if not found then
+    raise exception 'Equipo no encontrado';
+  end if;
+
+  select * into v_sala from public.salas where id = v_equipo.sala_id for update;
+  if not found or v_sala.estado = 'finalizada' then
+    raise exception 'Esta sala ya no admite cambios';
+  end if;
+  if v_sala.fecha_limite_inscripcion is not null and now() > v_sala.fecha_limite_inscripcion then
+    raise exception 'Ya ha pasado la fecha límite para modificar tu equipo en esta sala';
+  end if;
+
+  if p_jugadores is null or jsonb_array_length(p_jugadores) = 0 then
+    raise exception 'Tienes que elegir al menos un jugador';
+  end if;
+
+  if exists (
+    select 1 from public.jugadores j
+    where j.id in (select (jsonb_array_elements_text(p_jugadores))::uuid)
+      and (j.deporte <> v_sala.deporte or j.competicion <> v_sala.competicion)
+  ) then
+    raise exception 'Alguno de los jugadores elegidos no pertenece a esta competición';
+  end if;
+
+  if jsonb_array_length(p_jugadores) <> (
+    select count(distinct v) from jsonb_array_elements_text(p_jugadores) v
+  ) then
+    raise exception 'No puedes elegir el mismo jugador más de una vez';
+  end if;
+
+  select coalesce(sum(precio), 0) into v_gasto
+    from public.jugadores
+    where id in (select (jsonb_array_elements_text(p_jugadores))::uuid);
+
+  if v_gasto > 100000 then
+    raise exception 'El equipo supera el presupuesto de 100.000 €';
+  end if;
+
+  update public.equipos
+    set jugadores = p_jugadores, alineacion = p_alineacion, gasto_total = v_gasto
+    where id = p_equipo_id
+    returning * into v_equipo;
+
+  return v_equipo;
+end;
+$$;
+
+revoke all on function public.editar_equipo_sala(uuid, jsonb, text) from public;
+grant execute on function public.editar_equipo_sala(uuid, jsonb, text) to authenticated;
+
 -- Reemplaza de golpe todo el ranking mundial de un deporte (golf o tenis)
 -- por el listado que acaba de pegar el admin — en una única transacción,
 -- para que un fallo a mitad de camino nunca deje la tabla vacía (ver
@@ -1609,6 +1706,266 @@ $$;
 
 revoke all on function public.eliminar_porra(uuid) from public;
 grant execute on function public.eliminar_porra(uuid) to authenticated;
+
+-- ============================================================================
+-- PUBLICIDAD EN VÍDEO (nuevo, 27/09, décima vuelta)
+-- ============================================================================
+-- Pedido de Iñi: monetizar con vídeos publicitarios de patrocinadores, en
+-- estos huecos de la app:
+--  1) Recarga de saldo (/recargar): la pantalla deja de tener los 4 botones
+--     de recarga instantánea y pasa a tener solo dos opciones — una recarga
+--     GRATIS de 10€ (como mucho una vez cada 30 días, ver
+--     recargar_gratis_mensual() más abajo) y, a partir de ahí, tantas
+--     recargas de 10€ como quiera el usuario SIEMPRE que vea antes un vídeo
+--     publicitario completo (recargar_por_video()).
+--  2) Clasificación en directo (/salas/[id]/clasificacion): un vídeo
+--     publicitario reproduciéndose debajo del contenido de la pantalla, sin
+--     interferir con la vista de la clasificación — aquí solo cuenta como
+--     "visualización" a efectos de estadísticas para el admin, no reparte
+--     saldo (registrar_visualizacion_anuncio()).
+--  3) Feed de /inicio (nuevo, 27/09, a modo de prueba): un vídeo embebido
+--     entre "tus equipos en juego" y "Elige tu deporte" — la propia idea
+--     original de Iñi ("idea B") que había quedado sin confirmar tras la
+--     primera tanda de esta funcionalidad; Iñi pidió expresamente "ponlo a
+--     ver para luego decidir si dejarlo o no", así que este hueco se puede
+--     desactivar sin tocar código en ningún momento: basta con desmarcar
+--     "Mostrar en inicio" en cada vídeo desde /admin (o dejar simplemente
+--     que ningún vídeo activo lo tenga marcado). Igual que en clasificación,
+--     solo cuenta como "visualización" para las estadísticas, no reparte
+--     saldo.
+--
+-- Los vídeos en sí se guardan en Supabase Storage, en un bucket nuevo
+-- llamado "anuncios" — público de LECTURA (hace falta para que el <video>
+-- del navegador los reproduzca con una URL directa), de ESCRITURA solo el
+-- admin (políticas de storage.objects más abajo). Se suben desde una
+-- sección nueva en /admin ("Publicidad en vídeo").
+
+create table if not exists public.anuncios_video (
+  id uuid primary key default gen_random_uuid(),
+  nombre_referencia text not null, -- solo para uso interno del admin (qué anunciante es)
+  url text not null, -- URL pública del vídeo en el bucket "anuncios"
+  prioridad int not null default 0 check (prioridad >= 0), -- cuanto más alto, más veces sale — ver elegir_anuncio_video()
+  activo boolean not null default true,
+  mostrar_en_recarga boolean not null default true,
+  mostrar_en_clasificacion boolean not null default true,
+  mostrar_en_inicio boolean not null default true, -- feed de /inicio, entre "tus equipos en juego" y el selector de deporte (nuevo, 27/09, decidido a probar — ver más abajo)
+  fecha_inicio timestamptz not null default now(),
+  fecha_fin timestamptz, -- null = sin fecha de fin
+  creado_at timestamptz not null default now()
+);
+
+comment on table public.anuncios_video is 'Vídeos publicitarios subidos desde /admin. La prioridad decide, mediante un sorteo ponderado (ver elegir_anuncio_video()), cuántas veces sale cada uno — sin que ninguno activo pueda quedarse casi sin verse.';
+
+-- Tercer hueco: el feed de /inicio, entre "tus equipos en juego" y el
+-- selector de deporte (nuevo, 27/09 — Iñi lo pidió puesto "a ver" para
+-- luego decidir si se queda o no, así que puede desactivarse sin más que
+-- desmarcar "Mostrar en inicio" en cada vídeo desde /admin, sin tocar
+-- código). Si la tabla ya existía de una ejecución anterior del esquema, la
+-- columna se añade aquí.
+alter table public.anuncios_video add column if not exists mostrar_en_inicio boolean not null default true;
+
+alter table public.anuncios_video enable row level security;
+drop policy if exists "anuncios_video_admin_todo" on public.anuncios_video;
+create policy "anuncios_video_admin_todo" on public.anuncios_video
+  for all using (public.es_admin()) with check (public.es_admin());
+-- Sin política de lectura pública a propósito (mismo caso que
+-- rankings_mundiales o el valor de mercado de fútbol, sección 4/9): un
+-- usuario normal nunca lee esta tabla directamente — recibe el vídeo ya
+-- elegido a través de elegir_anuncio_video(), que solo devuelve id/url/
+-- nombre del vídeo sorteado, nunca la prioridad de nadie ni el resto de la
+-- tabla.
+
+-- Un registro por cada vez que un vídeo se reproduce (completo o no) — para
+-- dos cosas: dar de comer al panel de admin ("cuántas veces se ha visto
+-- cada vídeo", para poder enseñárselo al anunciante) y, en el caso de
+-- 'recarga', es la prueba de que el vídeo se vio de verdad antes de dar los
+-- 10€ (ver recargar_por_video()).
+create table if not exists public.anuncios_video_reproducciones (
+  id uuid primary key default gen_random_uuid(),
+  video_id uuid not null references public.anuncios_video(id) on delete cascade,
+  usuario_id uuid not null references auth.users(id) on delete cascade,
+  ubicacion text not null check (ubicacion in ('recarga', 'clasificacion', 'inicio')),
+  completado boolean not null default false,
+  creado_at timestamptz not null default now()
+);
+
+-- Añade 'inicio' como ubicación válida (nuevo, 27/09) si la tabla ya
+-- existía de una ejecución anterior del esquema, con solo 'recarga' y
+-- 'clasificacion' permitidos.
+alter table public.anuncios_video_reproducciones drop constraint if exists anuncios_video_reproducciones_ubicacion_check;
+alter table public.anuncios_video_reproducciones add constraint anuncios_video_reproducciones_ubicacion_check
+  check (ubicacion in ('recarga', 'clasificacion', 'inicio'));
+
+alter table public.anuncios_video_reproducciones enable row level security;
+drop policy if exists "anuncios_video_reproducciones_admin_lee" on public.anuncios_video_reproducciones;
+create policy "anuncios_video_reproducciones_admin_lee" on public.anuncios_video_reproducciones
+  for select using (public.es_admin());
+-- Sin política de insert/update/delete para nadie: solo se escribe desde
+-- dentro de las funciones security definer de más abajo, nunca directamente
+-- desde el cliente — así nadie puede insertarse a sí mismo una
+-- "visualización completa" falsa saltándose recargar_por_video().
+
+insert into storage.buckets (id, name, public)
+values ('anuncios', 'anuncios', true)
+on conflict (id) do nothing;
+
+drop policy if exists "anuncios_bucket_admin_insert" on storage.objects;
+create policy "anuncios_bucket_admin_insert" on storage.objects
+  for insert to authenticated
+  with check (bucket_id = 'anuncios' and public.es_admin());
+
+drop policy if exists "anuncios_bucket_admin_update" on storage.objects;
+create policy "anuncios_bucket_admin_update" on storage.objects
+  for update to authenticated
+  using (bucket_id = 'anuncios' and public.es_admin());
+
+drop policy if exists "anuncios_bucket_admin_delete" on storage.objects;
+create policy "anuncios_bucket_admin_delete" on storage.objects
+  for delete to authenticated
+  using (bucket_id = 'anuncios' and public.es_admin());
+
+-- Elige qué vídeo tocaba mostrar en un hueco concreto ('recarga' o
+-- 'clasificacion') mediante un sorteo aleatorio ponderado por prioridad —
+-- el peso real de cada vídeo es SIEMPRE 1 (de base) + su prioridad, así que
+-- un vídeo con prioridad 0 nunca deja de poder salir, solo sale menos veces
+-- de media que uno con más prioridad (pedido de Iñi: "la frecuencia tiene
+-- que ser más o menos parecida... no vamos a hacer que casi no se vea el
+-- vídeo de alguien que paga menos"). Algoritmo de sorteo ponderado estándar
+-- (random() ^ (1/peso), gana el mayor) — no hace falta ninguna extensión de
+-- Postgres. Devuelve cero filas si no hay ningún vídeo activo para ese
+-- hueco ahora mismo (la pantalla, en ese caso, simplemente no muestra
+-- ningún hueco de publicidad).
+create or replace function public.elegir_anuncio_video(p_ubicacion text)
+returns table (id uuid, url text, nombre_referencia text)
+language sql
+security definer set search_path = public
+as $$
+  select v.id, v.url, v.nombre_referencia
+  from public.anuncios_video v
+  where v.activo = true
+    and v.fecha_inicio <= now()
+    and (v.fecha_fin is null or v.fecha_fin >= now())
+    and (
+      (p_ubicacion = 'recarga' and v.mostrar_en_recarga) or
+      (p_ubicacion = 'clasificacion' and v.mostrar_en_clasificacion) or
+      (p_ubicacion = 'inicio' and v.mostrar_en_inicio)
+    )
+  order by random() ^ (1.0 / (1 + v.prioridad)) desc
+  limit 1;
+$$;
+
+revoke all on function public.elegir_anuncio_video(text) from public;
+grant execute on function public.elegir_anuncio_video(text) to authenticated;
+
+-- Registra que un usuario ha visto un vídeo en un hueco que NO reparte
+-- saldo (hoy, solo 'clasificacion') — únicamente para las estadísticas del
+-- admin. p_completado indica si llegó al final o lo cortó antes de acabar.
+create or replace function public.registrar_visualizacion_anuncio(p_video_id uuid, p_ubicacion text, p_completado boolean default false)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if p_ubicacion not in ('recarga', 'clasificacion') then
+    raise exception 'Ubicación de anuncio no válida: %', p_ubicacion;
+  end if;
+  insert into public.anuncios_video_reproducciones (video_id, usuario_id, ubicacion, completado)
+  values (p_video_id, auth.uid(), p_ubicacion, p_completado);
+end;
+$$;
+
+revoke all on function public.registrar_visualizacion_anuncio(uuid, text, boolean) from public;
+grant execute on function public.registrar_visualizacion_anuncio(uuid, text, boolean) to authenticated;
+
+-- Total de visualizaciones (y cuántas completas) de cada vídeo, para el
+-- panel de admin — pensado para poder enseñarle el dato real a cada
+-- anunciante. Solo el admin puede llamarla (comprobado dentro, con el mismo
+-- criterio que el resto de funciones exclusivas de admin).
+create or replace function public.estadisticas_anuncios_video()
+returns table (video_id uuid, total_visualizaciones bigint, total_completadas bigint)
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if not public.es_admin() then
+    raise exception 'Solo el administrador puede consultar las estadísticas de publicidad';
+  end if;
+
+  return query
+    select r.video_id, count(*) as total_visualizaciones, count(*) filter (where r.completado) as total_completadas
+    from public.anuncios_video_reproducciones r
+    group by r.video_id;
+end;
+$$;
+
+revoke all on function public.estadisticas_anuncios_video() from public;
+grant execute on function public.estadisticas_anuncios_video() to authenticated;
+
+-- Recarga gratuita de 10€ — como mucho una vez cada 30 días por usuario
+-- (pedido de Iñi: "una vez al mes"; se implementa como ventana móvil de 30
+-- días desde el último uso, no como "se resetea el día 1 del mes natural",
+-- para que sea un criterio simple e igual de justo sea cual sea el día en
+-- que cada uno empezó a jugar).
+create or replace function public.recargar_gratis_mensual()
+returns public.perfiles
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_ultima timestamptz;
+  v_perfil public.perfiles;
+begin
+  select ultima_recarga_gratis into v_ultima from public.perfiles where id = auth.uid() for update;
+
+  if v_ultima is not null and v_ultima > now() - interval '30 days' then
+    raise exception 'Ya has usado tu recarga gratuita de este mes';
+  end if;
+
+  update public.perfiles set ultima_recarga_gratis = now() where id = auth.uid();
+
+  v_perfil := public.registrar_movimiento('deposito', 10);
+  return v_perfil;
+end;
+$$;
+
+revoke all on function public.recargar_gratis_mensual() from public;
+grant execute on function public.recargar_gratis_mensual() to authenticated;
+
+-- Recarga de 10€ a cambio de ver un vídeo publicitario completo — sin
+-- límite de veces (a diferencia de la gratuita). Se llama SOLO cuando el
+-- vídeo ha terminado de reproducirse de verdad en el cliente (evento
+-- `onEnded` del <video>) — como cualquier "vídeo recompensado", no hay
+-- forma 100% infalible de impedir que alguien llame a esta función sin
+-- haber visto el vídeo; para Fase 1, con saldo ficticio sin valor real, se
+-- acepta ese riesgo. Si el día de mañana esto reparte algo con valor real,
+-- hace falta blindarlo más (por ejemplo, validando la reproducción del
+-- lado del proveedor de vídeo, no solo confiando en el evento del cliente).
+create or replace function public.recargar_por_video(p_video_id uuid)
+returns public.perfiles
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_perfil public.perfiles;
+begin
+  if not exists (
+    select 1 from public.anuncios_video
+    where id = p_video_id and activo = true and mostrar_en_recarga = true
+      and fecha_inicio <= now() and (fecha_fin is null or fecha_fin >= now())
+  ) then
+    raise exception 'Este vídeo ya no está disponible';
+  end if;
+
+  insert into public.anuncios_video_reproducciones (video_id, usuario_id, ubicacion, completado)
+  values (p_video_id, auth.uid(), 'recarga', true);
+
+  v_perfil := public.registrar_movimiento('deposito', 10);
+  return v_perfil;
+end;
+$$;
+
+revoke all on function public.recargar_por_video(uuid) from public;
+grant execute on function public.recargar_por_video(uuid) to authenticated;
 
 -- ============================================================================
 -- CONVERTIR TU CUENTA EN SUPERADMINISTRADOR

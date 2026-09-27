@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase, Perfil } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
+import AnuncioVideoInline from '@/components/AnuncioVideoInline';
 import * as S from '@/lib/mockupStyles';
 import {
   DEPORTES,
@@ -294,6 +295,14 @@ export default function InicioPage() {
               })}
             </div>
           )}
+
+          {/* Vídeo publicitario en el feed de inicio (nuevo, 27/09) — la
+              "idea B" original de Iñi, puesta a prueba entre "tus equipos en
+              juego" y el selector de deporte, exactamente donde la había
+              planteado la primera vez: "ponlo a ver para luego decidir si
+              dejarlo o no". Si no hay ningún vídeo con "Mostrar en inicio"
+              marcado, el componente no pinta nada. */}
+          <AnuncioVideoInline ubicacion="inicio" />
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 8 }}>
             <h2 style={{ fontSize: 20, fontWeight: 700, color: S.TEXT }}>Elige tu deporte.</h2>

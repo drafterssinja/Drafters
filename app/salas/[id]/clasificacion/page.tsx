@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase, Perfil } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
+import AnuncioVideoInline from '@/components/AnuncioVideoInline';
 import * as S from '@/lib/mockupStyles';
 import { formatEuros } from '@/lib/salaShared';
 
@@ -51,6 +52,15 @@ export default function ClasificacionPage() {
           <Link href={`/salas/${params.id}`} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '12px 24px', textDecoration: 'none', display: 'inline-flex' }}>
             Volver a la sala
           </Link>
+
+          {/* Vídeo publicitario debajo de todo (27/09, décima vuelta) — a
+              propósito, va DESPUÉS del contenido de la pantalla (el aviso de
+              "próximamente" y el botón de volver), nunca antes ni encima,
+              para no interferir con la vista de la clasificación en sí,
+              tal y como pidió Iñi. */}
+          <div style={{ width: '100%', maxWidth: 420 }}>
+            <AnuncioVideoInline ubicacion="clasificacion" />
+          </div>
         </div>
       </div>
     </main>

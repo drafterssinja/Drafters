@@ -1340,6 +1340,20 @@ export default function AdminPage() {
             <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>Solo visible para el superadministrador.</p>
           </div>
 
+          {/* Gestión de vídeos publicitarios (nuevo, 27/09, décima vuelta) —
+              pantalla propia, mismo patrón que /admin/usuarios: no vive
+              embebida aquí, se llega pulsando esta tarjeta. */}
+          <Link
+            href="/admin/publicidad"
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: '14px 16px', textDecoration: 'none' }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 13.5, color: S.TEXT }}>Vídeos publicitarios</span>
+              <span style={{ fontSize: 11.5, color: S.MUTED_2 }}>Subir vídeos, prioridad y estadísticas de visualización</span>
+            </div>
+            <span style={{ flexShrink: 0, color: S.ACCENT, fontSize: 16, fontWeight: 700 }}>→</span>
+          </Link>
+
           {error && <p style={S.errorText}>{error}</p>}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

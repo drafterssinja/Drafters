@@ -1,8 +1,10 @@
-# DRAFTERS — Sistema de Puntuaciones (actualizado 24/09/2026)
+# DRAFTERS — Sistema de Puntuaciones (actualizado 27/09/2026)
 
 > Este documento sustituye al contenido del archivo subido `Puntuaciones_Drafters.docx`. La herramienta de proyecto no puede sobrescribir un archivo subido por el usuario (solo puede leerlo), así que esta es la copia de trabajo actualizada — el .docx original (`Puntuaciones_Drafters_DEFINITIVO.docx`) se ha entregado también en el chat para que Iñi lo suba él mismo si quiere sustituir el archivo del proyecto.
 >
-> Cambio de esta revisión: en fútbol, la parada del portero pasa de +2,5 a **+1,5 puntos** (tabla "Fútbol — Portero").
+> Cambio de la revisión del 24/09: en fútbol, la parada del portero pasa de +2,5 a **+1,5 puntos** (tabla "Fútbol — Portero").
+>
+> El 27/09, Iñi pidió igualar la portería a cero del defensa a la del portero (+6 ptos, 90 min. completos), pero al ver que el defensa YA puntuaba por portería a cero aclaró que ese cambio no hacía falta — "me gusta que los defensas con más de 60 minutos jugados puntúen a cuatro puntos... no lo tocamos". Revertido: la tabla "Fútbol — Defensas (bonus adicional)" se queda tal cual estaba (+4 ptos, con 60+ minutos jugados).
 
 Esta es una de las características diferenciales de Drafters con respecto a las porras tradicionales o otras páginas Fantasy. La valoración de cada jugador del equipo Drafter no se evalúa únicamente por el resultado final, sino que cada acción positiva o negativa durante todo el transcurso de la competición tendrá un valor adicional.
 
@@ -208,6 +210,7 @@ Notas:
 Notas:
 - La portería a cero del defensa sube de +3 (DraftKings) a +4.
 - El duelo aéreo ganado es exclusivo de Drafters — premia al defensa físico y consistente, validado por Opta.
+- **Nota del 27/09:** Iñi confirmó que esta tabla se queda tal cual estaba (no se iguala a la del portero) — ver la cabecera del documento.
 
 ### Fútbol — Bonus globales (todos los jugadores)
 

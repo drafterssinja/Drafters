@@ -37,6 +37,10 @@ export type Perfil = {
   // de usuarios registrados (/admin/usuarios). Puede venir null en algún
   // perfil muy antiguo hasta que se vuelva a pegar el esquema.
   email?: string | null;
+  // Última vez que se usó la recarga gratuita mensual de 10€ (nuevo, 27/09,
+  // décima vuelta) — null si nunca se ha usado. Ver /recargar y
+  // recargar_gratis_mensual() en drafters-schema.sql.
+  ultima_recarga_gratis?: string | null;
 };
 
 export type Movimiento = {
