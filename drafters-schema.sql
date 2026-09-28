@@ -2017,12 +2017,24 @@ $$;
 revoke all on function public.registrar_visualizacion_anuncio(uuid, text, boolean) from public;
 grant execute on function public.registrar_visualizacion_anuncio(uuid, text, boolean) to authenticated;
 
--- Total de visualizaciones (y cuántas completas) de cada vídeo, para el
--- panel de admin — pensado para poder enseñarle el dato real a cada
--- anunciante. Solo el admin puede llamarla (comprobado dentro, con el mismo
--- criterio que el resto de funciones exclusivas de admin).
+-- Total de visualizaciones de cada vídeo, para el panel de admin — pensado
+-- para poder enseñarle el dato real a cada anunciante. Solo el admin puede
+-- llamarla (comprobado dentro, con el mismo criterio que el resto de
+-- funciones exclusivas de admin).
+--
+-- Separado en dos columnas (28/09, pedido de Iñi): "pasivas" (clasificación
+-- en directo + Mesas Drafters — se reproducen solas, sin que el usuario
+-- pida nada) y "recarga" (el usuario decide activamente verlo a cambio de
+-- 20€) — son audiencias muy distintas para un anunciante, así que no tiene
+-- sentido sumarlas en un único número. `total_visualizaciones` se mantiene
+-- para no romper nada que ya lo usara, pero siempre es la suma de las
+-- otras dos. `total_completadas` ya no aporta nada de más: con el diseño
+-- actual, tanto las pasivas como las de recarga se registran siempre con
+-- completado=true (ver registrar_visualizacion_anuncio() y
+-- recargar_por_video() más abajo), así que se retira de aquí para no dar
+-- una columna que siempre coincide con el total.
 create or replace function public.estadisticas_anuncios_video()
-returns table (video_id uuid, total_visualizaciones bigint, total_completadas bigint)
+returns table (video_id uuid, visualizaciones_pasivas bigint, visualizaciones_recarga bigint, total_visualizaciones bigint)
 language plpgsql
 security definer set search_path = public
 as $$
@@ -2032,7 +2044,11 @@ begin
   end if;
 
   return query
-    select r.video_id, count(*) as total_visualizaciones, count(*) filter (where r.completado) as total_completadas
+    select
+      r.video_id,
+      count(*) filter (where r.ubicacion in ('clasificacion', 'mesas')) as visualizaciones_pasivas,
+      count(*) filter (where r.ubicacion = 'recarga') as visualizaciones_recarga,
+      count(*) as total_visualizaciones
     from public.anuncios_video_reproducciones r
     group by r.video_id;
 end;

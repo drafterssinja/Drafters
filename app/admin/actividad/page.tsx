@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { supabase, Perfil } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
+import { conTiempoMaximo } from '@/lib/conTiempoMaximo';
 
 // ============================================================================
 // REGISTRO DE ACTIVIDAD (nuevo, 28/09 — pedido de Iñi)
@@ -48,6 +49,7 @@ export default function AdminActividadPage() {
   const [usuarioFiltro, setUsuarioFiltro] = useState<string>('todos');
   const [cargandoEventos, setCargandoEventos] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorAcceso, setErrorAcceso] = useState<string | null>(null);
 
   async function cargarEventos(usuarioId: string) {
     setCargandoEventos(true);
@@ -58,7 +60,13 @@ export default function AdminActividadPage() {
     setCargandoEventos(false);
 
     if (eventosError) {
-      setError('No se ha podido cargar el registro de actividad.');
+      // Se enseña el mensaje real de Supabase (28/09) — lo más probable si
+      // esto falla es que todavía no se haya vuelto a ejecutar el
+      // drafters-schema.sql completo en el editor SQL de Supabase desde que
+      // se añadió esta función (eventos_actividad_admin no existiría
+      // todavía en la base de datos), y así se ve claramente en vez de un
+      // mensaje genérico.
+      setError(`No se ha podido cargar el registro de actividad: ${eventosError.message}`);
     } else {
       setEventos((data as EventoActividad[]) ?? []);
     }
@@ -68,39 +76,58 @@ export default function AdminActividadPage() {
     let activo = true;
 
     async function cargar() {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      // Mismo endurecimiento que en /admin/publicidad (28/09, aviso de
+      // Iñi): todo el bloque de comprobación de acceso va con un tiempo
+      // máximo de espera y capturando cualquier error, para no quedarse
+      // colgado en "Comprobando acceso..." sin explicación.
+      try {
+        const {
+          data: { session },
+        } = await conTiempoMaximo(supabase.auth.getSession(), 'comprobar la sesión');
 
-      if (!session) {
-        router.push('/login');
-        return;
+        if (!activo) return;
+
+        if (!session) {
+          router.push('/login');
+          return;
+        }
+
+        const { data: perfilData, error: perfilError } = await conTiempoMaximo(
+          supabase.from('perfiles').select('*').eq('id', session.user.id).single(),
+          'cargar tu perfil'
+        );
+
+        if (!activo) return;
+
+        if (perfilError) {
+          setErrorAcceso(`No se ha podido comprobar tu acceso: ${perfilError.message}`);
+          return;
+        }
+
+        const p = perfilData as Perfil | null;
+        if (!p || p.rol !== 'admin') {
+          router.push('/cuenta');
+          return;
+        }
+
+        setPerfil(p);
+        setAutorizado(true);
+
+        const { data: usuariosData, error: usuariosError } = await supabase
+          .from('perfiles')
+          .select('id, nombre, apellido, nombre_usuario, email')
+          .order('nombre', { ascending: true });
+
+        if (!activo) return;
+
+        if (usuariosError) setError('No se han podido cargar los usuarios para el filtro.');
+        else setUsuarios((usuariosData as Perfil[]) ?? []);
+
+        await cargarEventos('todos');
+      } catch (e) {
+        if (!activo) return;
+        setErrorAcceso(e instanceof Error ? `No se ha podido comprobar tu acceso: ${e.message}` : 'No se ha podido comprobar tu acceso.');
       }
-
-      const { data: perfilData } = await supabase.from('perfiles').select('*').eq('id', session.user.id).single();
-
-      if (!activo) return;
-
-      const p = perfilData as Perfil | null;
-      if (!p || p.rol !== 'admin') {
-        router.push('/cuenta');
-        return;
-      }
-
-      setPerfil(p);
-      setAutorizado(true);
-
-      const { data: usuariosData, error: usuariosError } = await supabase
-        .from('perfiles')
-        .select('id, nombre, apellido, nombre_usuario, email')
-        .order('nombre', { ascending: true });
-
-      if (!activo) return;
-
-      if (usuariosError) setError('No se han podido cargar los usuarios para el filtro.');
-      else setUsuarios((usuariosData as Perfil[]) ?? []);
-
-      await cargarEventos('todos');
     }
 
     cargar();
@@ -113,6 +140,30 @@ export default function AdminActividadPage() {
   async function onCambiarFiltro(usuarioId: string) {
     setUsuarioFiltro(usuarioId);
     await cargarEventos(usuarioId);
+  }
+
+  if (errorAcceso) {
+    return (
+      <main style={S.mainReset}>
+        <div style={S.pageFrame}>
+          <DraftersHeader />
+          <div style={S.accountSection}>
+            <p style={S.errorText}>{errorAcceso}</p>
+            <button
+              type="button"
+              onClick={() => {
+                setErrorAcceso(null);
+                setAutorizado(null);
+                window.location.reload();
+              }}
+              style={S.primaryButton}
+            >
+              Reintentar
+            </button>
+          </div>
+        </div>
+      </main>
+    );
   }
 
   if (autorizado === null || !perfil) {

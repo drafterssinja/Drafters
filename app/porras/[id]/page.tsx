@@ -8,7 +8,7 @@ import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
 import { calcularTramosPorInscritos } from '@/lib/repartoPremios';
 import { GRUPO_PORRA_LABELS, GrupoPorra, ORDEN_GRUPOS, COLOR_GRUPO } from '@/lib/porraGrupos';
-import { formatEuros, posicionLabel, closesInLabel } from '@/lib/salaShared';
+import { formatEuros, posicionLabel, closesInLabel, parteParaPremios, parteComision } from '@/lib/salaShared';
 import { PorraFormato, PORRA_FORMATO_LABELS, PORRA_FORMATO_COLOR, PORRA_FORMATO_DESCRIPCION_LARGA } from '@/lib/porraFormato';
 
 // ============================================================================
@@ -164,7 +164,12 @@ export default function PorraDetallePage() {
     );
   }
 
-  const bote = porra.precio * signedUp;
+  // Bote real = lo que va a premios (90% del precio de entrada, sin la
+  // comisión de la casa) — corregido el 28/09, pedido de Iñi: "en las
+  // porras también nos quedamos un 10%", así que el bote ya no es el
+  // precio de entrada completo, sino la misma fracción que ya se
+  // descontaba en salas (parteParaPremios(), lib/salaShared.ts).
+  const bote = parteParaPremios(porra.precio) * signedUp;
   const tramos = calcularTramosPorInscritos(signedUp);
   const estadoColor = porra.estado === 'disponible' ? '#3DDC84' : porra.estado === 'proximamente' ? '#F0B94D' : S.MUTED_3;
   const estadoLabel = porra.estado === 'disponible' ? 'Disponible' : porra.estado === 'proximamente' ? 'Próximamente' : 'Finalizada';
@@ -328,7 +333,15 @@ export default function PorraDetallePage() {
 
           {tab === 'info' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <InfoRow label="Precio de entrada" value={formatEuros(porra.precio)} accent />
+              {/* Desglose precio + comisión (28/09), mismo criterio que ya
+                  usa "Buy-in" en /salas/[id]: "18 € + 2 €" en vez del total
+                  seguido de la palabra "comisión" — se entiende sin más
+                  aclaración (mismo pedido de Iñi, 25/09, aplicado aquí). */}
+              <InfoRow
+                label="Precio de entrada"
+                value={`${formatEuros(parteParaPremios(porra.precio))} + ${formatEuros(parteComision(porra.precio))}`}
+                accent
+              />
               <InfoRow label="Competición" value={porra.competicion ?? '—'} />
               <InfoRow label="Jugadores inscritos" value={String(signedUp)} />
 
@@ -378,7 +391,7 @@ export default function PorraDetallePage() {
               {tramos.map((t, i) => (
                 <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '13px 14px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
                   <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14, color: S.TEXT }}>{posicionLabel(t.desde, t.hasta)}</span>
-                  <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 14, color: '#F0B94D' }}>{formatEuros((bote * t.porcentajeCadaUno) / 100)} c/u</span>
+                  <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 14, color: '#F0B94D' }}>{formatEuros((bote * t.porcentajeCadaUno) / 100)}</span>
                 </div>
               ))}
             </div>

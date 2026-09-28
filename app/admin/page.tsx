@@ -34,7 +34,12 @@ type PorraAdmin = {
 type InscripcionFila = {
   importe: number;
   fecha: string;
-  equipos: { modo: string; salas: { deporte: string; tipo: string; buy_in: number } | null } | null;
+  // `porras` (28/09): antes solo se traía `salas` — las filas de porra
+  // llegaban igual en esta misma consulta, pero se descartaban al filtrar
+  // porque `equipos.salas` salía null para ellas. Ahora se distingue
+  // también el caso de porra, para poder sacar el rake de porras aparte
+  // (ver rakeGanadoPorras más abajo).
+  equipos: { modo: string; salas: { deporte: string; tipo: string; buy_in: number } | null; porras: { id: string } | null } | null;
 };
 type MovimientoFila = { tipo: 'deposito' | 'retiro'; importe: number; creado_en: string };
 
@@ -91,6 +96,12 @@ export default function AdminPage() {
   const [filtroBuyIn, setFiltroBuyIn] = useState<string>('todos');
   const [filtroFecha, setFiltroFecha] = useState<string>('todo');
 
+  // Desglose de "Rake ganado" por salas/porras (28/09, pedido de Iñi: "en
+  // la caja de Rake sumas ambas cantidades, y que si pulso encima me cargue
+  // justo debajo el separado de cada una") — colapsado de serie, se
+  // despliega al pulsar la propia tarjeta.
+  const [mostrarDesgloseRake, setMostrarDesgloseRake] = useState(false);
+
   // Editar una porra ya creada, directamente desde su propia tarjeta en
   // "Porras creadas" (pedido de Iñi, ronda de correcciones: antes solo se
   // podía tocar su fecha límite indirectamente, editando el torneo entero
@@ -116,7 +127,7 @@ export default function AdminPage() {
         // Las inscripciones 'reembolsada' son dinero devuelto íntegro (la sala no se
         // llenó a tiempo y no había con quién juntarla) — no cuentan como partida
         // jugada ni deben sumar a la facturación real.
-        supabase.from('inscripciones').select('importe, fecha, equipos!inner(modo, salas(deporte, tipo, buy_in))').neq('estado', 'reembolsada'),
+        supabase.from('inscripciones').select('importe, fecha, equipos!inner(modo, salas(deporte, tipo, buy_in), porras(id))').neq('estado', 'reembolsada'),
         supabase.from('movimientos').select('tipo, importe, creado_en'),
       ]);
 
@@ -226,23 +237,43 @@ export default function AdminPage() {
     return true;
   });
 
+  // Inscripciones de porra (28/09, pedido de Iñi: "lleva también el
+  // control del rake ganado por las porras") — misma consulta de arriba,
+  // separada por el lado de porras en vez de salas. Los filtros de
+  // deporte/tipo de sala/buy-in son propios de las 5 salas de aforo fijo y
+  // el Maratón, así que no se aplican aquí (una porra siempre es de golf, y
+  // no tiene "tipo de sala" ni buy-in en ese sentido) — solo se respeta el
+  // filtro de periodo, que sí tiene sentido para las dos cosas.
+  const inscripcionesPorrasFiltradas = inscripciones.filter((i) => {
+    if (!i.equipos?.porras) return false;
+    if (!dentroDelPeriodo(i.fecha)) return false;
+    return true;
+  });
+
   const movimientosFiltrados = movimientos.filter((m) => dentroDelPeriodo(m.creado_en));
 
   const partidasJugadas = inscripcionesFiltradas.length;
   const dineroJugado = inscripcionesFiltradas.reduce((acc, i) => acc + Number(i.importe), 0);
-  const rakeGanado = dineroJugado * 0.1;
+  const dineroJugadoPorras = inscripcionesPorrasFiltradas.reduce((acc, i) => acc + Number(i.importe), 0);
+  const rakeGanadoSalas = dineroJugado * 0.1;
+  const rakeGanadoPorras = dineroJugadoPorras * 0.1;
+  const rakeGanado = rakeGanadoSalas + rakeGanadoPorras;
   const dineroDepositado = movimientosFiltrados.filter((m) => m.tipo === 'deposito').reduce((acc, m) => acc + Number(m.importe), 0);
   const dineroRetirado = movimientosFiltrados.filter((m) => m.tipo === 'retiro').reduce((acc, m) => acc + Number(m.importe), 0);
 
   const saldoLabel = `${perfil.saldo_simulado.toFixed(2)} €`;
   const initials = S.iniciales(perfil.nombre, perfil.apellido);
 
-  const statCards: { value: string; label: string; href?: string }[] = [
+  const statCards: { value: string; label: string; href?: string; onClick?: () => void; expandido?: boolean }[] = [
     { value: `${dineroDepositado.toFixed(2)} €`, label: 'Dinero depositado' },
     { value: `${dineroRetirado.toFixed(2)} €`, label: 'Dinero retirado' },
     { value: `${partidasJugadas}`, label: 'Partidas jugadas' },
-    { value: `${dineroJugado.toFixed(2)} €`, label: 'Dinero jugado' },
-    { value: `${rakeGanado.toFixed(2)} €`, label: 'Rake ganado (10%)' },
+    { value: `${dineroJugado.toFixed(2)} €`, label: 'Dinero jugado (salas)' },
+    // Clicable (28/09, pedido de Iñi: "lleva también el control del rake
+    // ganado por las porras... que si pulso encima me cargue justo debajo
+    // el separado de cada una") — suma salas + porras, y despliega el
+    // desglose de las dos por separado justo debajo del grid al pulsarla.
+    { value: `${rakeGanado.toFixed(2)} €`, label: 'Rake ganado (10%)', onClick: () => setMostrarDesgloseRake((v) => !v), expandido: mostrarDesgloseRake },
     // Clicable (pedido de Iñi): pulsar el número lleva al listado completo
     // de usuarios en su propia pantalla, en vez de mostrarlo siempre aquí.
     { value: `${totalUsuarios ?? '—'}`, label: 'Usuarios registrados', href: '/admin/usuarios' },
@@ -336,24 +367,70 @@ export default function AdminPage() {
                   <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: S.MUTED_2 }}>
                     {c.label}
                     {c.href && <span style={{ marginLeft: 5, color: S.ACCENT }}>→</span>}
+                    {c.onClick && <span style={{ marginLeft: 5, color: S.ACCENT, display: 'inline-block', transform: c.expandido ? 'rotate(180deg)' : 'none' }}>▾</span>}
                   </span>
                 </>
               );
-              return c.href ? (
-                <Link
-                  key={c.label}
-                  href={c.href}
-                  style={{ display: 'flex', flexDirection: 'column', gap: 4, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 14, textDecoration: 'none', cursor: 'pointer' }}
-                >
-                  {contenido}
-                </Link>
-              ) : (
+              if (c.href) {
+                return (
+                  <Link
+                    key={c.label}
+                    href={c.href}
+                    style={{ display: 'flex', flexDirection: 'column', gap: 4, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 14, textDecoration: 'none', cursor: 'pointer' }}
+                  >
+                    {contenido}
+                  </Link>
+                );
+              }
+              if (c.onClick) {
+                return (
+                  <button
+                    key={c.label}
+                    type="button"
+                    onClick={c.onClick}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'flex-start',
+                      gap: 4,
+                      background: S.PANEL,
+                      border: `1px solid ${c.expandido ? S.ACCENT : S.CARD_BORDER}`,
+                      borderRadius: 12,
+                      padding: 14,
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                    }}
+                  >
+                    {contenido}
+                  </button>
+                );
+              }
+              return (
                 <div key={c.label} style={{ display: 'flex', flexDirection: 'column', gap: 4, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 14 }}>
                   {contenido}
                 </div>
               );
             })}
           </div>
+
+          {/* Desglose de "Rake ganado" por salas/porras (28/09) — justo
+              debajo del grid, se despliega al pulsar esa tarjeta. */}
+          {mostrarDesgloseRake && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 14, marginTop: -4 }}>
+              <span style={S.sectionLabel}>Rake ganado, por origen</span>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>Salas (Doble o Nada, Triple o Nada, Oro y Plata, Tridente, Maratón)</span>
+                <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13.5, color: S.TEXT, flexShrink: 0 }}>{rakeGanadoSalas.toFixed(2)} €</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>Porras clásicas de golf</span>
+                <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13.5, color: S.TEXT, flexShrink: 0 }}>{rakeGanadoPorras.toFixed(2)} €</span>
+              </div>
+              <p style={{ fontSize: 10.5, color: S.MUTED_3, margin: 0 }}>
+                El de salas respeta los filtros de deporte, tipo de sala y buy-in de arriba; el de porras solo respeta el periodo (una porra no tiene esos otros filtros).
+              </p>
+            </div>
+          )}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <span style={S.sectionLabel}>Porras creadas</span>

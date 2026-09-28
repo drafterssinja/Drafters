@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { supabase, Perfil } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
+import { conTiempoMaximo } from '@/lib/conTiempoMaximo';
 
 // ============================================================================
 // PUBLICIDAD EN VÍDEO — panel de admin (nuevo, 27/09, décima vuelta)
@@ -45,7 +46,11 @@ type VideoRow = {
   creado_at: string;
 };
 
-type EstadisticaVideo = { video_id: string; total_visualizaciones: number; total_completadas: number };
+// Separado en pasivas (clasificación en directo + Mesas Drafters, se
+// reproducen solas) y recarga (el usuario elige activamente verlo a
+// cambio de 20€) — pedido de Iñi, 28/09: son audiencias distintas para un
+// anunciante, así que no tiene sentido enseñar un único número.
+type EstadisticaVideo = { video_id: string; visualizaciones_pasivas: number; visualizaciones_recarga: number; total_visualizaciones: number };
 
 // Extrae la ruta dentro del bucket "anuncios" a partir de la URL pública
 // (formato fijo de Supabase Storage: ".../object/public/anuncios/<ruta>")
@@ -59,10 +64,12 @@ function rutaStorageDesdeUrl(url: string): string | null {
   return i === -1 ? null : url.slice(i + marcador.length);
 }
 
+
 export default function AdminPublicidadPage() {
   const router = useRouter();
   const [perfil, setPerfil] = useState<Perfil | null>(null);
   const [autorizado, setAutorizado] = useState<boolean | null>(null);
+  const [errorAcceso, setErrorAcceso] = useState<string | null>(null);
   const [videos, setVideos] = useState<VideoRow[]>([]);
   const [estadisticas, setEstadisticas] = useState<Map<string, EstadisticaVideo>>(new Map());
   const [error, setError] = useState<string | null>(null);
@@ -97,28 +104,51 @@ export default function AdminPublicidadPage() {
     let activo = true;
 
     async function cargar() {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      // 28/09: esta pantalla se quedaba a veces colgada en "Comprobando
+      // acceso..." sin llegar a mostrar nada (aviso de Iñi) — si alguna de
+      // estas llamadas fallaba o se quedaba sin responder, la pantalla se
+      // quedaba en el estado de carga para siempre, porque nada capturaba
+      // el error. Ahora todo el bloque va en un try/catch con un tiempo
+      // máximo de espera (10s): si algo falla o tarda demasiado, se sale
+      // del estado de "comprobando acceso" con un mensaje real en vez de
+      // quedarse colgado sin explicación.
+      try {
+        const {
+          data: { session },
+        } = await conTiempoMaximo(supabase.auth.getSession(), 'comprobar la sesión');
 
-      if (!session) {
-        router.push('/login');
-        return;
+        if (!activo) return;
+
+        if (!session) {
+          router.push('/login');
+          return;
+        }
+
+        const { data: perfilData, error: perfilError } = await conTiempoMaximo(
+          supabase.from('perfiles').select('*').eq('id', session.user.id).single(),
+          'cargar tu perfil'
+        );
+
+        if (!activo) return;
+
+        if (perfilError) {
+          setErrorAcceso(`No se ha podido comprobar tu acceso: ${perfilError.message}`);
+          return;
+        }
+
+        const p = perfilData as Perfil | null;
+        if (!p || p.rol !== 'admin') {
+          router.push('/cuenta');
+          return;
+        }
+
+        setPerfil(p);
+        setAutorizado(true);
+        await cargarVideosYEstadisticas();
+      } catch (e) {
+        if (!activo) return;
+        setErrorAcceso(e instanceof Error ? `No se ha podido comprobar tu acceso: ${e.message}` : 'No se ha podido comprobar tu acceso.');
       }
-
-      const { data: perfilData } = await supabase.from('perfiles').select('*').eq('id', session.user.id).single();
-
-      if (!activo) return;
-
-      const p = perfilData as Perfil | null;
-      if (!p || p.rol !== 'admin') {
-        router.push('/cuenta');
-        return;
-      }
-
-      setPerfil(p);
-      setAutorizado(true);
-      await cargarVideosYEstadisticas();
     }
 
     cargar();
@@ -227,6 +257,30 @@ export default function AdminPublicidadPage() {
     setVideos((prev) => prev.filter((v) => v.id !== video.id));
   }
 
+  if (errorAcceso) {
+    return (
+      <main style={S.mainReset}>
+        <div style={S.pageFrame}>
+          <DraftersHeader />
+          <div style={S.accountSection}>
+            <p style={S.errorText}>{errorAcceso}</p>
+            <button
+              type="button"
+              onClick={() => {
+                setErrorAcceso(null);
+                setAutorizado(null);
+                window.location.reload();
+              }}
+              style={S.primaryButton}
+            >
+              Reintentar
+            </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   if (autorizado === null || !perfil) {
     return (
       <main style={S.mainReset}>
@@ -293,7 +347,7 @@ export default function AdminPublicidadPage() {
               <span style={S.label}>Dónde se muestra</span>
               <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, color: S.TEXT, cursor: 'pointer', padding: '4px 0' }}>
                 <input type="checkbox" checked={mostrarEnRecarga} onChange={(e) => setMostrarEnRecarga(e.target.checked)} style={{ width: 18, height: 18, flexShrink: 0, accentColor: S.ACCENT, cursor: 'pointer' }} />
-                Recarga de saldo (ver vídeo a cambio de 10 €)
+                Recarga de saldo (ver vídeo a cambio de 20 €)
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, color: S.TEXT, cursor: 'pointer', padding: '4px 0' }}>
                 <input type="checkbox" checked={mostrarEnClasificacion} onChange={(e) => setMostrarEnClasificacion(e.target.checked)} style={{ width: 18, height: 18, flexShrink: 0, accentColor: S.ACCENT, cursor: 'pointer' }} />
@@ -360,10 +414,13 @@ export default function AdminPublicidadPage() {
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
                     <span style={{ fontSize: 11.5, color: S.MUTED_2 }}>
-                      <span style={{ color: S.TEXT, fontWeight: 700 }}>{stats?.total_visualizaciones ?? 0}</span> visualizaciones
+                      <span style={{ color: S.TEXT, fontWeight: 700 }}>{stats?.visualizaciones_pasivas ?? 0}</span> en la app (clasificación / Mesas Drafters)
                     </span>
                     <span style={{ fontSize: 11.5, color: S.MUTED_2 }}>
-                      <span style={{ color: S.TEXT, fontWeight: 700 }}>{stats?.total_completadas ?? 0}</span> completas
+                      <span style={{ color: S.TEXT, fontWeight: 700 }}>{stats?.visualizaciones_recarga ?? 0}</span> por recarga de saldo
+                    </span>
+                    <span style={{ fontSize: 11.5, color: S.MUTED_3 }}>
+                      <span style={{ color: S.TEXT, fontWeight: 700 }}>{stats?.total_visualizaciones ?? 0}</span> en total
                     </span>
                   </div>
 
