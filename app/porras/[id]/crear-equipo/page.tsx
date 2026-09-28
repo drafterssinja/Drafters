@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { supabase, Perfil } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
@@ -250,6 +250,43 @@ export default function CrearEquipoPorraPage() {
     setComodinId((prev) => (prev === jugador.id ? null : jugador.id));
   }
 
+  // Autoscroll entre grupos (28/09, pedido de Iñi: "igual que hacemos en el
+  // fútbol cuando ya has elegido, por ejemplo, a todos los defensas, que
+  // automáticamente se te desplace hasta la siguiente lista" — mismo patrón
+  // que salas/[id]/crear-equipo usa para las líneas de fútbol: `grupoRefs`
+  // guarda el bloque de cada grupo de color, `gruposCompletadosRef` recuerda
+  // si cada uno estaba ya completo en el render anterior, para detectar el
+  // momento exacto en que se acaba de rellenar. Al completar el último grupo
+  // de color (el modo comodín usa la lista entera) y al elegir el comodín,
+  // "vuelva otra vez al inicio" — sube hasta arriba del todo (`listTopRef`).
+  const grupoRefs = useRef<Partial<Record<GrupoPorra, HTMLDivElement | null>>>({});
+  const listTopRef = useRef<HTMLDivElement | null>(null);
+  const gruposCompletadosRef = useRef<Partial<Record<GrupoPorra, boolean>>>({});
+  const comodinCompletadoRef = useRef(false);
+
+  useEffect(() => {
+    if (porra?.formato !== 'clasica') return;
+    gruposDisponibles.forEach((grupo, i) => {
+      const completoAhora = selected.has(grupo);
+      const completoAntes = gruposCompletadosRef.current[grupo] ?? false;
+      if (completoAhora && !completoAntes) {
+        const siguienteGrupo = gruposDisponibles[i + 1];
+        const el = siguienteGrupo ? grupoRefs.current[siguienteGrupo] : listTopRef.current;
+        el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      gruposCompletadosRef.current[grupo] = completoAhora;
+    });
+  }, [porra?.formato, gruposDisponibles, selected]);
+
+  useEffect(() => {
+    if (porra?.formato !== 'clasica') return;
+    const completoAhora = !!comodinId;
+    if (completoAhora && !comodinCompletadoRef.current) {
+      listTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    comodinCompletadoRef.current = completoAhora;
+  }, [porra?.formato, comodinId]);
+
   function toggleJugadorPresupuesto(jugador: JugadorRow) {
     setSelectedPresupuesto((prev) => {
       if (prev.includes(jugador.id)) return prev.filter((id) => id !== jugador.id);
@@ -278,6 +315,11 @@ export default function CrearEquipoPorraPage() {
       setErrorEnvio(traducirError(rpcError.message));
       setEnviando(false);
       return;
+    }
+    // Registro de actividad (28/09, pedido de Iñi): solo la inscripción
+    // nueva, no al editar un equipo ya inscrito.
+    if (!modoEdicion && porra) {
+      await supabase.rpc('registrar_evento_actividad', { p_tipo: 'inscripcion', p_detalle: { modo: 'porra', nombre: porra.major } });
     }
     // replace, no push — ver el mismo comentario en salas/[id]/crear-equipo (bug de la flecha de volver, 23/09).
     router.replace(`/porras/${porraId}`);
@@ -442,7 +484,7 @@ export default function CrearEquipoPorraPage() {
                 <p style={{ fontSize: 13, color: S.MUTED_2 }}>Todavía no se ha subido el listado de jugadores de este torneo.</p>
               ) : (
                 <>
-                  <div style={{ position: 'sticky', top: 0, zIndex: 5, background: S.BG, paddingTop: 2, paddingBottom: 6, margin: '0 -20px', paddingLeft: 20, paddingRight: 20 }}>
+                  <div ref={listTopRef} style={{ position: 'sticky', top: 0, zIndex: 5, background: S.BG, paddingTop: 2, paddingBottom: 6, margin: '0 -20px', paddingLeft: 20, paddingRight: 20, scrollMarginTop: 0 }}>
                     <div style={{ background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_2 }}>Grupo activo</span>
                       <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 16, color: activeGroup === 'comodin' ? COMODIN_COLOR : activeGroup ? COLOR_GRUPO[activeGroup] : S.MUTED_3 }}>
@@ -452,12 +494,22 @@ export default function CrearEquipoPorraPage() {
                   </div>
 
                   <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 7 }}>
-                      {gruposDisponibles.map((grupo) =>
-                        jugadores
-                          .filter((j) => j.grupo_porra === grupo)
-                          .sort((a, b) => a.nombre.localeCompare(b.nombre))
-                          .map((j) => {
+                    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>
+                      {gruposDisponibles.map((grupo) => (
+                        <div
+                          key={grupo}
+                          ref={(el) => {
+                            grupoRefs.current[grupo] = el;
+                          }}
+                          style={{ display: 'flex', flexDirection: 'column', gap: 7, scrollMarginTop: 90 }}
+                        >
+                          <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: COLOR_GRUPO[grupo] }}>
+                            {GRUPO_PORRA_LABELS[grupo]}
+                          </span>
+                          {jugadores
+                            .filter((j) => j.grupo_porra === grupo)
+                            .sort((a, b) => b.precio - a.precio)
+                            .map((j) => {
                             const modoComodin = activeGroup === 'comodin';
                             const isSelectedPrimario = selected.get(grupo) === j.id;
                             const isSelectedComodin = comodinId === j.id;
@@ -517,8 +569,9 @@ export default function CrearEquipoPorraPage() {
                                 </span>
                               </a>
                             );
-                          })
-                      )}
+                          })}
+                        </div>
+                      ))}
                     </div>
 
                     <div style={{ flexShrink: 0, width: 96, display: 'flex', flexDirection: 'column', gap: 6, position: 'sticky', top: 128 }}>

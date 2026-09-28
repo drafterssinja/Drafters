@@ -16,8 +16,9 @@ import * as S from '@/lib/mockupStyles';
 // (pedido de Iñi: "la frecuencia tiene que ser más o menos parecida" — el
 // sorteo ponderado de elegir_anuncio_video() ya garantiza esto del lado del
 // servidor, aquí solo se fija el número), en qué huecos sale (recarga,
-// clasificación y/o el feed de inicio — este último añadido el 27/09, a modo
-// de prueba, ver drafters-schema.sql), activarlo/desactivarlo y,
+// clasificación y/o Mesas Drafters — este hueco vivió primero, a modo de
+// prueba, en el feed de /inicio, y desde el 28/09 vive en /mesas, ver
+// drafters-schema.sql), activarlo/desactivarlo y,
 // opcionalmente, una ventana de fechas — más las estadísticas de visualización de cada uno
 // (estadisticas_anuncios_video()), para poder enseñarle el dato real a cada
 // anunciante.
@@ -38,7 +39,7 @@ type VideoRow = {
   activo: boolean;
   mostrar_en_recarga: boolean;
   mostrar_en_clasificacion: boolean;
-  mostrar_en_inicio: boolean;
+  mostrar_en_mesas: boolean;
   fecha_inicio: string;
   fecha_fin: string | null;
   creado_at: string;
@@ -73,7 +74,7 @@ export default function AdminPublicidadPage() {
   const [activo, setActivo] = useState(true);
   const [mostrarEnRecarga, setMostrarEnRecarga] = useState(true);
   const [mostrarEnClasificacion, setMostrarEnClasificacion] = useState(true);
-  const [mostrarEnInicio, setMostrarEnInicio] = useState(true);
+  const [mostrarEnMesas, setMostrarEnMesas] = useState(true);
   const [fechaInicio, setFechaInicio] = useState('');
   const [fechaFin, setFechaFin] = useState('');
   const [subiendo, setSubiendo] = useState(false);
@@ -177,7 +178,7 @@ export default function AdminPublicidadPage() {
       activo,
       mostrar_en_recarga: mostrarEnRecarga,
       mostrar_en_clasificacion: mostrarEnClasificacion,
-      mostrar_en_inicio: mostrarEnInicio,
+      mostrar_en_mesas: mostrarEnMesas,
       fecha_inicio: fechaInicio ? new Date(fechaInicio).toISOString() : undefined,
       fecha_fin: fechaFin ? new Date(fechaFin).toISOString() : null,
     });
@@ -195,13 +196,13 @@ export default function AdminPublicidadPage() {
     setActivo(true);
     setMostrarEnRecarga(true);
     setMostrarEnClasificacion(true);
-    setMostrarEnInicio(true);
+    setMostrarEnMesas(true);
     setFechaInicio('');
     setFechaFin('');
     await cargarVideosYEstadisticas();
   }
 
-  async function actualizarVideo(id: string, cambios: Partial<Pick<VideoRow, 'activo' | 'mostrar_en_recarga' | 'mostrar_en_clasificacion' | 'mostrar_en_inicio' | 'prioridad'>>) {
+  async function actualizarVideo(id: string, cambios: Partial<Pick<VideoRow, 'activo' | 'mostrar_en_recarga' | 'mostrar_en_clasificacion' | 'mostrar_en_mesas' | 'prioridad'>>) {
     // Optimista: se actualiza en pantalla al momento y, si el guardado
     // falla, se recarga la lista de verdad para no dejar la pantalla
     // mostrando algo que no se llegó a guardar.
@@ -299,8 +300,8 @@ export default function AdminPublicidadPage() {
                 Clasificación en directo (debajo del contenido)
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, color: S.TEXT, cursor: 'pointer', padding: '4px 0' }}>
-                <input type="checkbox" checked={mostrarEnInicio} onChange={(e) => setMostrarEnInicio(e.target.checked)} style={{ width: 18, height: 18, flexShrink: 0, accentColor: S.ACCENT, cursor: 'pointer' }} />
-                Feed de inicio (entre tus equipos y elegir deporte) — a prueba
+                <input type="checkbox" checked={mostrarEnMesas} onChange={(e) => setMostrarEnMesas(e.target.checked)} style={{ width: 18, height: 18, flexShrink: 0, accentColor: S.ACCENT, cursor: 'pointer' }} />
+                Mesas Drafters (entre tus mesas en juego y elegir deporte)
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, color: S.TEXT, cursor: 'pointer', padding: '4px 0' }}>
                 <input type="checkbox" checked={activo} onChange={(e) => setActivo(e.target.checked)} style={{ width: 18, height: 18, flexShrink: 0, accentColor: S.ACCENT, cursor: 'pointer' }} />
@@ -397,11 +398,11 @@ export default function AdminPublicidadPage() {
                     <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, color: S.TEXT, cursor: 'pointer', padding: '3px 0' }}>
                       <input
                         type="checkbox"
-                        checked={v.mostrar_en_inicio}
-                        onChange={(e) => actualizarVideo(v.id, { mostrar_en_inicio: e.target.checked })}
+                        checked={v.mostrar_en_mesas}
+                        onChange={(e) => actualizarVideo(v.id, { mostrar_en_mesas: e.target.checked })}
                         style={{ width: 16, height: 16, flexShrink: 0, accentColor: S.ACCENT, cursor: 'pointer' }}
                       />
-                      Feed de inicio
+                      Mesas Drafters
                     </label>
                   </div>
 

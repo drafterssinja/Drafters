@@ -7,15 +7,19 @@ import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
 
 // ============================================================================
-// RECARGA DE SALDO — 10€ gratis al mes + 10€ por cada vídeo visto (27/09,
-// décima vuelta)
+// RECARGA DE SALDO — 20€ gratis al mes + 20€ por cada vídeo visto (27/09,
+// décima vuelta; importes subidos de 10€ a 20€ el 28/09)
 // ============================================================================
 // Antes había 4 botones de recarga instantánea y gratuita (+10/+25/+50/
-// +100€). Pedido de Iñi: "cada nuevo usuario, cuando entra, solamente va a
-// tener 20 euros de saldo... en la parte de recarga solamente va a tener
-// dos botones: uno que es una recarga gratuita de 10 euros, y esa solo la
-// puede gastar una vez al mes... después todas las recargas adicionales que
-// quiera hacer, de 10 euros, tiene que ser a cambio de ver un vídeo".
+// +100€). Pedido de Iñi (27/09): "cada nuevo usuario, cuando entra,
+// solamente va a tener 20 euros de saldo... en la parte de recarga
+// solamente va a tener dos botones: uno que es una recarga gratuita de 10
+// euros, y esa solo la puede gastar una vez al mes... después todas las
+// recargas adicionales que quiera hacer, de 10 euros, tiene que ser a
+// cambio de ver un vídeo". El 28/09 subió ambos importes de 10€ a 20€:
+// "para que si uno quiere comprar 20 euros ficticios para apuntarse una
+// porra, que no tenga que ver dos vídeos" (el saldo de partida de cuenta
+// nueva también subió de 20€ a 60€ el mismo día — ver drafters-schema.sql).
 //
 // - Botón 1, "Recarga gratis": llama a recargar_gratis_mensual() — el
 //   servidor comprueba perfiles.ultima_recarga_gratis y rechaza si se usó
@@ -25,11 +29,11 @@ import * as S from '@/lib/mockupStyles';
 // - Botón 2, "Ver un vídeo": pide un vídeo activo para este hueco
 //   (elegir_anuncio_video('recarga')) y lo reproduce a pantalla completa;
 //   solo al terminar de verse entero (evento onEnded) se llama a
-//   recargar_por_video(), que es quien de verdad da los 10€ — cerrar el
+//   recargar_por_video(), que es quien de verdad da los 20€ — cerrar el
 //   vídeo antes de que acabe no da nada.
 const RECARGA_GRATIS_DIAS = 30;
-const RECARGA_GRATIS_IMPORTE = 10;
-const RECARGA_VIDEO_IMPORTE = 10;
+const RECARGA_GRATIS_IMPORTE = 20;
+const RECARGA_VIDEO_IMPORTE = 20;
 
 type AnuncioVideo = { id: string; url: string; nombre_referencia: string };
 

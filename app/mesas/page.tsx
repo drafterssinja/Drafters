@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase, Perfil } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
+import AnuncioVideoInline from '@/components/AnuncioVideoInline';
 import * as S from '@/lib/mockupStyles';
 import {
   DEPORTES,
@@ -29,6 +30,13 @@ import type { TipoSala } from '@/lib/repartoPremios';
 // que ya vivía aquí — la pestaña de Porras clásicas se ha quitado de esta
 // pantalla porque ahora tiene su propia landing en /porras (enlazada desde
 // el otro recuadro de /inicio), tal y como pidió Iñi.
+//
+// 28/09: Iñi pidió recuperar aquí, arriba del todo, el listado de "tus
+// mesas en juego" (solo mesas — a propósito NUNCA porras, aunque el
+// usuario también tenga equipos de porra: esas se gestionan y se ven desde
+// /porras) y, debajo, el hueco de vídeo publicitario que antes vivía en el
+// feed de /inicio — ver AnuncioVideoInline y drafters-schema.sql
+// (mostrar_en_mesas). El selector de deporte pasa a ir después de los dos.
 
 type SalaFila = {
   id: string;
@@ -52,6 +60,17 @@ type MaratonFila = {
   fecha_limite_inscripcion: string | null;
 };
 
+// Solo mesas (modo 'sala'/'mtt') — a propósito, nunca equipos de porra, que
+// se gestionan desde /porras (pedido de Iñi, 28/09).
+type EquipoMesaFila = {
+  id: string;
+  sala_id: string;
+  nombre_equipo: string | null;
+  jugadores: string[];
+  salas: { id: string; nombre: string; competicion: string; deporte: string; estado: string; tipo: string } | null;
+  inscripciones: { estado: string }[];
+};
+
 function MesasPageInner() {
   const router = useRouter();
   const [deporte, setDeporte] = useState<Deporte>('futbol');
@@ -60,6 +79,8 @@ function MesasPageInner() {
   const [salasAbiertas, setSalasAbiertas] = useState<SalaFila[]>([]);
   const [maratones, setMaratones] = useState<MaratonFila[]>([]);
   const [inscritosPorSala, setInscritosPorSala] = useState<Map<string, number>>(new Map());
+  const [misMesas, setMisMesas] = useState<EquipoMesaFila[]>([]);
+  const [lesionMap, setLesionMap] = useState<Map<string, { nombre: string; lesionado: boolean }>>(new Map());
   const [cargando, setCargando] = useState(true);
 
   useEffect(() => {
@@ -74,7 +95,7 @@ function MesasPageInner() {
         return;
       }
 
-      const [{ data: perfilData }, { data: salasData }, { data: maratonData }, { data: inscritosData }] = await Promise.all([
+      const [{ data: perfilData }, { data: salasData }, { data: maratonData }, { data: inscritosData }, { data: equiposData }] = await Promise.all([
         supabase.from('perfiles').select('*').eq('id', session.user.id).single(),
         supabase
           .from('salas')
@@ -91,6 +112,14 @@ function MesasPageInner() {
         // las filas propias de cada usuario, pero el número de inscritos de
         // cada sala sí es un dato público. Ver drafters-schema.sql.
         supabase.rpc('inscritos_por_sala'),
+        // "Tus mesas en juego" (28/09) — solo modo 'sala'/'mtt', nunca
+        // 'porra' (esas viven en /porras, no aquí).
+        supabase
+          .from('equipos')
+          .select('id, sala_id, nombre_equipo, jugadores, salas(id,nombre,competicion,deporte,estado,tipo), inscripciones(estado)')
+          .eq('usuario_id', session.user.id)
+          .neq('modo', 'porra')
+          .order('created_at', { ascending: false }),
       ]);
 
       if (!activo) return;
@@ -102,6 +131,17 @@ function MesasPageInner() {
       const mapaInscritos = new Map<string, number>();
       ((inscritosData as { sala_id: string; inscritos: number }[]) ?? []).forEach((fila) => mapaInscritos.set(fila.sala_id, Number(fila.inscritos)));
       setInscritosPorSala(mapaInscritos);
+
+      const mesas = ((equiposData as unknown as EquipoMesaFila[]) ?? []).filter((eq) => eq.inscripciones.some((i) => i.estado !== 'reembolsada'));
+      setMisMesas(mesas);
+
+      const idsJugadores = Array.from(new Set(mesas.flatMap((eq) => eq.jugadores ?? [])));
+      if (idsJugadores.length > 0) {
+        const { data: jugData } = await supabase.from('jugadores').select('id,nombre,lesionado').in('id', idsJugadores);
+        const mapaLesion = new Map<string, { nombre: string; lesionado: boolean }>();
+        (jugData ?? []).forEach((j) => mapaLesion.set(j.id, { nombre: j.nombre as string, lesionado: j.lesionado as boolean }));
+        if (activo) setLesionMap(mapaLesion);
+      }
 
       setCargando(false);
     }
@@ -144,6 +184,14 @@ function MesasPageInner() {
     .sort((a, b) => new Date(a.fecha_limite_inscripcion!).getTime() - new Date(b.fecha_limite_inscripcion!).getTime())
     .slice(0, 6);
 
+  function lesionadoDe(eq: EquipoMesaFila): string | null {
+    for (const id of eq.jugadores ?? []) {
+      const j = lesionMap.get(id);
+      if (j?.lesionado) return j.nombre;
+    }
+    return null;
+  }
+
   return (
     <main style={S.mainReset}>
       <div style={S.pageFrame}>
@@ -153,6 +201,100 @@ function MesasPageInner() {
             <h1 style={{ fontSize: 26, fontWeight: 800, color: S.TEXT }}>Mesas Drafters</h1>
             <p style={{ fontSize: 13, color: S.MUTED_2 }}>Fútbol, golf y tenis — salas, maratón y draft de fantasía.</p>
           </div>
+
+          {misMesas.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <h2 style={{ fontSize: 20, fontWeight: 700, color: S.TEXT }}>Tus mesas en juego.</h2>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {misMesas.map((eq) => {
+                  const sala = eq.salas;
+                  const nombre = sala?.nombre ?? eq.nombre_equipo ?? 'Mi equipo';
+                  const href = sala ? `/salas/${eq.sala_id}` : '#';
+                  const clasificacionHref = sala ? `/salas/${eq.sala_id}/clasificacion` : '#';
+                  const enDirecto = sala?.estado === 'completa';
+                  const lesionado = lesionadoDe(eq);
+                  return (
+                    <div key={eq.id} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 10,
+                          background: S.PANEL,
+                          border: `1px solid ${S.CARD_BORDER}`,
+                          borderRadius: 12,
+                          padding: '12px 14px',
+                        }}
+                      >
+                        <Link href={href} style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1, textDecoration: 'none' }}>
+                          <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#F0B94D' }}>
+                            {sala?.competicion ?? ''}
+                          </span>
+                          <span style={{ fontSize: 13, fontWeight: 600, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {nombre}
+                          </span>
+                        </Link>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
+                          <Link
+                            href={href}
+                            style={{
+                              fontFamily: "'Barlow Condensed', sans-serif",
+                              fontWeight: 700,
+                              fontSize: 12,
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.03em',
+                              color: '#04140B',
+                              background: '#3DDC84',
+                              borderRadius: 8,
+                              padding: '8px 12px',
+                              whiteSpace: 'nowrap',
+                              textDecoration: 'none',
+                            }}
+                          >
+                            Ver mi equipo
+                          </Link>
+                          {enDirecto && (
+                            <Link
+                              href={clasificacionHref}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 5,
+                                fontFamily: "'Barlow Condensed', sans-serif",
+                                fontWeight: 700,
+                                fontSize: 11,
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.03em',
+                                color: '#FF7A45',
+                                background: 'rgba(255,122,69,0.14)',
+                                border: '1px solid rgba(255,122,69,0.45)',
+                                borderRadius: 8,
+                                padding: '6px 10px',
+                                whiteSpace: 'nowrap',
+                                textDecoration: 'none',
+                              }}
+                            >
+                              <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#FF7A45', flexShrink: 0 }} />
+                              Clasificación en directo
+                            </Link>
+                          )}
+                        </div>
+                      </div>
+                      {lesionado && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 4px' }}>
+                          <span style={{ flexShrink: 0, width: 13, height: 13, borderRadius: '50%', background: '#FF5C5C' }} />
+                          <span style={{ fontSize: 11, color: '#FF5C5C', fontWeight: 600 }}>{lesionado} está lesionado. Haz un cambio.</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <AnuncioVideoInline ubicacion="mesas" />
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <h2 style={{ fontSize: 20, fontWeight: 700, color: S.TEXT }}>Elige tu deporte.</h2>

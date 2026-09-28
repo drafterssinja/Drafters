@@ -62,7 +62,7 @@ create table if not exists public.perfiles (
   apellido text,
   nombre_usuario text,
   fecha_nacimiento date,
-  saldo_simulado numeric(10, 2) not null default 20.00, -- € simulados, sin valor monetario real — 20€ de partida (27/09, décima vuelta; antes 150€, ver ALTER más abajo para cuentas ya existentes en una base de datos previa)
+  saldo_simulado numeric(10, 2) not null default 60.00, -- € simulados, sin valor monetario real — 60€ de partida (28/09; antes 20€ desde el 27/09, y 150€ antes de eso — ver ALTER más abajo para cuentas ya existentes en una base de datos previa)
   terminos_aceptados boolean not null default false,
   terminos_aceptados_en timestamptz,
   rol text not null default 'usuario' check (rol in ('usuario', 'admin')),
@@ -77,13 +77,12 @@ comment on table public.perfiles is 'Datos de producto de cada usuario registrad
 alter table public.perfiles add column if not exists apellido text;
 alter table public.perfiles add column if not exists nombre_usuario text;
 
--- Saldo inicial de cuenta nueva: de 150€ a 20€ (27/09, décima vuelta,
--- pedido de Iñi: "cada nuevo usuario, cuando entra, solamente va a tener 20
--- euros de saldo"). Esto solo cambia el DEFAULT de la columna (ver también
--- la propia definición de la tabla, arriba) — nunca toca el saldo actual de
--- ninguna cuenta que ya exista, solo aplica a las que se registren a partir
--- de ahora.
-alter table public.perfiles alter column saldo_simulado set default 20.00;
+-- Saldo inicial de cuenta nueva: de 150€ a 20€ (27/09, décima vuelta) y de
+-- 20€ a 60€ (28/09, pedido de Iñi). Esto solo cambia el DEFAULT de la
+-- columna (ver también la propia definición de la tabla, arriba) — nunca
+-- toca el saldo actual de ninguna cuenta que ya exista, solo aplica a las
+-- que se registren a partir de ahora.
+alter table public.perfiles alter column saldo_simulado set default 60.00;
 
 -- Última vez que este usuario usó la recarga gratuita mensual de 10€ (ver
 -- recargar_gratis_mensual() más abajo) — null hasta que la use por primera
@@ -1802,25 +1801,36 @@ grant execute on function public.eliminar_porra(uuid) to authenticated;
 -- estos huecos de la app:
 --  1) Recarga de saldo (/recargar): la pantalla deja de tener los 4 botones
 --     de recarga instantánea y pasa a tener solo dos opciones — una recarga
---     GRATIS de 10€ (como mucho una vez cada 30 días, ver
+--     GRATIS de 20€ (como mucho una vez cada 30 días, ver
 --     recargar_gratis_mensual() más abajo) y, a partir de ahí, tantas
---     recargas de 10€ como quiera el usuario SIEMPRE que vea antes un vídeo
---     publicitario completo (recargar_por_video()).
+--     recargas de 20€ como quiera el usuario SIEMPRE que vea antes un vídeo
+--     publicitario completo (recargar_por_video()). Antes eran 10€ cada una
+--     — subido a 20€ el 28/09, pedido de Iñi: "para que si uno quiere
+--     comprar 20 euros ficticios para apuntarse una porra, que no tenga que
+--     ver dos vídeos".
 --  2) Clasificación en directo (/salas/[id]/clasificacion): un vídeo
 --     publicitario reproduciéndose debajo del contenido de la pantalla, sin
 --     interferir con la vista de la clasificación — aquí solo cuenta como
 --     "visualización" a efectos de estadísticas para el admin, no reparte
 --     saldo (registrar_visualizacion_anuncio()).
---  3) Feed de /inicio (nuevo, 27/09, a modo de prueba): un vídeo embebido
---     entre "tus equipos en juego" y "Elige tu deporte" — la propia idea
---     original de Iñi ("idea B") que había quedado sin confirmar tras la
---     primera tanda de esta funcionalidad; Iñi pidió expresamente "ponlo a
---     ver para luego decidir si dejarlo o no", así que este hueco se puede
---     desactivar sin tocar código en ningún momento: basta con desmarcar
---     "Mostrar en inicio" en cada vídeo desde /admin (o dejar simplemente
---     que ningún vídeo activo lo tenga marcado). Igual que en clasificación,
---     solo cuenta como "visualización" para las estadísticas, no reparte
---     saldo.
+--  3) Pantalla /mesas (28/09): un vídeo embebido entre "tus mesas en
+--     juego" y "Elige tu deporte" — vivió primero como prueba en el feed de
+--     /inicio (27/09), se quitó de ahí el mismo día al simplificar esa
+--     pantalla a dos recuadros, y el 28/09 Iñi pidió recuperar el hueco,
+--     esta vez en /mesas. Se puede desactivar sin tocar código en ningún
+--     momento: basta con desmarcar "Mesas Drafters" en cada vídeo desde
+--     /admin (o dejar simplemente que ningún vídeo activo lo tenga
+--     marcado). Igual que en clasificación, solo cuenta como
+--     "visualización" para las estadísticas, no reparte saldo.
+--
+-- En los huecos 2 y 3 (los que no reparten saldo), el vídeo se reproduce
+-- silenciado de serie con un botón propio para activar/desactivar el
+-- sonido (pedido de Iñi, 28/09) — ver components/AnuncioVideoInline.tsx. Y,
+-- como esos dos huecos reproducen en bucle, cada usuario cuenta como mucho
+-- una visualización por vídeo al día para las estadísticas (pedido de Iñi,
+-- 28/09) — ver registrar_visualizacion_anuncio() más abajo. El hueco 1
+-- (recarga) no tiene este límite: ahí cada visualización va ligada a un
+-- +20€ real, así que sigue contando todas, sin límite de veces al día.
 --
 -- Los vídeos en sí se guardan en Supabase Storage, en un bucket nuevo
 -- llamado "anuncios" — público de LECTURA (hace falta para que el <video>
@@ -1836,7 +1846,7 @@ create table if not exists public.anuncios_video (
   activo boolean not null default true,
   mostrar_en_recarga boolean not null default true,
   mostrar_en_clasificacion boolean not null default true,
-  mostrar_en_inicio boolean not null default true, -- feed de /inicio, entre "tus equipos en juego" y el selector de deporte (nuevo, 27/09, decidido a probar — ver más abajo)
+  mostrar_en_mesas boolean not null default true, -- pantalla /mesas, entre "tus mesas en juego" y el selector de deporte (movido aquí el 28/09 — antes era el feed de /inicio, ver más abajo)
   fecha_inicio timestamptz not null default now(),
   fecha_fin timestamptz, -- null = sin fecha de fin
   creado_at timestamptz not null default now()
@@ -1844,13 +1854,21 @@ create table if not exists public.anuncios_video (
 
 comment on table public.anuncios_video is 'Vídeos publicitarios subidos desde /admin. La prioridad decide, mediante un sorteo ponderado (ver elegir_anuncio_video()), cuántas veces sale cada uno — sin que ninguno activo pueda quedarse casi sin verse.';
 
--- Tercer hueco: el feed de /inicio, entre "tus equipos en juego" y el
--- selector de deporte (nuevo, 27/09 — Iñi lo pidió puesto "a ver" para
--- luego decidir si se queda o no, así que puede desactivarse sin más que
--- desmarcar "Mostrar en inicio" en cada vídeo desde /admin, sin tocar
--- código). Si la tabla ya existía de una ejecución anterior del esquema, la
--- columna se añade aquí.
-alter table public.anuncios_video add column if not exists mostrar_en_inicio boolean not null default true;
+-- Tercer hueco: pantalla /mesas, entre "tus mesas en juego" y el selector
+-- de deporte (28/09 — Iñi pidió recuperar este hueco, que había quedado sin
+-- usarse desde que se quitó del feed de /inicio el 27/09; ahora vive en
+-- /mesas en su lugar). Si el esquema ya se había ejecutado con el nombre
+-- antiguo de la columna (mostrar_en_inicio, de cuando este hueco vivía en
+-- /inicio), se renombra para no perder lo que el admin ya tuviera marcado;
+-- si la tabla es nueva o ya tiene el nombre actual, no hace nada.
+do $$
+begin
+  if exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'anuncios_video' and column_name = 'mostrar_en_inicio')
+     and not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'anuncios_video' and column_name = 'mostrar_en_mesas') then
+    alter table public.anuncios_video rename column mostrar_en_inicio to mostrar_en_mesas;
+  end if;
+end $$;
+alter table public.anuncios_video add column if not exists mostrar_en_mesas boolean not null default true;
 
 alter table public.anuncios_video enable row level security;
 drop policy if exists "anuncios_video_admin_todo" on public.anuncios_video;
@@ -1867,22 +1885,31 @@ create policy "anuncios_video_admin_todo" on public.anuncios_video
 -- dos cosas: dar de comer al panel de admin ("cuántas veces se ha visto
 -- cada vídeo", para poder enseñárselo al anunciante) y, en el caso de
 -- 'recarga', es la prueba de que el vídeo se vio de verdad antes de dar los
--- 10€ (ver recargar_por_video()).
+-- 20€ (ver recargar_por_video()).
 create table if not exists public.anuncios_video_reproducciones (
   id uuid primary key default gen_random_uuid(),
   video_id uuid not null references public.anuncios_video(id) on delete cascade,
   usuario_id uuid not null references auth.users(id) on delete cascade,
-  ubicacion text not null check (ubicacion in ('recarga', 'clasificacion', 'inicio')),
+  ubicacion text not null check (ubicacion in ('recarga', 'clasificacion', 'mesas')),
   completado boolean not null default false,
   creado_at timestamptz not null default now()
 );
 
--- Añade 'inicio' como ubicación válida (nuevo, 27/09) si la tabla ya
--- existía de una ejecución anterior del esquema, con solo 'recarga' y
--- 'clasificacion' permitidos.
+-- Sustituye 'inicio' por 'mesas' como ubicación válida (28/09 — el hueco se
+-- ha movido de /inicio a /mesas, ver más arriba). Sin necesidad de migrar
+-- filas existentes: 'inicio' nunca llegó a registrar ninguna visualización
+-- real (registrar_visualizacion_anuncio() nunca la permitió como valor,
+-- solo 'recarga' y 'clasificacion' — ver esa función más abajo), así que no
+-- puede haber ninguna fila con ubicacion = 'inicio' que este cambio deje
+-- huérfana.
 alter table public.anuncios_video_reproducciones drop constraint if exists anuncios_video_reproducciones_ubicacion_check;
 alter table public.anuncios_video_reproducciones add constraint anuncios_video_reproducciones_ubicacion_check
-  check (ubicacion in ('recarga', 'clasificacion', 'inicio'));
+  check (ubicacion in ('recarga', 'clasificacion', 'mesas'));
+
+-- Acelera la comprobación "¿ya hay una visualización de hoy para este
+-- usuario+vídeo?" que hace registrar_visualizacion_anuncio() más abajo.
+create index if not exists anuncios_video_reproducciones_usuario_video_idx
+  on public.anuncios_video_reproducciones (video_id, usuario_id, creado_at);
 
 alter table public.anuncios_video_reproducciones enable row level security;
 drop policy if exists "anuncios_video_reproducciones_admin_lee" on public.anuncios_video_reproducciones;
@@ -1936,7 +1963,7 @@ as $$
     and (
       (p_ubicacion = 'recarga' and v.mostrar_en_recarga) or
       (p_ubicacion = 'clasificacion' and v.mostrar_en_clasificacion) or
-      (p_ubicacion = 'inicio' and v.mostrar_en_inicio)
+      (p_ubicacion = 'mesas' and v.mostrar_en_mesas)
     )
   order by random() ^ (1.0 / (1 + v.prioridad)) desc
   limit 1;
@@ -1946,17 +1973,42 @@ revoke all on function public.elegir_anuncio_video(text) from public;
 grant execute on function public.elegir_anuncio_video(text) to authenticated;
 
 -- Registra que un usuario ha visto un vídeo en un hueco que NO reparte
--- saldo (hoy, solo 'clasificacion') — únicamente para las estadísticas del
+-- saldo ('clasificacion' o 'mesas') — únicamente para las estadísticas del
 -- admin. p_completado indica si llegó al final o lo cortó antes de acabar.
+--
+-- Como mucho una visualización por usuario y por vídeo AL DÍA (pedido de
+-- Iñi, 28/09: "aunque se reproduzca en bucle, que cada usuario que vea un
+-- vídeo se guarde como una vez al día") — estos huecos reproducen el vídeo
+-- en bucle sin parar y el usuario puede volver a la misma pantalla varias
+-- veces en un rato, así que sin este límite una sola visita podría contarse
+-- decenas de veces. Si ya existe una fila de hoy para este usuario+vídeo
+-- (en cualquier ubicación — el límite es por usuario y vídeo, no por
+-- ubicación), esta llamada simplemente no hace nada. "Hoy" se calcula en
+-- UTC, igual que el resto de fechas de la app.
+--
+-- Esto NO afecta a recargar_por_video() (más abajo): esa función inserta
+-- directamente su propia fila, sin pasar por aquí, porque la recarga a
+-- cambio de vídeo está pensada para poder repetirse sin límite de veces al
+-- día — el límite diario es solo para estos huecos "pasivos".
 create or replace function public.registrar_visualizacion_anuncio(p_video_id uuid, p_ubicacion text, p_completado boolean default false)
 returns void
 language plpgsql
 security definer set search_path = public
 as $$
 begin
-  if p_ubicacion not in ('recarga', 'clasificacion') then
+  if p_ubicacion not in ('recarga', 'clasificacion', 'mesas') then
     raise exception 'Ubicación de anuncio no válida: %', p_ubicacion;
   end if;
+
+  if exists (
+    select 1 from public.anuncios_video_reproducciones
+    where video_id = p_video_id
+      and usuario_id = auth.uid()
+      and (creado_at at time zone 'utc')::date = (now() at time zone 'utc')::date
+  ) then
+    return;
+  end if;
+
   insert into public.anuncios_video_reproducciones (video_id, usuario_id, ubicacion, completado)
   values (p_video_id, auth.uid(), p_ubicacion, p_completado);
 end;
@@ -2011,7 +2063,7 @@ begin
 
   update public.perfiles set ultima_recarga_gratis = now() where id = auth.uid();
 
-  v_perfil := public.registrar_movimiento('deposito', 10);
+  v_perfil := public.registrar_movimiento('deposito', 20);
   return v_perfil;
 end;
 $$;
@@ -2019,7 +2071,7 @@ $$;
 revoke all on function public.recargar_gratis_mensual() from public;
 grant execute on function public.recargar_gratis_mensual() to authenticated;
 
--- Recarga de 10€ a cambio de ver un vídeo publicitario completo — sin
+-- Recarga de 20€ a cambio de ver un vídeo publicitario completo — sin
 -- límite de veces (a diferencia de la gratuita). Se llama SOLO cuando el
 -- vídeo ha terminado de reproducirse de verdad en el cliente (evento
 -- `onEnded` del <video>) — como cualquier "vídeo recompensado", no hay
@@ -2047,13 +2099,106 @@ begin
   insert into public.anuncios_video_reproducciones (video_id, usuario_id, ubicacion, completado)
   values (p_video_id, auth.uid(), 'recarga', true);
 
-  v_perfil := public.registrar_movimiento('deposito', 10);
+  v_perfil := public.registrar_movimiento('deposito', 20);
   return v_perfil;
 end;
 $$;
 
 revoke all on function public.recargar_por_video(uuid) from public;
 grant execute on function public.recargar_por_video(uuid) to authenticated;
+
+-- ============================================================================
+-- REGISTRO DE ACTIVIDAD (nuevo, 28/09)
+-- ============================================================================
+-- Pedido de Iñi: un registro de actividad de los usuarios — de momento solo
+-- dos tipos de evento: 'login' (cada vez que alguien accede con su usuario y
+-- contraseña) e 'inscripcion' (cada vez que alguien se inscribe, por
+-- primera vez, en una mesa o una porra — no al editar un equipo ya
+-- inscrito). Decidido con Iñi: un único registro global, no una pantalla
+-- por usuario — se puede filtrar por usuario desde ahí (app/admin/actividad).
+--
+-- `registrar_evento_actividad()` es la única forma de escribir en la tabla
+-- (security definer, sin política de insert para el usuario normal): cada
+-- pantalla que necesite registrar un evento llama a esta función con su
+-- propio usuario ya autenticado (auth.uid()), nunca escribe la tabla
+-- directamente — así no hace falta abrir una política de insert pública.
+create table if not exists public.eventos_actividad (
+  id uuid primary key default gen_random_uuid(),
+  usuario_id uuid not null references public.perfiles(id) on delete cascade,
+  tipo text not null check (tipo in ('login', 'inscripcion')),
+  -- Detalle libre según el tipo — por ahora, en 'inscripcion', algo como
+  -- {"modo": "sala", "nombre": "Duelo Golf #4"} para poder mostrarlo en el
+  -- registro sin tener que volver a cruzar con `equipos`/`salas`/`porras`
+  -- (que además pueden haberse borrado ya).
+  detalle jsonb,
+  creado_en timestamptz not null default now()
+);
+
+create index if not exists eventos_actividad_usuario_idx on public.eventos_actividad (usuario_id);
+create index if not exists eventos_actividad_creado_idx on public.eventos_actividad (creado_en desc);
+
+alter table public.eventos_actividad enable row level security;
+
+-- Nadie lee la tabla directamente (ni siquiera el admin) — la lectura pasa
+-- siempre por eventos_actividad_admin(), que ya comprueba el rol y además
+-- junta el nombre/email del usuario. Sin política de select: RLS deniega
+-- todo por defecto salvo lo que entre por una función security definer.
+
+create or replace function public.registrar_evento_actividad(p_tipo text, p_detalle jsonb default null)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  -- No interrumpe el flujo del usuario si por lo que sea no hay sesión o el
+  -- tipo no se reconoce — registrar actividad nunca debe poder romper un
+  -- login o una inscripción real.
+  if auth.uid() is null or p_tipo not in ('login', 'inscripcion') then
+    return;
+  end if;
+
+  insert into public.eventos_actividad (usuario_id, tipo, detalle) values (auth.uid(), p_tipo, p_detalle);
+end;
+$$;
+
+revoke all on function public.registrar_evento_actividad(text, jsonb) from public;
+grant execute on function public.registrar_evento_actividad(text, jsonb) to authenticated;
+
+-- Lectura para el panel de admin (app/admin/actividad/page.tsx): un único
+-- listado global, más reciente primero, opcionalmente filtrado por usuario
+-- — junta nombre/apellido/email para no tener que hacer una segunda
+-- consulta a `perfiles` por cada fila.
+create or replace function public.eventos_actividad_admin(p_usuario_id uuid default null, p_limite int default 200)
+returns table (
+  id uuid,
+  usuario_id uuid,
+  nombre text,
+  apellido text,
+  email text,
+  tipo text,
+  detalle jsonb,
+  creado_en timestamptz
+)
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if not exists (select 1 from public.perfiles where id = auth.uid() and rol = 'admin') then
+    raise exception 'No autorizado';
+  end if;
+
+  return query
+  select e.id, e.usuario_id, p.nombre, p.apellido, p.email, e.tipo, e.detalle, e.creado_en
+  from public.eventos_actividad e
+  join public.perfiles p on p.id = e.usuario_id
+  where p_usuario_id is null or e.usuario_id = p_usuario_id
+  order by e.creado_en desc
+  limit greatest(1, least(coalesce(p_limite, 200), 1000));
+end;
+$$;
+
+revoke all on function public.eventos_actividad_admin(uuid, int) from public;
+grant execute on function public.eventos_actividad_admin(uuid, int) to authenticated;
 
 -- ============================================================================
 -- CONVERTIR TU CUENTA EN SUPERADMINISTRADOR

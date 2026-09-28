@@ -172,7 +172,9 @@ export default function PorraDetallePage() {
 
   const gruposConJugadores = ORDEN_GRUPOS.map((g) => ({
     grupo: g,
-    jugadores: jugadores.filter((j) => j.grupo_porra === g).sort((a, b) => a.nombre.localeCompare(b.nombre)),
+    // Ordenado por precio (mejor jugador primero — cuota más baja, precio
+    // más alto), no alfabéticamente (pedido de Iñi, 28/09).
+    jugadores: jugadores.filter((j) => j.grupo_porra === g).sort((a, b) => b.precio - a.precio),
   })).filter((g) => g.jugadores.length > 0);
   const hayListaEspanoles = gruposConJugadores.some((g) => g.grupo === 'espanoles');
 

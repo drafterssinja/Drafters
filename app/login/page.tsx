@@ -40,6 +40,11 @@ export default function LoginPage() {
       return;
     }
 
+    // Registro de actividad (28/09, pedido de Iñi) — no bloquea el acceso
+    // si por lo que sea falla (registrar_evento_actividad() ya se traga
+    // cualquier caso raro del lado del servidor).
+    await supabase.rpc('registrar_evento_actividad', { p_tipo: 'login' });
+
     router.push('/inicio');
   }
 

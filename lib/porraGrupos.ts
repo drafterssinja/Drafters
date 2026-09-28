@@ -72,8 +72,11 @@ export const GRUPO_PORRA_LABELS: Record<GrupoPorra, string> = {
 
 // Orden y color visual de los grupos — compartido por la pantalla de
 // detalle de porra (pestaña "Grupos") y la de crear equipo (slots), para
-// que ambas se vean y se ordenen igual.
-export const ORDEN_GRUPOS: GrupoPorra[] = ['espanoles', 'amarillo', 'verde', 'azul', 'morado'];
+// que ambas se vean y se ordenen igual. Orden pedido por Iñi (28/09):
+// siempre Amarillo, Verde, Azul primero, y el cuarto grupo es Españoles o
+// Morado según cuál tenga esta porra (son excluyentes entre sí — nunca
+// coexisten, ver calcularGrupoPorra más arriba).
+export const ORDEN_GRUPOS: GrupoPorra[] = ['amarillo', 'verde', 'azul', 'espanoles', 'morado'];
 
 export const COLOR_GRUPO: Record<GrupoPorra, string> = {
   espanoles: '#FF5C5C',

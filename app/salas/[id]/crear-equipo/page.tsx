@@ -455,6 +455,11 @@ export default function CrearEquipoPage() {
       setEnviando(false);
       return;
     }
+    // Registro de actividad (28/09, pedido de Iñi): solo la inscripción
+    // nueva, no al editar un equipo ya inscrito.
+    if (!modoEdicion && sala) {
+      await supabase.rpc('registrar_evento_actividad', { p_tipo: 'inscripcion', p_detalle: { modo: 'sala', nombre: sala.nombre } });
+    }
     // replace: al confirmar, esta pantalla de crear equipo deja de tener
     // sentido en el historial (si vuelves a ella, redirige otra vez a la
     // sala) — con push, la flecha de "volver" quedaba atrapada rebotando
