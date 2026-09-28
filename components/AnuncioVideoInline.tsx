@@ -49,7 +49,21 @@ export default function AnuncioVideoInline({ ubicacion }: { ubicacion: 'clasific
     // hueco nunca reparte saldo, así que basta con registrarlo una vez al
     // empezar a reproducirse (no hace falta esperar a que acabe, y con
     // loop=true el evento "ended" no llega a dispararse nunca).
-    supabase.rpc('registrar_visualizacion_anuncio', { p_video_id: video.id, p_ubicacion: ubicacion, p_completado: true });
+    //
+    // 28/09 (aviso de Iñi: veía el vídeo pero no se quedaba registrado, ni
+    // una sola vez, ni en /mesas ni en clasificación): esta llamada era
+    // "fire and forget", sin comprobar el resultado — si por lo que fuera
+    // fallaba (el caso más probable: el esquema SQL de esta pantalla,
+    // 'mesas' como ubicación válida, todavía no se había vuelto a ejecutar
+    // en Supabase), no había ni un solo rastro del fallo en ningún sitio,
+    // así que era imposible diagnosticarlo. Ahora, si falla, al menos
+    // queda un error real en la consola del navegador (F12 → Console).
+    supabase.rpc('registrar_visualizacion_anuncio', { p_video_id: video.id, p_ubicacion: ubicacion, p_completado: true }).then(({ error }) => {
+      if (error) {
+        // eslint-disable-next-line no-console
+        console.error('No se ha podido registrar la visualización del vídeo publicitario:', error.message);
+      }
+    });
   }
 
   if (video === 'cargando' || video === null) return null;

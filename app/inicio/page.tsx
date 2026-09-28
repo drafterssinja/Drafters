@@ -51,6 +51,13 @@ export default function InicioPage() {
   const [equipos, setEquipos] = useState<EquipoFila[]>([]);
   const [lesionMap, setLesionMap] = useState<Map<string, { nombre: string; lesionado: boolean }>>(new Map());
   const [cargando, setCargando] = useState(true);
+  // "Mostrar más/menos" en "mis equipos en juego" (28/09, pedido de Iñi:
+  // con muchos equipos a la vez la lista se hacía muy larga y empujaba los
+  // recuadros de Mesas Drafters/Porras muy abajo) — se ven los 3 primeros
+  // de entrada y el resto queda detrás de un botón, con su contrario para
+  // volver a colapsar la lista.
+  const [mostrarTodos, setMostrarTodos] = useState(false);
+  const LIMITE_EQUIPOS_VISIBLE = 3;
 
   useEffect(() => {
     let activo = true;
@@ -173,7 +180,7 @@ export default function InicioPage() {
 
           {equipos.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {equipos.map((eq) => {
+              {(mostrarTodos ? equipos : equipos.slice(0, LIMITE_EQUIPOS_VISIBLE)).map((eq) => {
                 const competicionLabel = eq.salas?.competicion ?? eq.porras?.competicion ?? eq.porras?.major ?? '';
                 const salaNombre = eq.salas?.nombre ?? (eq.porras ? `Porra · ${eq.porras.major}` : eq.nombre_equipo ?? 'Mi equipo');
                 const href = eq.salas ? `/salas/${eq.sala_id}` : eq.porras ? `/porras/${eq.porra_id}` : '#';
@@ -261,6 +268,26 @@ export default function InicioPage() {
                   </div>
                 );
               })}
+              {equipos.length > LIMITE_EQUIPOS_VISIBLE && (
+                <button
+                  type="button"
+                  onClick={() => setMostrarTodos((v) => !v)}
+                  style={{
+                    alignSelf: 'center',
+                    marginTop: 2,
+                    background: 'transparent',
+                    border: 'none',
+                    color: ACCENT,
+                    fontFamily: "'Manrope', sans-serif",
+                    fontWeight: 700,
+                    fontSize: 12.5,
+                    cursor: 'pointer',
+                    padding: '6px 10px',
+                  }}
+                >
+                  {mostrarTodos ? 'Mostrar menos ▴' : `Mostrar más (${equipos.length - LIMITE_EQUIPOS_VISIBLE}) ▾`}
+                </button>
+              )}
             </div>
           )}
 

@@ -20,12 +20,17 @@ import { conTiempoMaximo } from '@/lib/conTiempoMaximo';
 // nombre/apellido/email del usuario — aquí no hace falta ninguna comprobación
 // extra de permisos aparte del auth-check de siempre.
 //
-// De momento se registran dos tipos de evento (registrar_evento_actividad()
-// se llama desde /login y desde confirmarInscripcion() en las pantallas de
-// crear-equipo de salas y porras):
+// Se registran tres tipos de evento (registrar_evento_actividad() se llama
+// desde /login, desde confirmarInscripcion() en las pantallas de
+// crear-equipo de salas y porras, y desde recargar_gratis_mensual() /
+// recargar_por_video() en el propio servidor — sección "REGISTRO DE
+// ACTIVIDAD" de drafters-schema.sql):
 //   - 'login': cada vez que alguien entra con usuario y contraseña.
 //   - 'inscripcion': cada vez que alguien se inscribe (por primera vez, no al
 //     editar un equipo ya existente) a una mesa o a una porra.
+//   - 'recarga' (añadido 28/09, pedido de Iñi): cada vez que alguien recarga
+//     saldo, diferenciando en `detalle.tipo_recarga` si fue la recarga
+//     gratuita mensual ('gratuita') o viendo un vídeo publicitario ('video').
 
 type EventoActividad = {
   id: string;
@@ -33,8 +38,8 @@ type EventoActividad = {
   nombre: string | null;
   apellido: string | null;
   email: string | null;
-  tipo: 'login' | 'inscripcion';
-  detalle: { modo?: 'sala' | 'porra'; nombre?: string } | null;
+  tipo: 'login' | 'inscripcion' | 'recarga';
+  detalle: { modo?: 'sala' | 'porra'; nombre?: string; tipo_recarga?: 'gratuita' | 'video' } | null;
   creado_en: string;
 };
 
@@ -204,10 +209,23 @@ export default function AdminActividadPage() {
 
   function resumenEvento(e: EventoActividad): string {
     if (e.tipo === 'login') return 'Ha iniciado sesión';
+    if (e.tipo === 'recarga') {
+      return e.detalle?.tipo_recarga === 'video' ? 'Ha recargado 20 € viendo un vídeo' : 'Ha recargado 20 € (gratuita mensual)';
+    }
     const nombreObjetivo = e.detalle?.nombre ?? '';
     if (e.detalle?.modo === 'porra') return `Se ha inscrito en la porra "${nombreObjetivo}"`;
     if (e.detalle?.modo === 'sala') return `Se ha inscrito en la mesa "${nombreObjetivo}"`;
     return 'Se ha inscrito';
+  }
+
+  // Etiqueta y color de la pastilla de cada fila — antes era un booleano
+  // esLogin/no-esLogin (solo había dos tipos); con 'recarga' añadido
+  // (28/09) hace falta un tercer color propio para no confundirla con una
+  // inscripción.
+  function etiquetaEvento(e: EventoActividad): { texto: string; color: string; fondo: string } {
+    if (e.tipo === 'login') return { texto: 'Login', color: S.MUTED, fondo: 'rgba(148,163,184,0.14)' };
+    if (e.tipo === 'recarga') return { texto: 'Recarga', color: '#F0B94D', fondo: 'rgba(240,185,77,0.14)' };
+    return { texto: 'Inscripción', color: S.ACCENT, fondo: 'rgba(61,220,132,0.12)' };
   }
 
   return (
@@ -270,7 +288,7 @@ export default function AdminActividadPage() {
             )}
             {!cargandoEventos &&
               eventos.map((e) => {
-                const esLogin = e.tipo === 'login';
+                const etiqueta = etiquetaEvento(e);
                 return (
                   <div
                     key={e.id}
@@ -285,15 +303,15 @@ export default function AdminActividadPage() {
                           flexShrink: 0,
                           fontSize: 10,
                           fontWeight: 700,
-                          color: esLogin ? S.MUTED : S.ACCENT,
+                          color: etiqueta.color,
                           textTransform: 'uppercase',
                           letterSpacing: '0.04em',
-                          background: esLogin ? 'rgba(148,163,184,0.14)' : 'rgba(61,220,132,0.12)',
+                          background: etiqueta.fondo,
                           borderRadius: 999,
                           padding: '3px 8px',
                         }}
                       >
-                        {esLogin ? 'Login' : 'Inscripción'}
+                        {etiqueta.texto}
                       </span>
                     </div>
                     <span style={{ fontSize: 12, color: S.MUTED_2 }}>{resumenEvento(e)}</span>

@@ -248,8 +248,10 @@ export default function PorraDetallePage() {
 
           {/* Acceso a la clasificación en directo (isPorraDetalle de
               Main.dc.html, línea 1449) — solo tiene sentido una vez la
-              porra ha empezado de verdad (misma marca que ya usa
-              participantes_porra() para dejar de ocultar los nombres). */}
+              porra ha empezado de verdad (misma marca de tiempo que usa
+              participantes_porra_con_plantilla(), que sigue ocultando la
+              PLANTILLA de cada rival hasta ese momento — desde el 28/09 los
+              nombres de los equipos ya se ven siempre, ver más abajo). */}
           {porraEmpezada && misEquipos.length > 0 && (
             <Link
               href={`/porras/${porra.id}/clasificacion`}

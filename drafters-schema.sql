@@ -1164,13 +1164,12 @@ revoke all on function public.participantes_sala(uuid) from public;
 grant execute on function public.participantes_sala(uuid) to authenticated;
 
 -- Equipos participantes de una porra clásica (pestaña "Equipos" del
--- detalle) — pedido de Iñi, 23/09: se ve QUÉ EQUIPOS participan, pero sus
--- nombres se quedan ocultos hasta que la porra haya empezado de verdad. Aquí
--- se considera "empezada" cuando ya pasó su fecha límite de inscripción (o
--- no tiene, en cuyo caso solo se considera empezada si ya está finalizada) —
--- es la única marca de tiempo real que existe hoy para "el torneo ya está
--- en juego". Mientras no ha empezado, nombre_equipo vuelve null y
--- oculto=true; el cliente pinta un texto tipo "Oculto hasta que empiece".
+-- detalle). Antes (23/09) el nombre se ocultaba hasta que la porra hubiera
+-- empezado de verdad — **corregido el 28/09, pedido explícito de Iñi:
+-- "tienen que verse los nombres de los equipos inscritos"** — ahora el
+-- nombre de cada equipo se ve siempre, desde el momento en que se inscribe.
+-- La columna `oculto` se deja en la firma (devuelve siempre `false`) para
+-- no tener que tocar también el resto de sitios que leen esta función.
 create or replace function public.participantes_porra(p_porra_id uuid)
 returns table (equipo_id uuid, nombre_equipo text, created_at timestamptz, oculto boolean)
 language sql
@@ -1179,17 +1178,11 @@ stable
 as $$
   select
     e.id,
-    case when v.empezada then e.nombre_equipo else null end,
+    e.nombre_equipo,
     e.created_at,
-    not v.empezada
+    false
   from public.equipos e
   join public.inscripciones i on i.equipo_id = e.id
-  cross join lateral (
-    select p.estado = 'finalizada'
-      or (p.fecha_limite_inscripcion is not null and p.fecha_limite_inscripcion <= now()) as empezada
-    from public.porras p
-    where p.id = p_porra_id
-  ) v
   where e.porra_id = p_porra_id and i.estado <> 'reembolsada'
   order by e.created_at asc;
 $$;
@@ -2087,6 +2080,13 @@ begin
   update public.perfiles set ultima_recarga_gratis = now() where id = auth.uid();
 
   v_perfil := public.registrar_movimiento('deposito', 20);
+  -- Registro de actividad (28/09, pedido de Iñi) — se llama a
+  -- registrar_evento_actividad() aunque esté definida más abajo en este
+  -- mismo archivo: en Postgres el cuerpo de una función plpgsql no se
+  -- resuelve hasta que se ejecuta de verdad, así que basta con que exista
+  -- en la base de datos en el momento en que alguien pida una recarga, no
+  -- en el momento en que se ejecuta este CREATE.
+  perform public.registrar_evento_actividad('recarga', jsonb_build_object('tipo_recarga', 'gratuita'));
   return v_perfil;
 end;
 $$;
@@ -2123,6 +2123,10 @@ begin
   values (p_video_id, auth.uid(), 'recarga', true);
 
   v_perfil := public.registrar_movimiento('deposito', 20);
+  -- Registro de actividad (28/09, pedido de Iñi) — igual que en
+  -- recargar_gratis_mensual(), diferenciando el tipo de recarga en el
+  -- `detalle` para que el panel de admin pueda distinguirlas.
+  perform public.registrar_evento_actividad('recarga', jsonb_build_object('tipo_recarga', 'video'));
   return v_perfil;
 end;
 $$;
@@ -2148,14 +2152,25 @@ grant execute on function public.recargar_por_video(uuid) to authenticated;
 create table if not exists public.eventos_actividad (
   id uuid primary key default gen_random_uuid(),
   usuario_id uuid not null references public.perfiles(id) on delete cascade,
-  tipo text not null check (tipo in ('login', 'inscripcion')),
-  -- Detalle libre según el tipo — por ahora, en 'inscripcion', algo como
-  -- {"modo": "sala", "nombre": "Duelo Golf #4"} para poder mostrarlo en el
-  -- registro sin tener que volver a cruzar con `equipos`/`salas`/`porras`
-  -- (que además pueden haberse borrado ya).
+  tipo text not null check (tipo in ('login', 'inscripcion', 'recarga')),
+  -- Detalle libre según el tipo — en 'inscripcion', algo como {"modo":
+  -- "sala", "nombre": "Duelo Golf #4"}; en 'recarga' (añadido 28/09, pedido
+  -- de Iñi), {"tipo_recarga": "gratuita"} o {"tipo_recarga": "video"} — así
+  -- para poder mostrarlo en el registro sin tener que volver a cruzar con
+  -- `equipos`/`salas`/`porras` (que además pueden haberse borrado ya).
   detalle jsonb,
   creado_en timestamptz not null default now()
 );
+
+-- 'recarga' se añade el 28/09 a un check constraint que ya existía con solo
+-- ('login', 'inscripcion') — en una base de datos donde la tabla ya estaba
+-- creada, `create table if not exists` de arriba no toca la restricción ya
+-- puesta, así que hace falta reemplazarla a mano (nombre por defecto que le
+-- da Postgres a un check puesto en línea sobre una columna: `<tabla>_<
+-- columna>_check`). Si la tabla se crea nueva de cero, este bloque no hace
+-- nada (la restricción ya sale bien puesta desde el create table).
+alter table public.eventos_actividad drop constraint if exists eventos_actividad_tipo_check;
+alter table public.eventos_actividad add constraint eventos_actividad_tipo_check check (tipo in ('login', 'inscripcion', 'recarga'));
 
 create index if not exists eventos_actividad_usuario_idx on public.eventos_actividad (usuario_id);
 create index if not exists eventos_actividad_creado_idx on public.eventos_actividad (creado_en desc);
@@ -2175,8 +2190,11 @@ as $$
 begin
   -- No interrumpe el flujo del usuario si por lo que sea no hay sesión o el
   -- tipo no se reconoce — registrar actividad nunca debe poder romper un
-  -- login o una inscripción real.
-  if auth.uid() is null or p_tipo not in ('login', 'inscripcion') then
+  -- login, una inscripción o una recarga real. 'recarga' añadido el 28/09
+  -- (pedido de Iñi) — se llama desde recargar_gratis_mensual() y
+  -- recargar_por_video() más abajo, con p_detalle indicando de cuál de las
+  -- dos se trata.
+  if auth.uid() is null or p_tipo not in ('login', 'inscripcion', 'recarga') then
     return;
   end if;
 
