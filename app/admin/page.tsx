@@ -17,6 +17,7 @@ import { parsearValoresMercado, FilaValorMercado } from '@/lib/parsearValoresMer
 import { parsearCuotasPartidosFutbol } from '@/lib/parsearCuotasFutbol';
 import { emparejarEquipo } from '@/lib/aliasEquipos';
 import { calcularPreciosFutbolDetallado, factorPosicion, fuerzaPorEquipo, PosicionFutbol, JugadorConPrecioFutbol } from '@/lib/precioFutbol';
+import { PorraFormato, PORRA_FORMATO_LABELS, PORRA_FORMATO_COLOR } from '@/lib/porraFormato';
 
 // El precio de golf/tenis ya no sale del ranking mundial, sino de la cuota
 // de "Ganador" de la casa de apuestas de esa semana (decidido con Iñi el
@@ -45,6 +46,7 @@ type PorraAdmin = {
   estado: string;
   precio: number;
   fecha_limite_inscripcion: string | null;
+  formato: PorraFormato;
 };
 type Jugador = {
   id: string;
@@ -243,13 +245,12 @@ export default function AdminPage() {
   const [torneoDeporte, setTorneoDeporte] = useState<'futbol' | 'golf' | 'tenis'>('futbol');
   const [torneoTexto, setTorneoTexto] = useState('');
   const [torneoFechaLimite, setTorneoFechaLimite] = useState('');
-  // Checks separados para crear mesas/porra al importar (pedido de Iñi,
-  // 23/09): por defecto los dos activados (torneo nuevo de cero), pero se
-  // pueden desmarcar por separado — p.ej. si ya borró la porra para
-  // recrearla sola y las mesas de Drafters de ese torneo ya están bien, no
-  // hace falta duplicarlas.
+  // Crear mesas al importar (pedido de Iñi, 23/09) — activado por defecto,
+  // se puede desmarcar si ya están bien tal cual y solo se quiere
+  // actualizar el listado de jugadores. La porra clásica/draft de golf ya
+  // NO se crea desde aquí (28/09, decoupling pedido por Iñi): eso vive en su
+  // propio menú, /admin/porras-golf.
   const [crearMesas, setCrearMesas] = useState(true);
-  const [crearPorraCheck, setCrearPorraCheck] = useState(true);
   const [previewJugadores, setPreviewJugadores] = useState<PreviewJugador[]>([]);
   // Avisos del parseo de cuotas (líneas sin cuota reconocible o con una
   // cuota inválida) — el jugador correspondiente no entra en la vista
@@ -331,7 +332,7 @@ export default function AdminPage() {
     const [{ data: salasData }, { data: porrasData }, { data: jugadoresData }, { count }, { data: inscripcionesData, error: inscripcionesError }, { data: movimientosData, error: movimientosError }] =
       await Promise.all([
         supabase.from('salas').select('id, codigo, nombre, deporte, tipo, estado, buy_in, competicion, fecha_limite_inscripcion').order('created_at', { ascending: false }),
-        supabase.from('porras').select('id, major, competicion, estado, precio, fecha_limite_inscripcion').order('created_at', { ascending: false }),
+        supabase.from('porras').select('id, major, competicion, estado, precio, fecha_limite_inscripcion, formato').order('created_at', { ascending: false }),
         supabase.from('jugadores').select('id, nombre, deporte, competicion, precio, lesionado').order('created_at', { ascending: false }),
         // Solo el total (head: true, sin traer filas) — el listado completo
         // de usuarios vive en su propia pantalla (/admin/usuarios), a la que
@@ -1088,32 +1089,13 @@ export default function AdminPage() {
       }
     }
 
-    // Porra clásica: por ahora solo para golf, una por torneo, usando el
-    // mismo listado de jugadores (ya repartido en sus listas por color).
-    let porraCreada = false;
-    if (esGolf && crearPorraCheck) {
-      const { count: porraExistente } = await supabase
-        .from('porras')
-        .select('id', { count: 'exact', head: true })
-        .eq('competicion', nombreTorneo);
-      if (!porraExistente) {
-        const { error: porraError } = await supabase.from('porras').insert({
-          major: nombreTorneo,
-          competicion: nombreTorneo,
-          fecha_limite_inscripcion: fechaLimiteIso,
-          estado: 'disponible',
-        });
-        if (!porraError) porraCreada = true;
-      }
-    }
-
     const sinCuotaValida = usandoCuotas ? previewJugadores.filter((j) => !cuotaValida(j.cuota)).length : 0;
 
     setImportandoTorneo(false);
     setResultadoTorneo(
       `Importados ${filas.length} jugadores de "${nombreTorneo}" (precio ${usandoCuotas ? 'por cuota' : 'por ranking'}).` +
         (crearMesas ? ` ${salasCreadas} salas nuevas creadas.` : ' Mesas de Drafters no marcadas para crear.') +
-        (esGolf ? (crearPorraCheck ? ` ${porraCreada ? 'Porra clásica creada.' : 'Porra clásica ya existía.'}` : ' Porra clásica no marcada para crear.') : '') +
+        (esGolf ? ' Para crear su porra (clásica o modo draft), ve a "Porras de golf".' : '') +
         (noEncontrados > 0
           ? ` ⚠️ ${noEncontrados} jugador${noEncontrados === 1 ? '' : 'es'} no ${noEncontrados === 1 ? 'se ha encontrado' : 'se han encontrado'} en el ranking mundial de ${esGolf ? 'golf' : 'tenis'} — revisa que el nombre coincida exactamente, si no ${esGolf ? 'su grupo de porra se ha calculado' : 'se ha calculado'} como si fuera de los últimos del ranking${usandoCuotas ? ' (el precio no se ve afectado, viene de la cuota)' : '.'}`
           : '') +
@@ -1127,7 +1109,6 @@ export default function AdminPage() {
     setTorneoNombre('');
     setTorneoFechaLimite('');
     setCrearMesas(true);
-    setCrearPorraCheck(true);
     await cargarTodo();
   }
 
@@ -1350,6 +1331,21 @@ export default function AdminPage() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 13.5, color: S.TEXT }}>Vídeos publicitarios</span>
               <span style={{ fontSize: 11.5, color: S.MUTED_2 }}>Subir vídeos, prioridad y estadísticas de visualización</span>
+            </div>
+            <span style={{ flexShrink: 0, color: S.ACCENT, fontSize: 16, fontWeight: 700 }}>→</span>
+          </Link>
+
+          {/* Porras de golf (nuevo, 28/09): pantalla propia, mismo patrón
+              que /admin/usuarios y /admin/publicidad — la creación de
+              porras (clásica o modo draft) ya no vive dentro de "Nuevo
+              torneo o jornada", se llega pulsando esta tarjeta. */}
+          <Link
+            href="/admin/porras-golf"
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: '14px 16px', textDecoration: 'none' }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 13.5, color: S.TEXT }}>Porras de golf</span>
+              <span style={{ fontSize: 11.5, color: S.MUTED_2 }}>Crear porras (clásica o modo draft) y gestionar las existentes</span>
             </div>
             <span style={{ flexShrink: 0, color: S.ACCENT, fontSize: 16, fontWeight: 700 }}>→</span>
           </Link>
@@ -1722,15 +1718,13 @@ export default function AdminPage() {
                   Crear mesas de Drafters
                 </label>
                 {torneoDeporte === 'golf' && (
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, color: S.TEXT, cursor: 'pointer', padding: '4px 0' }}>
-                    <input
-                      type="checkbox"
-                      checked={crearPorraCheck}
-                      onChange={(e) => setCrearPorraCheck(e.target.checked)}
-                      style={{ width: 18, height: 18, flexShrink: 0, accentColor: S.ACCENT, cursor: 'pointer' }}
-                    />
-                    Crear la porra
-                  </label>
+                  <p style={{ fontSize: 11.5, color: S.MUTED_3, margin: '2px 0 0', lineHeight: 1.4 }}>
+                    La porra de este torneo (clásica o modo draft) ya no se crea aquí — hazlo desde{' '}
+                    <Link href="/admin/porras-golf" style={{ color: S.ACCENT }}>
+                      Porras de golf
+                    </Link>
+                    .
+                  </p>
                 )}
               </div>
 
@@ -2192,6 +2186,13 @@ export default function AdminPage() {
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <span style={S.sectionLabel}>Porras creadas</span>
+            <p style={{ fontSize: 11.5, color: S.MUTED_3, margin: 0, lineHeight: 1.4 }}>
+              Solo lectura — para crear una porra nueva o cambiar su formato, ve a{' '}
+              <Link href="/admin/porras-golf" style={{ color: S.ACCENT }}>
+                Porras de golf
+              </Link>
+              .
+            </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {porrasAdmin.length === 0 && <p style={{ fontSize: 12.5, color: S.MUTED_3, margin: 0 }}>Todavía no hay ninguna porra creada.</p>}
               {porrasAdmin.map((p) => {
@@ -2207,10 +2208,10 @@ export default function AdminPage() {
                             fontSize: 9.5,
                             textTransform: 'uppercase',
                             letterSpacing: '0.05em',
-                            color: S.ACCENT,
+                            color: PORRA_FORMATO_COLOR[p.formato],
                           }}
                         >
-                          Porra
+                          {PORRA_FORMATO_LABELS[p.formato]}
                         </span>
                         <span
                           style={{

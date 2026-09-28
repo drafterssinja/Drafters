@@ -154,7 +154,16 @@ export default function AdminPublicidadPage() {
 
     const { error: subidaError } = await supabase.storage.from('anuncios').upload(ruta, archivo, { contentType: archivo.type || undefined });
     if (subidaError) {
-      setErrorSubida('No se ha podido subir el archivo de vídeo. Inténtalo de nuevo.');
+      // Se muestra el mensaje real de Supabase (nuevo, tras el aviso de Iñi
+      // de un 413/"exceeded the maximum allowed size" subiendo un vídeo de
+      // 50MB) — antes era un texto genérico que no dejaba ver si el motivo
+      // era el límite de tamaño del proyecto (el más probable, ver más abajo)
+      // u otra cosa. El límite de tamaño de archivo es una configuración de
+      // Supabase (Project Settings → Storage → "Global file size limit"),
+      // no algo que dependa del código de esta pantalla: en el plan Free de
+      // Supabase está fijado en 50 MB y no se puede subir sin pasar a un
+      // plan de pago.
+      setErrorSubida(`No se ha podido subir el archivo de vídeo: ${subidaError.message}. Si el vídeo pesa cerca de 50 MB o más, es probable que sea el límite de tamaño de tu proyecto de Supabase (Project Settings → Storage) — en el plan Free ese límite está fijado en 50 MB.`);
       setSubiendo(false);
       return;
     }
@@ -261,6 +270,12 @@ export default function AdminPublicidadPage() {
                 onChange={(e) => setArchivo(e.target.files?.[0] ?? null)}
                 style={{ ...S.input, padding: '10px 12px' }}
               />
+              {archivo && (
+                <span style={{ fontSize: 11, color: archivo.size > 50 * 1024 * 1024 ? S.ERROR : S.MUTED_3 }}>
+                  {(archivo.size / (1024 * 1024)).toFixed(1)} MB
+                  {archivo.size > 50 * 1024 * 1024 && ' — puede que no se pueda subir: el plan Free de Supabase limita cada archivo a 50 MB (Project Settings → Storage, en tu proyecto de Supabase)'}
+                </span>
+              )}
             </div>
 
             <div style={S.field}>

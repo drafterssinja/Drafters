@@ -9,6 +9,7 @@ import * as S from '@/lib/mockupStyles';
 import { calcularTramosPorInscritos } from '@/lib/repartoPremios';
 import { GRUPO_PORRA_LABELS, GrupoPorra, ORDEN_GRUPOS, COLOR_GRUPO } from '@/lib/porraGrupos';
 import { formatEuros, posicionLabel, closesInLabel } from '@/lib/salaShared';
+import { PorraFormato, PORRA_FORMATO_LABELS, PORRA_FORMATO_COLOR, PORRA_FORMATO_DESCRIPCION_LARGA } from '@/lib/porraFormato';
 
 // ============================================================================
 // DETALLE DE PORRA CLÁSICA
@@ -22,11 +23,14 @@ import { formatEuros, posicionLabel, closesInLabel } from '@/lib/salaShared';
 // inscritos que hay"). Elegir equipo jugador a jugador es la siguiente
 // pieza pendiente del proyecto — el botón de abajo ya enlaza a su sitio.
 
-type PorraFila = { id: string; major: string; estado: string; precio: number; competicion: string | null; fecha_limite_inscripcion: string | null };
+type PorraFila = { id: string; major: string; estado: string; precio: number; competicion: string | null; fecha_limite_inscripcion: string | null; formato: PorraFormato };
 type JugadorRow = { id: string; nombre: string; grupo_porra: GrupoPorra | null; precio: number };
 type EquipoMio = { id: string; nombre_equipo: string | null; jugadores: string[]; gasto_total: number; created_at: string };
 type EquipoParticipante = { equipoId: string; nombreEquipo: string | null; createdAt: string; oculto: boolean };
 
+// La pestaña "Grupos" (por color) solo tiene sentido en el formato clásico;
+// el formato "presupuesto" muestra en su lugar "Jugadores" (el campo
+// completo, ordenado por precio — no hay grupos de color que enseñar).
 type Tab = 'equipo' | 'info' | 'premios' | 'grupos' | 'equipos';
 
 export default function PorraDetallePage() {
@@ -62,7 +66,7 @@ export default function PorraDetallePage() {
 
       const [{ data: perfilData }, { data: porraData }] = await Promise.all([
         supabase.from('perfiles').select('*').eq('id', session.user.id).single(),
-        supabase.from('porras').select('id,major,estado,precio,competicion,fecha_limite_inscripcion').eq('id', porraId).single(),
+        supabase.from('porras').select('id,major,estado,precio,competicion,fecha_limite_inscripcion,formato').eq('id', porraId).single(),
       ]);
 
       if (!activo) return;
@@ -170,10 +174,18 @@ export default function PorraDetallePage() {
     grupo: g,
     jugadores: jugadores.filter((j) => j.grupo_porra === g).sort((a, b) => a.nombre.localeCompare(b.nombre)),
   })).filter((g) => g.jugadores.length > 0);
+  const hayListaEspanoles = gruposConJugadores.some((g) => g.grupo === 'espanoles');
 
   // Se puede crear otro equipo aunque ya tengas uno o varios (pedido de
   // Iñi, 23/09: "en la porra puedo participar todas las veces que quiera").
   const showJoinCta = porra.estado !== 'finalizada';
+
+  // "Empezada" = ya pasó su fecha límite de inscripción, o ya está
+  // finalizada — mismo criterio que ya usa participantes_porra() (sección
+  // 11.7 de la arquitectura técnica) para dejar de ocultar los nombres de
+  // los equipos. Solo a partir de ahí tiene sentido enlazar a la
+  // clasificación en directo.
+  const porraEmpezada = porra.estado === 'finalizada' || (!!porra.fecha_limite_inscripcion && new Date(porra.fecha_limite_inscripcion).getTime() <= Date.now());
 
   return (
     <main style={S.mainReset}>
@@ -181,7 +193,23 @@ export default function PorraDetallePage() {
         <DraftersHeader saldoLabel={saldoLabel} accountInitials={initials} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20, padding: '28px 20px 100px', position: 'relative' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#F0B94D' }}>Porra clásica</span>
+            <span
+              style={{
+                alignSelf: 'flex-start',
+                fontFamily: "'Manrope', sans-serif",
+                fontWeight: 700,
+                fontSize: 11,
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                color: PORRA_FORMATO_COLOR[porra.formato],
+                background: `${PORRA_FORMATO_COLOR[porra.formato]}1F`,
+                border: `1px solid ${PORRA_FORMATO_COLOR[porra.formato]}55`,
+                borderRadius: 999,
+                padding: '3px 9px',
+              }}
+            >
+              {PORRA_FORMATO_LABELS[porra.formato]}
+            </span>
             <h1 style={{ fontSize: 24, fontWeight: 800, color: S.TEXT, lineHeight: 1.15 }}>{porra.major}</h1>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: estadoColor, flexShrink: 0 }} />
@@ -204,12 +232,26 @@ export default function PorraDetallePage() {
               Premios
             </button>
             <button type="button" onClick={() => setTab('grupos')} style={tabButtonStyle(tab === 'grupos')}>
-              Grupos
+              {porra.formato === 'presupuesto' ? 'Jugadores' : 'Grupos'}
             </button>
             <button type="button" onClick={() => setTab('equipos')} style={tabButtonStyle(tab === 'equipos')}>
               Equipos
             </button>
           </div>
+
+          {/* Acceso a la clasificación en directo (isPorraDetalle de
+              Main.dc.html, línea 1449) — solo tiene sentido una vez la
+              porra ha empezado de verdad (misma marca que ya usa
+              participantes_porra() para dejar de ocultar los nombres). */}
+          {porraEmpezada && misEquipos.length > 0 && (
+            <Link
+              href={`/porras/${porra.id}/clasificacion`}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, alignSelf: 'flex-start', padding: '7px 12px', background: 'rgba(240,185,77,0.12)', border: '1px solid rgba(240,185,77,0.4)', borderRadius: 20, textDecoration: 'none' }}
+            >
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#FF7A45' }} />
+              <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: '#F0B94D' }}>Clasificación en directo</span>
+            </Link>
+          )}
 
           {tab === 'equipo' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -234,7 +276,11 @@ export default function PorraDetallePage() {
                       {jugadoresDeEsteEquipo.map((j) => (
                         <div key={j.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 12px', background: '#10150F', border: '1px solid #1E2723', borderRadius: 9 }}>
                           <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 13, color: S.TEXT }}>{j.nombre}</span>
-                          {j.grupo_porra && <span style={{ fontSize: 10.5, fontWeight: 700, color: COLOR_GRUPO[j.grupo_porra] }}>{GRUPO_PORRA_LABELS[j.grupo_porra]}</span>}
+                          {j.grupo_porra ? (
+                            <span style={{ fontSize: 10.5, fontWeight: 700, color: COLOR_GRUPO[j.grupo_porra] }}>{GRUPO_PORRA_LABELS[j.grupo_porra]}</span>
+                          ) : (
+                            <span style={{ fontSize: 10.5, fontWeight: 700, color: '#F0B94D' }}>{j.precio.toLocaleString('es-ES')} €</span>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -283,6 +329,39 @@ export default function PorraDetallePage() {
               <InfoRow label="Precio de entrada" value={formatEuros(porra.precio)} accent />
               <InfoRow label="Competición" value={porra.competicion ?? '—'} />
               <InfoRow label="Jugadores inscritos" value={String(signedUp)} />
+
+              {/* Instrucciones de cómo se eligen los equipos, con la
+                  explicación condicional según si esta porra tiene 3 o más
+                  españoles inscritos (pedido de Iñi, 27/09) — mismo texto
+                  que se repite, más detallado, en la pantalla de crear
+                  equipo (app/porras/[id]/crear-equipo/page.tsx), para que
+                  quien quiera participar lo vea también antes de entrar
+                  ahí. */}
+              {porra.formato === 'presupuesto' ? (
+                <div style={{ background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                  <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Cómo se elige el equipo</span>
+                  <p style={{ fontSize: 12.5, lineHeight: 1.5, color: S.MUTED_2, margin: 0 }}>{PORRA_FORMATO_DESCRIPCION_LARGA.presupuesto}</p>
+                </div>
+              ) : (
+                gruposConJugadores.length > 0 && (
+                  <div style={{ background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                    <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Cómo se eligen los equipos</span>
+                    {hayListaEspanoles ? (
+                      <p style={{ fontSize: 12.5, lineHeight: 1.5, color: S.MUTED_2, margin: 0 }}>
+                        Elige 5 jugadores: uno de cada grupo de color, más un comodín libre. Como en este torneo participan 3 o más jugadores españoles, hay una lista
+                        aparte <strong style={{ color: COLOR_GRUPO.espanoles }}>Españoles</strong> con todos ellos (no cuentan para ningún otro grupo), y el grupo{' '}
+                        <strong style={{ color: COLOR_GRUPO.azul }}>Azul</strong> no tiene tope superior (no hay grupo Morado).
+                      </p>
+                    ) : (
+                      <p style={{ fontSize: 12.5, lineHeight: 1.5, color: S.MUTED_2, margin: 0 }}>
+                        Elige 5 jugadores: uno de cada grupo de color, más un comodín libre. Como en este torneo participan menos de 3 jugadores españoles, no hay lista
+                        aparte de Españoles: el grupo <strong style={{ color: COLOR_GRUPO.azul }}>Azul</strong> va del 36 al 70, y el grupo{' '}
+                        <strong style={{ color: COLOR_GRUPO.morado }}>Morado</strong> agrupa del 71 en adelante.
+                      </p>
+                    )}
+                  </div>
+                )
+              )}
             </div>
           )}
 
@@ -303,7 +382,21 @@ export default function PorraDetallePage() {
             </div>
           )}
 
-          {tab === 'grupos' && (
+          {tab === 'grupos' && porra.formato === 'presupuesto' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {jugadores.length === 0 && <p style={{ fontSize: 13, color: S.MUTED_2 }}>Todavía no se ha subido el listado de jugadores de este torneo.</p>}
+              {[...jugadores]
+                .sort((a, b) => b.precio - a.precio)
+                .map((j) => (
+                  <div key={j.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
+                    <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 13.5, color: S.TEXT }}>{j.nombre}</span>
+                    <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 12.5, color: '#F0B94D' }}>{j.precio.toLocaleString('es-ES')} €</span>
+                  </div>
+                ))}
+            </div>
+          )}
+
+          {tab === 'grupos' && porra.formato === 'clasica' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               {gruposConJugadores.length === 0 && <p style={{ fontSize: 13, color: S.MUTED_2 }}>Todavía no se ha subido el listado de jugadores de este torneo.</p>}
               {gruposConJugadores.map(({ grupo, jugadores: lista }) => (

@@ -1,22 +1,46 @@
 'use client';
 
-import { useEffect, useMemo, useState, Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useEffect, useState, Suspense } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase, Perfil } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
-import { DEPORTES, Deporte, DEPORTE_LABELS, formatEuros, estadoSalaInfo, closesInLabel } from '@/lib/salaShared';
+import {
+  DEPORTES,
+  Deporte,
+  DEPORTE_LABELS,
+  TIPO_SALA_LABELS,
+  formatEuros,
+  estadoSalaInfo,
+  closesInLabel,
+  capacidadLabel,
+} from '@/lib/salaShared';
+import type { TipoSala } from '@/lib/repartoPremios';
 
 // ============================================================================
-// GRANDES TORNEOS (adaptación de isMesas, Main.dc.html líneas 528-560)
+// MESAS DRAFTERS (27/09, undécima vuelta) — antes "Grandes torneos"
 // ============================================================================
-// Iñi (23/09): "las salas maratón no van a estar con el resto de salas...
-// van a estar en el apartado especial... los grandes torneos" y "para las
-// porras clásicas también lo mismo". Esta pantalla junta las dos cosas en
-// un selector superior — Maratón conserva los pills de deporte de la
-// maqueta original (isMesas), Porras clásicas es solo golf así que no los
-// necesita.
+// Iñi (27/09): al dividir la pantalla de inicio en dos recuadros ("Mesas
+// Drafters" a la izquierda, "Porras clásicas de golf" a la derecha —
+// app/inicio/page.tsx), pidió dejar todo lo de Mesas Drafters "tal como lo
+// teníamos". Esta pantalla pasa a ser esa landing: reúne el selector de
+// deporte y "Cierran pronto" que antes vivían en /inicio, más el Maratón
+// que ya vivía aquí — la pestaña de Porras clásicas se ha quitado de esta
+// pantalla porque ahora tiene su propia landing en /porras (enlazada desde
+// el otro recuadro de /inicio), tal y como pidió Iñi.
+
+type SalaFila = {
+  id: string;
+  nombre: string;
+  competicion: string;
+  deporte: string;
+  tipo: string;
+  aforo: number | null;
+  buy_in: number;
+  estado: string;
+  fecha_limite_inscripcion: string | null;
+};
 
 type MaratonFila = {
   id: string;
@@ -28,26 +52,14 @@ type MaratonFila = {
   fecha_limite_inscripcion: string | null;
 };
 
-type PorraFila = {
-  id: string;
-  major: string;
-  estado: string;
-  precio: number;
-  competicion: string | null;
-  fecha_limite_inscripcion: string | null;
-};
-
 function MesasPageInner() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const [tabPrincipal, setTabPrincipal] = useState<'maraton' | 'porras'>(searchParams.get('tab') === 'porras' ? 'porras' : 'maraton');
   const [deporte, setDeporte] = useState<Deporte>('futbol');
 
   const [perfil, setPerfil] = useState<Perfil | null>(null);
+  const [salasAbiertas, setSalasAbiertas] = useState<SalaFila[]>([]);
   const [maratones, setMaratones] = useState<MaratonFila[]>([]);
-  const [porras, setPorras] = useState<PorraFila[]>([]);
   const [inscritosPorSala, setInscritosPorSala] = useState<Map<string, number>>(new Map());
-  const [inscritosPorPorra, setInscritosPorPorra] = useState<Map<string, number>>(new Map());
   const [cargando, setCargando] = useState(true);
 
   useEffect(() => {
@@ -62,40 +74,34 @@ function MesasPageInner() {
         return;
       }
 
-      // inscritos_por_sala()/inscritos_por_porra() son funciones de base de
-      // datos (RPC), no selects directas: equipos/inscripciones tienen RLS
-      // que solo deja ver las filas propias de cada usuario — el número de
-      // inscritos de cada sala/porra es agregado y público. Ver
-      // drafters-schema.sql.
-      const [{ data: perfilData }, { data: maratonData }, { data: porraData }, { data: inscritosSalaData }, { data: inscritosPorraData }] = await Promise.all([
+      const [{ data: perfilData }, { data: salasData }, { data: maratonData }, { data: inscritosData }] = await Promise.all([
         supabase.from('perfiles').select('*').eq('id', session.user.id).single(),
+        supabase
+          .from('salas')
+          .select('id,nombre,competicion,deporte,tipo,aforo,buy_in,estado,fecha_limite_inscripcion')
+          .neq('tipo', 'maraton')
+          .neq('estado', 'finalizada'),
         supabase
           .from('salas')
           .select('id,nombre,competicion,deporte,buy_in,estado,fecha_limite_inscripcion')
           .eq('tipo', 'maraton')
           .neq('estado', 'finalizada'),
-        supabase
-          .from('porras')
-          .select('id,major,estado,precio,competicion,fecha_limite_inscripcion')
-          .neq('estado', 'finalizada')
-          .order('fecha_limite_inscripcion', { ascending: true }),
+        // inscritos_por_sala() es una función de base de datos (RPC) — hace
+        // falta porque equipos/inscripciones tienen RLS que solo deja ver
+        // las filas propias de cada usuario, pero el número de inscritos de
+        // cada sala sí es un dato público. Ver drafters-schema.sql.
         supabase.rpc('inscritos_por_sala'),
-        supabase.rpc('inscritos_por_porra'),
       ]);
 
       if (!activo) return;
 
       if (perfilData) setPerfil(perfilData as Perfil);
+      setSalasAbiertas((salasData as SalaFila[]) ?? []);
       setMaratones((maratonData as MaratonFila[]) ?? []);
-      setPorras((porraData as PorraFila[]) ?? []);
 
-      const mapaSala = new Map<string, number>();
-      ((inscritosSalaData as { sala_id: string; inscritos: number }[]) ?? []).forEach((fila) => mapaSala.set(fila.sala_id, Number(fila.inscritos)));
-      setInscritosPorSala(mapaSala);
-
-      const mapaPorra = new Map<string, number>();
-      ((inscritosPorraData as { porra_id: string; inscritos: number }[]) ?? []).forEach((fila) => mapaPorra.set(fila.porra_id, Number(fila.inscritos)));
-      setInscritosPorPorra(mapaPorra);
+      const mapaInscritos = new Map<string, number>();
+      ((inscritosData as { sala_id: string; inscritos: number }[]) ?? []).forEach((fila) => mapaInscritos.set(fila.sala_id, Number(fila.inscritos)));
+      setInscritosPorSala(mapaInscritos);
 
       setCargando(false);
     }
@@ -105,19 +111,6 @@ function MesasPageInner() {
       activo = false;
     };
   }, [router]);
-
-  const maratonesDelDeporte = useMemo(
-    () =>
-      maratones
-        .filter((m) => m.deporte === deporte)
-        .slice()
-        .sort((a, b) => {
-          const da = a.fecha_limite_inscripcion ? new Date(a.fecha_limite_inscripcion).getTime() : Infinity;
-          const db = b.fecha_limite_inscripcion ? new Date(b.fecha_limite_inscripcion).getTime() : Infinity;
-          return da - db;
-        }),
-    [maratones, deporte]
-  );
 
   if (cargando || !perfil) {
     return (
@@ -132,134 +125,327 @@ function MesasPageInner() {
     );
   }
 
+  const conteoPorDeporte: Record<string, number> = {};
+  DEPORTES.forEach((d) => {
+    conteoPorDeporte[d] = salasAbiertas.filter((s) => s.deporte === d).length;
+  });
+
+  const maratonesDelDeporte = maratones
+    .filter((m) => m.deporte === deporte)
+    .slice()
+    .sort((a, b) => {
+      const da = a.fecha_limite_inscripcion ? new Date(a.fecha_limite_inscripcion).getTime() : Infinity;
+      const db = b.fecha_limite_inscripcion ? new Date(b.fecha_limite_inscripcion).getTime() : Infinity;
+      return da - db;
+    });
+
+  const cierranPronto = salasAbiertas
+    .filter((s) => s.fecha_limite_inscripcion && closesInLabel(s.fecha_limite_inscripcion))
+    .sort((a, b) => new Date(a.fecha_limite_inscripcion!).getTime() - new Date(b.fecha_limite_inscripcion!).getTime())
+    .slice(0, 6);
+
   return (
     <main style={S.mainReset}>
       <div style={S.pageFrame}>
         <DraftersHeader saldoLabel={formatEuros(perfil.saldo_simulado)} accountInitials={S.iniciales(perfil.nombre, perfil.apellido)} />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '32px 20px 56px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20, padding: '32px 20px 56px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <h1 style={{ fontSize: 26, fontWeight: 800, color: S.TEXT }}>Grandes torneos</h1>
-            <p style={{ fontSize: 13, color: S.MUTED_2 }}>Maratón y porras clásicas — aparte del resto de salas, sin límite de inscritos.</p>
+            <h1 style={{ fontSize: 26, fontWeight: 800, color: S.TEXT }}>Mesas Drafters</h1>
+            <p style={{ fontSize: 13, color: S.MUTED_2 }}>Fútbol, golf y tenis — salas, maratón y draft de fantasía.</p>
           </div>
 
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button type="button" onClick={() => setTabPrincipal('maraton')} style={pillStyle(tabPrincipal === 'maraton')}>
-              Maratón
-            </button>
-            <button type="button" onClick={() => setTabPrincipal('porras')} style={pillStyle(tabPrincipal === 'porras')}>
-              Porras clásicas
-            </button>
-          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <h2 style={{ fontSize: 20, fontWeight: 700, color: S.TEXT }}>Elige tu deporte.</h2>
 
-          {tabPrincipal === 'maraton' && (
-            <>
-              <div style={{ display: 'flex', gap: 8 }}>
-                {DEPORTES.map((d) => (
-                  <button key={d} type="button" onClick={() => setDeporte(d)} style={pillStyle(deporte === d)}>
-                    {DEPORTE_LABELS[d]}
-                  </button>
-                ))}
+            <Link
+              href="/salas?deporte=futbol"
+              style={{
+                position: 'relative',
+                display: 'block',
+                height: 138,
+                borderRadius: 18,
+                overflow: 'hidden',
+                border: '1px solid rgba(61,220,132,0.35)',
+                background: 'linear-gradient(135deg, #0B2318 0%, #0F3320 55%, #12452A 100%)',
+                textDecoration: 'none',
+              }}
+            >
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 12,
+                  right: 14,
+                  background: 'rgba(6,10,8,0.55)',
+                  border: '1px solid rgba(255,255,255,0.14)',
+                  borderRadius: 999,
+                  padding: '4px 10px',
+                  fontFamily: "'Manrope', sans-serif",
+                  fontWeight: 700,
+                  fontSize: 11,
+                  color: '#EAF7EE',
+                }}
+              >
+                {conteoPorDeporte.futbol} salas abiertas
               </div>
+              <div style={{ position: 'relative', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', padding: '16px 20px' }}>
+                <span
+                  style={{
+                    fontFamily: "'Barlow Condensed', sans-serif",
+                    fontWeight: 800,
+                    fontStyle: 'italic',
+                    fontSize: 38,
+                    lineHeight: 1,
+                    color: '#3DDC84',
+                    textShadow: '0 3px 0 rgba(0,0,0,0.45), 0 6px 16px rgba(0,0,0,0.55)',
+                  }}
+                >
+                  FÚTBOL
+                </span>
+                <span style={{ marginTop: 4, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 12, color: 'rgba(245,247,245,0.75)' }}>
+                  Puntuación jugada a jugada
+                </span>
+              </div>
+            </Link>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {maratonesDelDeporte.length === 0 && <p style={{ fontSize: 13, color: S.MUTED_2 }}>No hay ningún Maratón abierto de {DEPORTE_LABELS[deporte].toLowerCase()} ahora mismo.</p>}
-                {maratonesDelDeporte.map((m) => {
-                  const signedUp = inscritosPorSala.get(m.id) ?? 0;
-                  const estadoInfo = estadoSalaInfo(m.estado, null, signedUp);
-                  const cierra = closesInLabel(m.fecha_limite_inscripcion);
-                  return (
-                    <Link
-                      key={m.id}
-                      href={`/salas/${m.id}`}
-                      style={{ background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8, textDecoration: 'none' }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                        <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, color: S.TEXT }}>{m.nombre}</span>
-                        {cierra && (
-                          <span
-                            style={{
-                              flexShrink: 0,
-                              fontFamily: "'Manrope', sans-serif",
-                              fontWeight: 700,
-                              fontSize: 11,
-                              color: '#FF9F6E',
-                              background: 'rgba(255,159,110,0.12)',
-                              padding: '4px 8px',
-                              borderRadius: 999,
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
-                            Cierra en {cierra}
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <Link
+              href="/salas?deporte=golf"
+              style={{
+                position: 'relative',
+                display: 'block',
+                height: 138,
+                borderRadius: 18,
+                overflow: 'hidden',
+                border: '1px solid rgba(255,122,69,0.35)',
+                background: 'linear-gradient(135deg, #241505 0%, #3B230A 55%, #4A2A0A 100%)',
+                textDecoration: 'none',
+              }}
+            >
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 12,
+                  right: 14,
+                  background: 'rgba(10,7,3,0.55)',
+                  border: '1px solid rgba(255,255,255,0.14)',
+                  borderRadius: 999,
+                  padding: '4px 10px',
+                  fontFamily: "'Manrope', sans-serif",
+                  fontWeight: 700,
+                  fontSize: 11,
+                  color: '#FCEEE3',
+                }}
+              >
+                {conteoPorDeporte.golf} salas abiertas
+              </div>
+              <div style={{ position: 'relative', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', padding: '16px 20px' }}>
+                <span
+                  style={{
+                    fontFamily: "'Barlow Condensed', sans-serif",
+                    fontWeight: 800,
+                    fontStyle: 'italic',
+                    fontSize: 38,
+                    lineHeight: 1,
+                    color: '#FF7A45',
+                    textShadow: '0 3px 0 rgba(0,0,0,0.45), 0 6px 16px rgba(0,0,0,0.55)',
+                  }}
+                >
+                  GOLF
+                </span>
+                <span style={{ marginTop: 4, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 12, color: 'rgba(245,247,245,0.75)' }}>
+                  Golpe a golpe, hoyo a hoyo
+                </span>
+              </div>
+            </Link>
+
+            <Link
+              href="/salas?deporte=tenis"
+              style={{
+                position: 'relative',
+                display: 'block',
+                height: 138,
+                borderRadius: 18,
+                overflow: 'hidden',
+                border: '1px solid rgba(215,255,61,0.35)',
+                background: 'linear-gradient(135deg, #141607 0%, #1E2408 55%, #263109 100%)',
+                textDecoration: 'none',
+              }}
+            >
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 12,
+                  right: 14,
+                  background: 'rgba(9,11,4,0.55)',
+                  border: '1px solid rgba(255,255,255,0.14)',
+                  borderRadius: 999,
+                  padding: '4px 10px',
+                  fontFamily: "'Manrope', sans-serif",
+                  fontWeight: 700,
+                  fontSize: 11,
+                  color: '#F3FADD',
+                }}
+              >
+                {conteoPorDeporte.tenis} salas abiertas
+              </div>
+              <div style={{ position: 'relative', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', padding: '16px 20px' }}>
+                <span
+                  style={{
+                    fontFamily: "'Barlow Condensed', sans-serif",
+                    fontWeight: 800,
+                    fontStyle: 'italic',
+                    fontSize: 38,
+                    lineHeight: 1,
+                    color: '#D7FF3D',
+                    textShadow: '0 3px 0 rgba(0,0,0,0.45), 0 6px 16px rgba(0,0,0,0.55)',
+                  }}
+                >
+                  TENIS
+                </span>
+                <span style={{ marginTop: 4, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 12, color: 'rgba(245,247,245,0.75)' }}>
+                  Punto a punto, set a set
+                </span>
+              </div>
+            </Link>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 8 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <h2 style={{ fontSize: 20, fontWeight: 700, color: S.TEXT }}>Maratón.</h2>
+              <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>Un único bote acumulado por torneo o jornada. Sin límite de inscritos.</p>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              {DEPORTES.map((d) => (
+                <button key={d} type="button" onClick={() => setDeporte(d)} style={pillStyle(deporte === d)}>
+                  {DEPORTE_LABELS[d]}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {maratonesDelDeporte.length === 0 && <p style={{ fontSize: 13, color: S.MUTED_2 }}>No hay ningún Maratón abierto de {DEPORTE_LABELS[deporte].toLowerCase()} ahora mismo.</p>}
+              {maratonesDelDeporte.map((m) => {
+                const signedUp = inscritosPorSala.get(m.id) ?? 0;
+                const estadoInfo = estadoSalaInfo(m.estado, null, signedUp);
+                const cierra = closesInLabel(m.fecha_limite_inscripcion);
+                return (
+                  <Link
+                    key={m.id}
+                    href={`/salas/${m.id}`}
+                    style={{ background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8, textDecoration: 'none' }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                      <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, color: S.TEXT }}>{m.nombre}</span>
+                      {cierra && (
                         <span
                           style={{
+                            flexShrink: 0,
                             fontFamily: "'Manrope', sans-serif",
                             fontWeight: 700,
-                            fontSize: 10,
-                            textTransform: 'uppercase',
-                            letterSpacing: '0.04em',
-                            color: '#F0B94D',
-                            background: 'rgba(240,185,77,0.12)',
-                            border: '1px solid rgba(240,185,77,0.3)',
-                            borderRadius: 6,
-                            padding: '3px 7px',
+                            fontSize: 11,
+                            color: '#FF9F6E',
+                            background: 'rgba(255,159,110,0.12)',
+                            padding: '4px 8px',
+                            borderRadius: 999,
+                            whiteSpace: 'nowrap',
                           }}
                         >
-                          {m.competicion}
+                          Cierra en {cierra}
                         </span>
-                        <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.04em', color: S.MUTED_2, background: '#1B2420', border: '1px solid #22302B', borderRadius: 6, padding: '3px 7px' }}>
-                          {formatEuros(m.buy_in)}
-                        </span>
-                        <span style={{ fontSize: 12, color: estadoInfo.color }}>{estadoInfo.label}</span>
-                      </div>
-                    </Link>
-                  );
-                })}
-              </div>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span
+                        style={{
+                          fontFamily: "'Manrope', sans-serif",
+                          fontWeight: 700,
+                          fontSize: 10,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.04em',
+                          color: '#F0B94D',
+                          background: 'rgba(240,185,77,0.12)',
+                          border: '1px solid rgba(240,185,77,0.3)',
+                          borderRadius: 6,
+                          padding: '3px 7px',
+                        }}
+                      >
+                        {m.competicion}
+                      </span>
+                      <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.04em', color: S.MUTED_2, background: '#1B2420', border: '1px solid #22302B', borderRadius: 6, padding: '3px 7px' }}>
+                        {formatEuros(m.buy_in)}
+                      </span>
+                      <span style={{ fontSize: 12, color: estadoInfo.color }}>{estadoInfo.label}</span>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
 
-              <span style={{ fontSize: 11, color: S.FAINT }}>*Bote único acumulado. Sin límite de plazas.</span>
-            </>
-          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+              <h2 style={{ fontSize: 20, fontWeight: 700, color: S.TEXT }}>Cierran pronto.</h2>
+              <Link href="/salas" style={{ fontSize: 13, fontWeight: 600, color: S.TEXT }}>
+                Ver todas
+              </Link>
+            </div>
 
-          {tabPrincipal === 'porras' && (
-            <>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {porras.length === 0 && <p style={{ fontSize: 13, color: S.MUTED_2 }}>No hay ninguna porra clásica disponible ahora mismo.</p>}
-                {porras.map((p) => {
-                  const signedUp = inscritosPorPorra.get(p.id) ?? 0;
-                  const cierra = closesInLabel(p.fecha_limite_inscripcion);
-                  const estadoColor = p.estado === 'disponible' ? '#3DDC84' : p.estado === 'proximamente' ? '#F0B94D' : S.MUTED_3;
-                  const estadoLabel = p.estado === 'disponible' ? 'Disponible' : p.estado === 'proximamente' ? 'Próximamente' : 'Finalizada';
-                  return (
-                    <Link
-                      key={p.id}
-                      href={`/porras/${p.id}`}
-                      style={{ background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8, textDecoration: 'none' }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                        <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, color: S.TEXT }}>{p.major}</span>
-                        {cierra && (
-                          <span style={{ flexShrink: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: '#FF9F6E', background: 'rgba(255,159,110,0.12)', padding: '4px 8px', borderRadius: 999, whiteSpace: 'nowrap' }}>
-                            Cierra en {cierra}
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: 12, color: estadoColor, fontWeight: 700 }}>{estadoLabel}</span>
-                        <span style={{ fontSize: 12, color: S.MUTED_2 }}>{signedUp} inscritos</span>
-                        <span style={{ marginLeft: 'auto', fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13, color: '#F0B94D' }}>{formatEuros(p.precio)}</span>
-                      </div>
-                    </Link>
-                  );
-                })}
-              </div>
-
-              <span style={{ fontSize: 11, color: S.FAINT }}>*Sin límite de participantes. Los 4 grandes majors.</span>
-            </>
-          )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {cierranPronto.length === 0 && <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>No hay ninguna sala a punto de cerrar ahora mismo.</p>}
+              {cierranPronto.map((sala) => {
+                const signedUp = inscritosPorSala.get(sala.id) ?? 0;
+                const estadoInfo = estadoSalaInfo(sala.estado, sala.aforo, signedUp);
+                const juegoLabel = TIPO_SALA_LABELS[sala.tipo as TipoSala] ?? sala.tipo;
+                return (
+                  <Link
+                    key={sala.id}
+                    href={`/salas/${sala.id}`}
+                    style={{
+                      background: S.PANEL,
+                      border: '1px solid #1E2723',
+                      borderRadius: 10,
+                      padding: '12px 14px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 6,
+                      textDecoration: 'none',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                      <span style={{ flex: 1, minWidth: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, color: S.TEXT }}>{sala.nombre}</span>
+                      <span
+                        style={{
+                          flexShrink: 0,
+                          fontFamily: "'Manrope', sans-serif",
+                          fontWeight: 700,
+                          fontSize: 10,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.03em',
+                          color: '#F0B94D',
+                          background: 'rgba(240,185,77,0.12)',
+                          border: '1px solid rgba(240,185,77,0.3)',
+                          borderRadius: 999,
+                          padding: '3px 8px',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {sala.competicion}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: estadoInfo.color }}>{estadoInfo.label}</span>
+                      <span style={{ flexShrink: 0, width: 84, textAlign: 'center', fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 10.5, lineHeight: 1.2, color: S.MUTED_2 }}>{juegoLabel}</span>
+                      <span style={{ flexShrink: 0, width: 42, textAlign: 'center', fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 12, color: S.MUTED }}>
+                        {signedUp}/{capacidadLabel(sala.aforo)}
+                      </span>
+                      <span style={{ flexShrink: 0, width: 58, textAlign: 'right', fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13, color: '#F0B94D' }}>{formatEuros(sala.buy_in)}</span>
+                    </div>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: '#FF9F6E' }}>Cierra en {closesInLabel(sala.fecha_limite_inscripcion)}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </div>
     </main>

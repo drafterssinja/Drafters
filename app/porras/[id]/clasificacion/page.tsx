@@ -1,0 +1,389 @@
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { supabase, Perfil } from '@/lib/supabaseClient';
+import DraftersHeader from '@/components/DraftersHeader';
+import AnuncioVideoInline from '@/components/AnuncioVideoInline';
+import * as S from '@/lib/mockupStyles';
+import { formatEuros } from '@/lib/salaShared';
+import { GRUPO_PORRA_LABELS, ORDEN_GRUPOS, COLOR_GRUPO, type GrupoPorra } from '@/lib/porraGrupos';
+import { formatGolfScore } from '@/lib/golfScoring';
+
+// ============================================================================
+// PORRA CLÁSICA — CLASIFICACIÓN EN DIRECTO (nuevo, 27/09, undécima vuelta)
+// ============================================================================
+// Reproduce el diseño exacto de isPorraClasificacion (Main.dc.html, líneas
+// 1553-1667) — pedido explícito de Iñi: "tienes tú el diseño que hicimos
+// para la parte de la clasificación de las porras. Está perfecto... lo
+// quiero tal como lo teníamos, tanto la parte de la clasificación de los
+// participantes, que cuando pulsan un participante se vean los cinco
+// jugadores que tienes, que cuando pulsas encima de un jugador, abajo se
+// vean la parte de los jugadores con los resultados que van haciendo. Todo
+// eso tiene que ser así."
+//
+// Lo que SÍ es real aquí: la porra, sus jugadores/grupos de color, y —
+// desde que empieza la porra — la plantilla real de 5 jugadores de cada
+// equipo inscrito (equipos_porra_clasificacion(), nueva función de
+// drafters-schema.sql, con el mismo criterio de "empezada" que ya usa
+// participantes_porra()). Lo que TODAVÍA no es real: la puntuación en vivo
+// (resultados_evento no existe todavía, ver sección 12 de la arquitectura
+// técnica) — así que el total de cada equipo/jugador se ve como "E" (par,
+// el placeholder de lib/golfScoring.ts) y el panel "hoyo a hoyo" muestra un
+// aviso en vez de datos inventados, hasta que se construya "cómo introducir
+// los resultados" (la siguiente pieza pendiente, pedida explícitamente por
+// Iñi para después de esto). El botón "simular resultado" de la maqueta
+// (pensado para pruebas internas) se ha quitado a propósito — no es algo
+// que deba ver un usuario real, mismo criterio que ya aplicó Iñi para el
+// vídeo explicativo.
+//
+// Corrección de Iñi (28/09): la porra clásica NO puntúa por el sistema de
+// puntos de las Mesas Drafters — puntúa con el resultado de golf de
+// siempre (golpes respecto al par: birdie -1, bogey +1, eagle -2, doble
+// bogey +2...), exactamente el mismo criterio con el que ya estaba
+// diseñado el panel "hoyo a hoyo" de la maqueta. Ver lib/golfScoring.ts.
+//
+// El toggle "Bonos de podio" se mantiene visualmente (Iñi no pidió
+// quitarlo, y "todo eso tiene que ser así" incluye el diseño completo de
+// esta pantalla) pero es solo informativo por ahora — no hay ninguna
+// puntuación en vivo todavía a la que aplicarle un bono o una penalización.
+
+type PorraRow = { id: string; major: string; competicion: string | null; estado: string; fecha_limite_inscripcion: string | null };
+type JugadorRow = { id: string; nombre: string; grupo_porra: GrupoPorra | null; precio: number };
+type EquipoClasif = { equipoId: string; nombreEquipo: string | null; jugadores: string[]; createdAt: string };
+
+type Vista = 'porra' | 'torneo';
+
+export default function PorraClasificacionPage() {
+  const router = useRouter();
+  const params = useParams<{ id: string }>();
+  const porraId = params.id;
+
+  const [perfil, setPerfil] = useState<Perfil | null>(null);
+  const [porra, setPorra] = useState<PorraRow | null>(null);
+  const [jugadores, setJugadores] = useState<JugadorRow[]>([]);
+  const [equipos, setEquipos] = useState<EquipoClasif[]>([]);
+  const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [vista, setVista] = useState<Vista>('porra');
+  const [bonosPodio, setBonosPodio] = useState(false);
+  const [equipoSeleccionadoId, setEquipoSeleccionadoId] = useState<string | null>(null);
+  const [jugadorFocoId, setJugadorFocoId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let activo = true;
+
+    async function cargar() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session) {
+        router.push('/login');
+        return;
+      }
+
+      const [{ data: perfilData }, { data: porraData }] = await Promise.all([
+        supabase.from('perfiles').select('*').eq('id', session.user.id).single(),
+        supabase.from('porras').select('id,major,competicion,estado,fecha_limite_inscripcion').eq('id', porraId).single(),
+      ]);
+
+      if (!activo) return;
+      if (perfilData) setPerfil(perfilData as Perfil);
+
+      if (!porraData) {
+        setError('No se ha encontrado esta porra.');
+        setCargando(false);
+        return;
+      }
+      const porraRow = porraData as PorraRow;
+      setPorra(porraRow);
+
+      const [{ data: jugData }, { data: equiposData }] = await Promise.all([
+        porraRow.competicion
+          ? supabase.from('jugadores').select('id,nombre,grupo_porra,precio').eq('deporte', 'golf').eq('competicion', porraRow.competicion)
+          : Promise.resolve({ data: [] as JugadorRow[] }),
+        // equipos_porra_clasificacion() es una función de base de datos
+        // (RPC): solo devuelve filas una vez la porra ha "empezado" (misma
+        // marca que participantes_porra()) — antes de eso, da una lista
+        // vacía, y esta pantalla lo trata como "todavía no ha empezado"
+        // más abajo.
+        supabase.rpc('equipos_porra_clasificacion', { p_porra_id: porraId }),
+      ]);
+
+      if (!activo) return;
+
+      setJugadores(((jugData as JugadorRow[]) ?? []).filter((j) => j.grupo_porra !== null));
+
+      const filasEquipos = (equiposData as { equipo_id: string; nombre_equipo: string | null; jugadores: string[]; created_at: string }[]) ?? [];
+      const equiposOrdenados = filasEquipos
+        .map((f) => ({ equipoId: f.equipo_id, nombreEquipo: f.nombre_equipo, jugadores: f.jugadores ?? [], createdAt: f.created_at }))
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      setEquipos(equiposOrdenados);
+      if (equiposOrdenados.length > 0) setEquipoSeleccionadoId(equiposOrdenados[0].equipoId);
+
+      setCargando(false);
+    }
+
+    cargar();
+    return () => {
+      activo = false;
+    };
+  }, [router, porraId]);
+
+  const jugadoresPorId = useMemo(() => new Map(jugadores.map((j) => [j.id, j])), [jugadores]);
+  const campoOrdenado = useMemo(() => jugadores.slice().sort((a, b) => b.precio - a.precio), [jugadores]);
+
+  if (cargando || !perfil) {
+    return (
+      <main style={S.mainReset}>
+        <div style={S.pageFrame}>
+          <DraftersHeader />
+          <div style={{ padding: '40px 20px' }}>
+            <p style={{ fontSize: 14, color: S.MUTED }}>Cargando...</p>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  const saldoLabel = formatEuros(perfil.saldo_simulado);
+  const initials = S.iniciales(perfil.nombre, perfil.apellido);
+
+  if (error || !porra) {
+    return (
+      <main style={S.mainReset}>
+        <div style={S.pageFrame}>
+          <DraftersHeader saldoLabel={saldoLabel} accountInitials={initials} />
+          <div style={{ padding: '40px 20px' }}>
+            <p style={{ fontSize: 14, color: S.ERROR }}>{error ?? 'No se ha encontrado esta porra.'}</p>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  // Todavía no ha empezado (o no tiene ningún equipo inscrito todavía) —
+  // mismo tratamiento honesto que ya usa salas/[id]/clasificacion/page.tsx
+  // mientras no existe el motor de puntuación en directo.
+  if (equipos.length === 0) {
+    return (
+      <main style={S.mainReset}>
+        <div style={S.pageFrame}>
+          <DraftersHeader saldoLabel={saldoLabel} accountInitials={initials} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '48px 24px', alignItems: 'center', textAlign: 'center' }}>
+            <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT, fontFamily: "'Barlow Condensed', sans-serif" }}>Clasificación en directo</h1>
+            <p style={{ fontSize: 14, color: S.MUTED_2, lineHeight: 1.6 }}>
+              Esta porra todavía no ha empezado, o todavía no hay equipos inscritos. En cuanto empiece podrás ver aquí la clasificación de todos los participantes.
+            </p>
+            <Link href={`/porras/${porra.id}`} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '12px 24px', textDecoration: 'none', display: 'inline-flex' }}>
+              Volver a la porra
+            </Link>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  const equipoSeleccionado = equipos.find((e) => e.equipoId === equipoSeleccionadoId) ?? equipos[0];
+  const jugadoresDelEquipoSeleccionado = equipoSeleccionado.jugadores.map((id) => jugadoresPorId.get(id)).filter((j): j is JugadorRow => !!j);
+  const jugadorFoco = jugadorFocoId
+    ? (jugadoresDelEquipoSeleccionado.find((j) => j.id === jugadorFocoId) ?? campoOrdenado.find((j) => j.id === jugadorFocoId) ?? null)
+    : null;
+
+  return (
+    <main style={S.mainReset}>
+      <div style={S.pageFrame}>
+        <DraftersHeader saldoLabel={saldoLabel} accountInitials={initials} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '24px 20px 40px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#3DDC84' }}>{porra.major}</span>
+            <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT }}>Clasificación en directo</h1>
+            <p style={{ fontSize: 13, color: S.MUTED_2 }}>{equipos.length} equipo{equipos.length === 1 ? '' : 's'} inscrito{equipos.length === 1 ? '' : 's'}</p>
+          </div>
+
+          <div style={{ display: 'flex', gap: 6, alignSelf: 'flex-start' }}>
+            <button type="button" onClick={() => setVista('porra')} style={vistaPillStyle(vista === 'porra')}>
+              Porra
+            </button>
+            <button type="button" onClick={() => setVista('torneo')} style={vistaPillStyle(vista === 'torneo')}>
+              Torneo
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setBonosPodio((v) => !v)}
+            style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10, textAlign: 'left', cursor: 'pointer' }}
+          >
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 12.5, color: S.TEXT }}>Bonos de podio (−10 / −5 / −3)</span>
+              <span style={{ fontSize: 10, color: S.MUTED_3 }}>Pendiente de conectar con la puntuación en directo del torneo.</span>
+            </div>
+            <div style={{ flexShrink: 0, width: 40, height: 22, borderRadius: 999, background: bonosPodio ? 'rgba(61,220,132,0.35)' : '#232B26', position: 'relative' }}>
+              <div style={{ position: 'absolute', top: 2, left: bonosPodio ? 20 : 2, width: 18, height: 18, borderRadius: '50%', background: '#F5F7F5', transition: 'left 0.15s ease' }} />
+            </div>
+          </button>
+
+          {vista === 'porra' && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+              <div style={{ flexShrink: 0, width: 126, display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 380, overflowY: 'auto' }}>
+                <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Equipos ({equipos.length})</span>
+                {equipos.map((eq, i) => {
+                  const activo = eq.equipoId === equipoSeleccionado.equipoId;
+                  return (
+                    <a
+                      key={eq.equipoId}
+                      href="#"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setEquipoSeleccionadoId(eq.equipoId);
+                        setJugadorFocoId(null);
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        padding: 8,
+                        background: activo ? 'rgba(61,220,132,0.1)' : S.PANEL,
+                        border: `1px solid ${activo ? 'rgba(61,220,132,0.4)' : '#1E2723'}`,
+                        borderRadius: 9,
+                        textDecoration: 'none',
+                      }}
+                    >
+                      <span style={{ flexShrink: 0, width: 16, textAlign: 'center', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 11, color: S.MUTED_2 }}>{i + 1}</span>
+                      <span style={{ flex: 1, minWidth: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {eq.nombreEquipo}
+                      </span>
+                      <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 12, color: S.MUTED_2 }}>{formatGolfScore(0)}</span>
+                    </a>
+                  );
+                })}
+              </div>
+
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
+                  <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {equipoSeleccionado.nombreEquipo}
+                  </span>
+                  <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, color: S.MUTED_2 }}>{formatGolfScore(0)}</span>
+                </div>
+                {jugadoresDelEquipoSeleccionado.map((j) => (
+                  <a
+                    key={j.id}
+                    href="#"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setJugadorFocoId((prev) => (prev === j.id ? null : j.id));
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '9px 10px',
+                      background: jugadorFocoId === j.id ? 'rgba(61,220,132,0.1)' : S.PANEL,
+                      border: `1px solid ${jugadorFocoId === j.id ? 'rgba(61,220,132,0.4)' : '#1E2723'}`,
+                      borderRadius: 9,
+                      textDecoration: 'none',
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                      <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.nombre}</span>
+                      {j.grupo_porra && <span style={{ fontSize: 9.5, fontWeight: 700, color: COLOR_GRUPO[j.grupo_porra] }}>{GRUPO_PORRA_LABELS[j.grupo_porra]}</span>}
+                    </div>
+                    <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 13, color: S.MUTED_2 }}>{formatGolfScore(0)}</span>
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {vista === 'torneo' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 420, overflowY: 'auto' }}>
+              <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Campo completo ({campoOrdenado.length} jugadores)</span>
+              {campoOrdenado.map((j, i) => (
+                <a
+                  key={j.id}
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setJugadorFocoId((prev) => (prev === j.id ? null : j.id));
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '9px 10px',
+                    background: jugadorFocoId === j.id ? 'rgba(61,220,132,0.1)' : S.PANEL,
+                    border: `1px solid ${jugadorFocoId === j.id ? 'rgba(61,220,132,0.4)' : '#1E2723'}`,
+                    borderRadius: 9,
+                    textDecoration: 'none',
+                  }}
+                >
+                  <span style={{ flexShrink: 0, width: 20, textAlign: 'center', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 11, color: S.MUTED_2 }}>{i + 1}</span>
+                  <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.nombre}</span>
+                    {j.grupo_porra && <span style={{ fontSize: 9.5, fontWeight: 700, color: COLOR_GRUPO[j.grupo_porra] }}>{GRUPO_PORRA_LABELS[j.grupo_porra]}</span>}
+                  </div>
+                  <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 13, color: S.MUTED_2 }}>{formatGolfScore(0)}</span>
+                </a>
+              ))}
+            </div>
+          )}
+
+          {jugadorFoco && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, color: S.TEXT }}>{jugadorFoco.nombre} · resultados</span>
+                <a
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setJugadorFocoId(null);
+                  }}
+                  style={{ color: S.MUTED_3, fontSize: 13, textDecoration: 'none' }}
+                >
+                  ✕
+                </a>
+              </div>
+              <p style={{ fontSize: 12.5, lineHeight: 1.5, color: S.MUTED_2, margin: 0 }}>
+                Resultados en directo: próximamente. En cuanto conectemos la puntuación en vivo del torneo, aquí verás el desglose hoyo a hoyo de{' '}
+                {jugadorFoco.nombre}, golpe a golpe.
+              </p>
+            </div>
+          )}
+
+          <span style={{ fontSize: 10, color: S.FAINT }}>
+            *Clasificación en directo: resultado respecto al par de cada jugador/equipo (no puntos) — se ve "E" (par) para todos hasta que se conecten los resultados
+            oficiales del torneo.
+          </span>
+
+          {/* Vídeo publicitario debajo de todo (mismo criterio que en
+              salas/[id]/clasificacion/page.tsx — pedido de Iñi, 27/09: "en
+              alguna parte que sea accesible pero que tampoco moleste,
+              vamos a meter los ítems de publicidad"). */}
+          <div style={{ width: '100%' }}>
+            <AnuncioVideoInline ubicacion="clasificacion" />
+          </div>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+function vistaPillStyle(active: boolean) {
+  return {
+    fontFamily: "'Barlow Condensed', sans-serif",
+    fontWeight: 700,
+    fontSize: 12,
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.03em',
+    padding: '7px 12px',
+    borderRadius: 999,
+    border: `1px solid ${active ? '#3DDC84' : S.BORDER}`,
+    background: active ? 'rgba(61,220,132,0.12)' : 'transparent',
+    color: active ? '#3DDC84' : S.MUTED,
+    cursor: 'pointer',
+  };
+}

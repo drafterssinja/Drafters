@@ -7,25 +7,36 @@ import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
 import { formatEuros, inicialesJugador } from '@/lib/salaShared';
 import { GRUPO_PORRA_LABELS, ORDEN_GRUPOS, COLOR_GRUPO, type GrupoPorra } from '@/lib/porraGrupos';
+import { EQUIPO_PRESUPUESTO, TAMANO_EQUIPO_GOLF_TENIS, colorPresupuesto } from '@/lib/draftConfig';
+import { PorraFormato, PORRA_FORMATO_LABELS, PORRA_FORMATO_COLOR } from '@/lib/porraFormato';
 
 // ============================================================================
-// CREAR EQUIPO EN UNA PORRA CLÁSICA (isPorraEquipo + isPorraConfirmar de
-// Main.dc.html, líneas 1462-1550) — un jugador como mucho por cada grupo de
-// color, nombre de equipo obligatorio, sin presupuesto de fantasía (precio
-// de entrada fijo). Mismo patrón de un único componente con paso interno
-// (draft/confirm) que la pantalla equivalente de salas.
+// CREAR EQUIPO EN UNA PORRA — dos formatos (isPorraEquipo + isPorraConfirmar
+// de Main.dc.html, líneas 1462-1550, adaptado)
+// ============================================================================
+// Hasta el 28/09 solo existía el formato "clásica" (un jugador por cada
+// grupo de color, más un comodín, sin presupuesto de fantasía). Pedido de
+// Iñi ese día: un segundo formato, "de sueldo de 100.000 con un valor de
+// cada uno de los jugadores" — igual mecanismo que las Mesas Drafters de
+// golf/tenis (lib/draftConfig.ts), pero dentro de una porra: sin aforo,
+// precio de entrada fijo (porra.precio) y equipos ilimitados por
+// participante, exactamente igual que la porra clásica en todo lo demás.
 //
-// Adaptación respecto a la maqueta: la maqueta da por hecho un reparto fijo
-// de grupos (Amarillo/Verde/Azul/LIV + libre + reserva); aquí los huecos
-// del panel "Tu equipo" salen de los grupos que de verdad tiene esta porra
-// (lib/porraGrupos.ts, hasta 5: amarillo/verde/azul/morado/españoles) — se
-// pide un jugador de cada uno de los que tenga jugadores, más un hueco
-// adicional de "comodín" (corrección de Iñi, 23/09): el comodín se puede
-// rellenar con cualquier jugador de cualquiera de esas listas, repitiendo
-// grupo — solo no se permite repetir el mismo jugador físico (eso ya lo
-// impide, además, inscribirse_en_porra() en el esquema SQL).
+// Esta pantalla ahora tiene un paso previo "info" (mismo patrón que
+// app/salas/[id]/crear-equipo, PuntuacionInfoScreen) que explica qué modo
+// es ESTA porra en concreto antes de dejar elegir jugadores (pedido de Iñi,
+// 28/09: "antes de que el jugador empiece a elegir los equipos, se le
+// explica esa porra en concreto de qué manera se va a... si va a ser modo
+// draft o modo porra clásica con grupos") — se salta en modoEdicion, igual
+// que la de salas (si ya tienes equipo, ya sabes de qué modo es).
+//
+// El formato de la porra decide qué paso "draft" se muestra (por grupos de
+// color o por presupuesto) pero el paso "confirm" y el envío final
+// (inscribirse_en_porra / editar_equipo_porra) son las mismas funciones
+// para los dos — la validación de la composición del equipo (grupos vs.
+// presupuesto) vive en el servidor, ver drafters-schema.sql.
 
-type PorraRow = { id: string; major: string; precio: number; competicion: string | null; estado: string };
+type PorraRow = { id: string; major: string; precio: number; competicion: string | null; estado: string; formato: PorraFormato };
 type JugadorRow = { id: string; nombre: string; grupo_porra: GrupoPorra | null; precio: number };
 
 const COMODIN_COLOR = '#2DD4BF';
@@ -46,10 +57,14 @@ export default function CrearEquipoPorraPage() {
   const [porra, setPorra] = useState<PorraRow | null>(null);
   const [jugadores, setJugadores] = useState<JugadorRow[]>([]);
   const [nombreEquipo, setNombreEquipo] = useState('');
+  // Formato "clásica": un titular por grupo + comodín.
   const [selected, setSelected] = useState<Map<GrupoPorra, string>>(new Map());
   const [comodinId, setComodinId] = useState<string | null>(null);
   const [activeGroup, setActiveGroup] = useState<GrupoPorra | 'comodin' | null>(null);
-  const [step, setStep] = useState<'draft' | 'confirm'>('draft');
+  // Formato "presupuesto": hasta 5 jugadores libres, sin grupos.
+  const [selectedPresupuesto, setSelectedPresupuesto] = useState<string[]>([]);
+  // Paso previo "info" (28/09): se salta al editar un equipo ya existente.
+  const [step, setStep] = useState<'info' | 'draft' | 'confirm'>(modoEdicion ? 'draft' : 'info');
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
@@ -69,7 +84,7 @@ export default function CrearEquipoPorraPage() {
 
       const [{ data: perfilData }, { data: porraData }] = await Promise.all([
         supabase.from('perfiles').select('*').eq('id', session.user.id).single(),
-        supabase.from('porras').select('id,major,precio,competicion,estado').eq('id', porraId).single(),
+        supabase.from('porras').select('id,major,precio,competicion,estado,formato').eq('id', porraId).single(),
       ]);
 
       if (!activo) return;
@@ -105,7 +120,7 @@ export default function CrearEquipoPorraPage() {
 
       if (!activo) return;
 
-      const jugRows = ((jugData as JugadorRow[]) ?? []).filter((j) => j.grupo_porra !== null);
+      const jugRows = ((jugData as JugadorRow[]) ?? []).filter((j) => porraRow.formato === 'clasica' ? j.grupo_porra !== null : true);
       setPorra(porraRow);
       setJugadores(jugRows);
 
@@ -116,30 +131,35 @@ export default function CrearEquipoPorraPage() {
           setCargando(false);
           return;
         }
-        // Reconstruye qué jugador es el titular de cada grupo y cuál es el
-        // comodín a partir de la lista de ids guardada — un grupo con dos
-        // jugadores guardados es el grupo del comodín (da igual cuál de los
-        // dos se pinte como "titular" y cuál como "comodín", el resultado
-        // final es el mismo equipo).
-        const jugadoresPorIdLocal = new Map(jugRows.map((j) => [j.id, j]));
-        const porGrupo = new Map<GrupoPorra, string[]>();
-        (equipoEditando.jugadores ?? []).forEach((id) => {
-          const j = jugadoresPorIdLocal.get(id);
-          if (!j || !j.grupo_porra) return;
-          const arr = porGrupo.get(j.grupo_porra) ?? [];
-          arr.push(id);
-          porGrupo.set(j.grupo_porra, arr);
-        });
-        const nuevoSelected = new Map<GrupoPorra, string>();
-        let nuevoComodin: string | null = null;
-        porGrupo.forEach((ids, grupo) => {
-          const ordenados = [...ids].sort();
-          nuevoSelected.set(grupo, ordenados[0]);
-          if (ordenados[1]) nuevoComodin = ordenados[1];
-        });
         setNombreEquipo(equipoEditando.nombre_equipo ?? '');
-        setSelected(nuevoSelected);
-        setComodinId(nuevoComodin);
+
+        if (porraRow.formato === 'presupuesto') {
+          setSelectedPresupuesto(equipoEditando.jugadores ?? []);
+        } else {
+          // Reconstruye qué jugador es el titular de cada grupo y cuál es el
+          // comodín a partir de la lista de ids guardada — un grupo con dos
+          // jugadores guardados es el grupo del comodín (da igual cuál de los
+          // dos se pinte como "titular" y cuál como "comodín", el resultado
+          // final es el mismo equipo).
+          const jugadoresPorIdLocal = new Map(jugRows.map((j) => [j.id, j]));
+          const porGrupo = new Map<GrupoPorra, string[]>();
+          (equipoEditando.jugadores ?? []).forEach((id) => {
+            const j = jugadoresPorIdLocal.get(id);
+            if (!j || !j.grupo_porra) return;
+            const arr = porGrupo.get(j.grupo_porra) ?? [];
+            arr.push(id);
+            porGrupo.set(j.grupo_porra, arr);
+          });
+          const nuevoSelected = new Map<GrupoPorra, string>();
+          let nuevoComodin: string | null = null;
+          porGrupo.forEach((ids, grupo) => {
+            const ordenados = [...ids].sort();
+            nuevoSelected.set(grupo, ordenados[0]);
+            if (ordenados[1]) nuevoComodin = ordenados[1];
+          });
+          setSelected(nuevoSelected);
+          setComodinId(nuevoComodin);
+        }
       }
 
       const primerGrupo = ORDEN_GRUPOS.find((g) => jugRows.some((j) => j.grupo_porra === g));
@@ -153,31 +173,32 @@ export default function CrearEquipoPorraPage() {
     };
   }, [router, porraId, equipoEditandoId]);
 
-  // Flechas de "volver" bien ordenadas entre draft → confirm (nuevo, 26/09
-  // novena vuelta) — mismo arreglo que en salas/[id]/crear-equipo/page.tsx
-  // (ver el comentario largo de ahí): la flecha propia del paso "draft"
-  // usaba `router.push('/porras/${porraId}')` en vez de "volver" de verdad,
-  // así que añadía una entrada nueva al historial y la flecha de atrás
-  // podía acabar rebotando entre esta pantalla y la de la porra. Ahora
-  // avanzar de paso añade una entrada al historial con `history.pushState`,
-  // y un único listener de `popstate` decide a qué paso volver — así la
-  // flecha de la cabecera, la flecha propia de cada pantalla y el gesto de
-  // "atrás" del dispositivo hacen siempre lo mismo.
+  // Flechas de "volver" bien ordenadas entre info → draft → confirm (mismo
+  // arreglo que en salas/[id]/crear-equipo — ver el comentario largo de
+  // ahí): cada avance de paso añade una entrada al historial con
+  // `history.pushState`, y un único listener de `popstate` decide a qué
+  // paso volver.
   useEffect(() => {
     function onPopState(event: PopStateEvent) {
-      const paso = (event.state as { paso?: 'confirm' } | null)?.paso;
-      setStep(paso === 'confirm' ? 'confirm' : 'draft');
+      const paso = (event.state as { paso?: 'draft' | 'confirm' } | null)?.paso;
+      setStep(paso === 'confirm' ? 'confirm' : paso === 'draft' ? 'draft' : 'info');
     }
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
-  function avanzarAConfirmar() {
-    window.history.pushState({ paso: 'confirm' }, '', window.location.href);
-    setStep('confirm');
+  function avanzarPaso(siguiente: 'draft' | 'confirm') {
+    window.history.pushState({ paso: siguiente }, '', window.location.href);
+    setStep(siguiente);
   }
 
   const gruposDisponibles = useMemo(() => ORDEN_GRUPOS.filter((g) => jugadores.some((j) => j.grupo_porra === g)), [jugadores]);
+  // Se calcula a partir de los grupos que YA tiene esta porra en concreto
+  // (repartidos al importar el torneo, lib/porraGrupos.ts) — si existe el
+  // grupo "Españoles" es porque esta porra tiene 3 o más inscritos
+  // españoles; si no existe, es porque tiene menos de 3. No hace falta
+  // volver a contar españoles aquí.
+  const hayListaEspanoles = gruposDisponibles.includes('espanoles');
   const jugadoresPorId = useMemo(() => new Map(jugadores.map((j) => [j.id, j])), [jugadores]);
   const seleccionados: { jugador: JugadorRow; esComodin: boolean }[] = [
     ...gruposDisponibles
@@ -192,6 +213,19 @@ export default function CrearEquipoPorraPage() {
   const equipoCompleto = totalHuecos > 0 && huecosRellenos === totalHuecos;
   const nombreValido = nombreEquipo.trim().length > 0;
   const puedeConfirmar = equipoCompleto && nombreValido;
+
+  // Formato "presupuesto": lista completa ordenada por precio (más caro
+  // primero, mismo criterio visual que las Mesas Drafters), gasto y
+  // presupuesto restante — mismo EQUIPO_PRESUPUESTO que ellas
+  // (lib/draftConfig.ts).
+  const jugadoresPresupuestoOrdenados = useMemo(() => [...jugadores].sort((a, b) => b.precio - a.precio), [jugadores]);
+  const gastoPresupuesto = useMemo(
+    () => selectedPresupuesto.reduce((acc, id) => acc + (jugadoresPorId.get(id)?.precio ?? 0), 0),
+    [selectedPresupuesto, jugadoresPorId]
+  );
+  const restantePresupuesto = EQUIPO_PRESUPUESTO - gastoPresupuesto;
+  const equipoCompletoPresupuesto = selectedPresupuesto.length === TAMANO_EQUIPO_GOLF_TENIS;
+  const puedeConfirmarPresupuesto = equipoCompletoPresupuesto && restantePresupuesto >= 0 && nombreValido;
 
   function toggleJugador(jugador: JugadorRow) {
     const grupo = jugador.grupo_porra;
@@ -216,10 +250,19 @@ export default function CrearEquipoPorraPage() {
     setComodinId((prev) => (prev === jugador.id ? null : jugador.id));
   }
 
+  function toggleJugadorPresupuesto(jugador: JugadorRow) {
+    setSelectedPresupuesto((prev) => {
+      if (prev.includes(jugador.id)) return prev.filter((id) => id !== jugador.id);
+      if (prev.length >= TAMANO_EQUIPO_GOLF_TENIS) return prev;
+      return [...prev, jugador.id];
+    });
+  }
+
   async function confirmarInscripcion() {
     setEnviando(true);
     setErrorEnvio(null);
-    const jugadoresElegidos = [...Array.from(selected.values()), ...(comodinId ? [comodinId] : [])];
+    const jugadoresElegidos =
+      porra?.formato === 'presupuesto' ? selectedPresupuesto : [...Array.from(selected.values()), ...(comodinId ? [comodinId] : [])];
     const { error: rpcError } = modoEdicion
       ? await supabase.rpc('editar_equipo_porra', {
           p_equipo_id: equipoEditandoId,
@@ -269,12 +312,16 @@ export default function CrearEquipoPorraPage() {
     );
   }
 
+  const esPresupuesto = porra.formato === 'presupuesto';
+
   return (
     <main style={S.mainReset}>
       <div style={S.pageFrame}>
         <DraftersHeader saldoLabel={saldoLabel} accountInitials={initials} />
 
-        {step === 'draft' ? (
+        {step === 'info' ? (
+          <PorraModoInfoScreen porra={porra} hayListaEspanoles={hayListaEspanoles} onEntendido={() => avanzarPaso('draft')} onVolver={() => router.back()} />
+        ) : step === 'draft' ? (
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '20px 20px 24px' }}>
               <button type="button" onClick={() => router.back()} style={backArrowStyle}>
@@ -283,7 +330,9 @@ export default function CrearEquipoPorraPage() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#3DDC84' }}>{porra.major}</span>
                 <h1 style={{ fontSize: 24, fontWeight: 800, color: S.TEXT }}>{modoEdicion ? 'Edita tu equipo' : 'Crea tu equipo'}</h1>
-                <p style={{ fontSize: 13, color: S.MUTED_2 }}>Elige un jugador de cada grupo de color, más un comodín de cualquier lista.</p>
+                <p style={{ fontSize: 13, color: S.MUTED_2 }}>
+                  {esPresupuesto ? `Elige ${TAMANO_EQUIPO_GOLF_TENIS} jugadores dentro de un presupuesto de ${formatEuros(EQUIPO_PRESUPUESTO)}.` : 'Elige un jugador de cada grupo de color, más un comodín de cualquier lista.'}
+                </p>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -291,7 +340,105 @@ export default function CrearEquipoPorraPage() {
                 <input type="text" value={nombreEquipo} onChange={(e) => setNombreEquipo(e.target.value)} placeholder="Ej. Los Birdies de Iñi" style={S.input} />
               </div>
 
-              {gruposDisponibles.length === 0 ? (
+              {esPresupuesto ? (
+                jugadores.length === 0 ? (
+                  <p style={{ fontSize: 13, color: S.MUTED_2 }}>Todavía no se ha subido el listado de jugadores de este torneo.</p>
+                ) : (
+                  <>
+                    <div style={{ position: 'sticky', top: 0, zIndex: 5, background: S.BG, paddingTop: 2, paddingBottom: 6, margin: '0 -20px', paddingLeft: 20, paddingRight: 20 }}>
+                      <div style={{ background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_2 }}>
+                          Presupuesto restante · {selectedPresupuesto.length}/{TAMANO_EQUIPO_GOLF_TENIS} jugadores
+                        </span>
+                        <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 16, color: colorPresupuesto(restantePresupuesto) }}>{formatEuros(restantePresupuesto)}</span>
+                      </div>
+                    </div>
+
+                    {selectedPresupuesto.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        {selectedPresupuesto.map((id) => {
+                          const j = jugadoresPorId.get(id);
+                          if (!j) return null;
+                          return (
+                            <span
+                              key={id}
+                              style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(61,220,132,0.1)', border: '1px solid rgba(61,220,132,0.4)', borderRadius: 999, padding: '5px 10px' }}
+                            >
+                              <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 12, color: S.TEXT }}>{j.nombre}</span>
+                              <a
+                                href="#"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  toggleJugadorPresupuesto(j);
+                                }}
+                                style={{ color: S.ERROR, fontWeight: 800, textDecoration: 'none' }}
+                              >
+                                ×
+                              </a>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                      {jugadoresPresupuestoOrdenados.map((j) => {
+                        const isSelected = selectedPresupuesto.includes(j.id);
+                        const huecosLlenos = selectedPresupuesto.length >= TAMANO_EQUIPO_GOLF_TENIS;
+                        const noAlcanza = j.precio > restantePresupuesto;
+                        const disabled = !isSelected && (huecosLlenos || noAlcanza);
+                        return (
+                          <a
+                            key={j.id}
+                            href="#"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              if (disabled) return;
+                              toggleJugadorPresupuesto(j);
+                            }}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              padding: '9px 8px',
+                              background: isSelected ? 'rgba(61,220,132,0.1)' : S.PANEL,
+                              border: `1px solid ${isSelected ? 'rgba(61,220,132,0.4)' : '#1E2723'}`,
+                              borderRadius: 10,
+                              textDecoration: 'none',
+                              opacity: disabled ? 0.4 : 1,
+                              pointerEvents: disabled ? 'none' : 'auto',
+                            }}
+                          >
+                            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                              <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 13, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.nombre}</span>
+                              <span style={{ fontSize: 10, fontWeight: 700, color: '#F0B94D' }}>{j.precio.toLocaleString('es-ES')} €</span>
+                            </div>
+                            <span
+                              style={{
+                                flexShrink: 0,
+                                width: 23,
+                                height: 23,
+                                borderRadius: '50%',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontWeight: 800,
+                                fontSize: 14,
+                                border: `1px solid ${isSelected ? '#3DDC84' : S.BORDER}`,
+                                background: isSelected ? '#3DDC84' : 'transparent',
+                                color: isSelected ? '#04140B' : S.MUTED,
+                              }}
+                            >
+                              {isSelected ? '−' : '+'}
+                            </span>
+                          </a>
+                        );
+                      })}
+                    </div>
+                    <span style={{ fontSize: 11, color: '#4E574F' }}>Elige libremente hasta {TAMANO_EQUIPO_GOLF_TENIS} jugadores sin superar el presupuesto.</span>
+                  </>
+                )
+              ) : gruposDisponibles.length === 0 ? (
                 <p style={{ fontSize: 13, color: S.MUTED_2 }}>Todavía no se ha subido el listado de jugadores de este torneo.</p>
               ) : (
                 <>
@@ -459,9 +606,23 @@ export default function CrearEquipoPorraPage() {
             </div>
 
             <div style={{ position: 'sticky', bottom: 0, padding: '8px 20px 12px', background: 'linear-gradient(180deg, rgba(11,15,14,0) 0%, #0B0F0E 40%)' }}>
-              <button type="button" disabled={!puedeConfirmar} onClick={avanzarAConfirmar} style={submitButtonStyle(puedeConfirmar, '#3DDC84')}>
-                {!nombreValido ? 'Ponle nombre a tu equipo' : equipoCompleto ? (modoEdicion ? 'Revisar cambios' : 'Revisar e inscribirme') : `Faltan ${totalHuecos - huecosRellenos} jugadores`}
-              </button>
+              {esPresupuesto ? (
+                <button type="button" disabled={!puedeConfirmarPresupuesto} onClick={() => avanzarPaso('confirm')} style={submitButtonStyle(puedeConfirmarPresupuesto, '#3DDC84')}>
+                  {!nombreValido
+                    ? 'Ponle nombre a tu equipo'
+                    : restantePresupuesto < 0
+                      ? 'Te has pasado del presupuesto'
+                      : equipoCompletoPresupuesto
+                        ? modoEdicion
+                          ? 'Revisar cambios'
+                          : 'Revisar e inscribirme'
+                        : `Faltan ${TAMANO_EQUIPO_GOLF_TENIS - selectedPresupuesto.length} jugadores`}
+                </button>
+              ) : (
+                <button type="button" disabled={!puedeConfirmar} onClick={() => avanzarPaso('confirm')} style={submitButtonStyle(puedeConfirmar, '#3DDC84')}>
+                  {!nombreValido ? 'Ponle nombre a tu equipo' : equipoCompleto ? (modoEdicion ? 'Revisar cambios' : 'Revisar e inscribirme') : `Faltan ${totalHuecos - huecosRellenos} jugadores`}
+                </button>
+              )}
             </div>
           </div>
         ) : (
@@ -473,28 +634,53 @@ export default function CrearEquipoPorraPage() {
               <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#3DDC84' }}>{porra.major}</span>
               <h1 style={{ fontSize: 24, fontWeight: 800, color: S.TEXT }}>{modoEdicion ? 'Confirma los cambios' : 'Confirma tu equipo'}</h1>
               <p style={{ fontSize: 13, color: S.MUTED_2 }}>
-                Porra clásica{modoEdicion ? ' · sin coste adicional, ya está pagado' : ` · ${formatEuros(porra.precio)} por equipo`}
+                {PORRA_FORMATO_LABELS[porra.formato]}
+                {modoEdicion ? ' · sin coste adicional, ya está pagado' : ` · ${formatEuros(porra.precio)} por equipo`}
               </p>
             </div>
 
             <div style={{ background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
               <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>{nombreEquipo.trim()}</span>
-              {seleccionados.map(({ jugador: j, esComodin }) => {
-                const color = esComodin ? COMODIN_COLOR : COLOR_GRUPO[j.grupo_porra as GrupoPorra];
-                const etiqueta = esComodin ? `Comodín · ${GRUPO_PORRA_LABELS[j.grupo_porra as GrupoPorra]}` : GRUPO_PORRA_LABELS[j.grupo_porra as GrupoPorra];
-                return (
-                  <div key={`${j.id}-${esComodin ? 'comodin' : 'titular'}`} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ flexShrink: 0, width: 32, height: 32, borderRadius: '50%', background: color, color: '#04140B', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(255,255,255,0.2)' }}>
-                      {inicialesJugador(j.nombre)}
-                    </span>
-                    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-                      <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 13.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.nombre}</span>
-                      <span style={{ fontSize: 10.5, fontWeight: 700, color }}>{etiqueta}</span>
-                    </div>
-                  </div>
-                );
-              })}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid #1E2723', marginTop: 4, paddingTop: 10 }}>
+              {esPresupuesto
+                ? selectedPresupuesto.map((id) => {
+                    const j = jugadoresPorId.get(id);
+                    if (!j) return null;
+                    return (
+                      <div key={j.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ flexShrink: 0, width: 32, height: 32, borderRadius: '50%', background: '#3DDC84', color: '#04140B', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(255,255,255,0.2)' }}>
+                          {inicialesJugador(j.nombre)}
+                        </span>
+                        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                          <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 13.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.nombre}</span>
+                          <span style={{ fontSize: 10.5, fontWeight: 700, color: '#F0B94D' }}>{j.precio.toLocaleString('es-ES')} €</span>
+                        </div>
+                      </div>
+                    );
+                  })
+                : seleccionados.map(({ jugador: j, esComodin }) => {
+                    const color = esComodin ? COMODIN_COLOR : COLOR_GRUPO[j.grupo_porra as GrupoPorra];
+                    const etiqueta = esComodin ? `Comodín · ${GRUPO_PORRA_LABELS[j.grupo_porra as GrupoPorra]}` : GRUPO_PORRA_LABELS[j.grupo_porra as GrupoPorra];
+                    return (
+                      <div key={`${j.id}-${esComodin ? 'comodin' : 'titular'}`} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ flexShrink: 0, width: 32, height: 32, borderRadius: '50%', background: color, color: '#04140B', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(255,255,255,0.2)' }}>
+                          {inicialesJugador(j.nombre)}
+                        </span>
+                        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                          <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 13.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.nombre}</span>
+                          <span style={{ fontSize: 10.5, fontWeight: 700, color }}>{etiqueta}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+              {esPresupuesto && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid #1E2723', marginTop: 4, paddingTop: 10 }}>
+                  <span style={{ fontSize: 13, color: S.MUTED_2 }}>Presupuesto usado</span>
+                  <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 15, color: colorPresupuesto(restantePresupuesto) }}>
+                    {gastoPresupuesto.toLocaleString('es-ES')} € / {EQUIPO_PRESUPUESTO.toLocaleString('es-ES')} €
+                  </span>
+                </div>
+              )}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: esPresupuesto ? undefined : '1px solid #1E2723', marginTop: esPresupuesto ? undefined : 4, paddingTop: esPresupuesto ? undefined : 10 }}>
                 <span style={{ fontSize: 13, color: S.MUTED_2 }}>{modoEdicion ? 'Ya pagado' : 'Precio del equipo'}</span>
                 <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 15, color: '#F0B94D' }}>{formatEuros(porra.precio)}</span>
               </div>
@@ -515,6 +701,88 @@ export default function CrearEquipoPorraPage() {
         )}
       </div>
     </main>
+  );
+}
+
+// Pantalla previa "qué modo es esta porra" (28/09, pedido de Iñi: "antes de
+// que el jugador empiece a elegir los equipos, se le explica esa porra en
+// concreto... si va a ser modo draft o modo porra clásica con grupos") —
+// mismo patrón que PuntuacionInfoScreen de salas/[id]/crear-equipo: se ve
+// siempre antes del draft (salvo al editar un equipo ya existente), con un
+// botón "Entendido" que avanza al paso de elegir jugadores.
+function PorraModoInfoScreen({
+  porra,
+  hayListaEspanoles,
+  onEntendido,
+  onVolver,
+}: {
+  porra: PorraRow;
+  hayListaEspanoles: boolean;
+  onEntendido: () => void;
+  onVolver: () => void;
+}) {
+  const formato = porra.formato;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '14px 20px 100px' }}>
+      <button type="button" onClick={onVolver} style={backArrowStyle}>
+        ←
+      </button>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: PORRA_FORMATO_COLOR[formato] }}>{porra.major}</span>
+        <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT }}>Cómo funciona esta porra</h1>
+        <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>Léelo antes de elegir tu equipo.</p>
+      </div>
+
+      <div style={{ background: S.PANEL, border: `1px solid ${S.BORDER}`, borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <span
+          style={{
+            alignSelf: 'flex-start',
+            fontFamily: "'Manrope', sans-serif",
+            fontWeight: 700,
+            fontSize: 11,
+            color: PORRA_FORMATO_COLOR[formato],
+            background: `${PORRA_FORMATO_COLOR[formato]}1F`,
+            border: `1px solid ${PORRA_FORMATO_COLOR[formato]}55`,
+            borderRadius: 999,
+            padding: '4px 10px',
+          }}
+        >
+          {PORRA_FORMATO_LABELS[formato]}
+        </span>
+
+        {formato === 'presupuesto' ? (
+          <p style={{ fontSize: 13, lineHeight: 1.55, color: S.MUTED_2, margin: 0 }}>
+            En esta porra no hay grupos de color: eliges libremente <strong style={{ color: S.TEXT }}>{TAMANO_EQUIPO_GOLF_TENIS} jugadores</strong>, los que quieras, sin superar un
+            presupuesto de <strong style={{ color: '#F0B94D' }}>{formatEuros(EQUIPO_PRESUPUESTO)}</strong>. Cuanto mejor es un jugador, más caro sale — el reto es armar el mejor equipo
+            posible sin pasarte del presupuesto.
+          </p>
+        ) : hayListaEspanoles ? (
+          <p style={{ fontSize: 13, lineHeight: 1.55, color: S.MUTED_2, margin: 0 }}>
+            En esta porra el campo está repartido en grupos de color. Como participan 3 o más jugadores españoles, hay una lista aparte,{' '}
+            <strong style={{ color: COLOR_GRUPO.espanoles }}>Españoles</strong>, con todos ellos — no cuentan para ningún otro grupo. El resto se reparte en{' '}
+            <strong style={{ color: COLOR_GRUPO.amarillo }}>Amarillo</strong> (puesto 1-15), <strong style={{ color: COLOR_GRUPO.verde }}>Verde</strong> (16-35) y{' '}
+            <strong style={{ color: COLOR_GRUPO.azul }}>Azul</strong> (36 en adelante, sin tope). Eliges un jugador de cada grupo que tenga esta porra, más un comodín de cualquiera de
+            esas listas.
+          </p>
+        ) : (
+          <p style={{ fontSize: 13, lineHeight: 1.55, color: S.MUTED_2, margin: 0 }}>
+            En esta porra el campo está repartido en grupos de color: <strong style={{ color: COLOR_GRUPO.amarillo }}>Amarillo</strong> (puesto 1-15),{' '}
+            <strong style={{ color: COLOR_GRUPO.verde }}>Verde</strong> (16-35), <strong style={{ color: COLOR_GRUPO.azul }}>Azul</strong> (36-70) y{' '}
+            <strong style={{ color: COLOR_GRUPO.morado }}>Morado</strong> (71 en adelante). Eliges un jugador de cada grupo que tenga esta porra, más un comodín de cualquiera de esas
+            listas.
+          </p>
+        )}
+        <span style={{ fontSize: 11, color: S.FAINT }}>
+          {formato === 'clasica' ? 'El puesto de cada jugador es siempre el suyo dentro de este torneo, no un ranking mundial absoluto.' : 'El precio de cada jugador es el mismo que se usa en las Mesas Drafters de este torneo.'}
+        </span>
+      </div>
+
+      <div style={{ position: 'sticky', bottom: 0, padding: '8px 0 12px', background: 'linear-gradient(180deg, rgba(11,15,14,0) 0%, #0B0F0E 40%)' }}>
+        <button type="button" onClick={onEntendido} style={submitButtonStyle(true, '#3DDC84')}>
+          Entendido, elegir jugadores
+        </button>
+      </div>
+    </div>
   );
 }
 

@@ -5,39 +5,32 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase, Perfil } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
-import AnuncioVideoInline from '@/components/AnuncioVideoInline';
 import * as S from '@/lib/mockupStyles';
-import {
-  DEPORTES,
-  TIPO_SALA_LABELS,
-  formatEuros,
-  estadoSalaInfo,
-  closesInLabel,
-  capacidadLabel,
-} from '@/lib/salaShared';
-import type { TipoSala } from '@/lib/repartoPremios';
+import { formatEuros } from '@/lib/salaShared';
 
 const ACCENT = '#3DDC84';
+const PORRAS_COLOR = '#FF7A45';
 
 // ============================================================================
-// PANTALLA DE INICIO (isHome de Main.dc.html, líneas 366-526)
+// PANTALLA DE INICIO — rediseñada (27/09, undécima vuelta)
 // ============================================================================
-// Bienvenida + mis equipos en juego + selector de deporte + accesos a
-// "Grandes torneos" (Maratón y Porras clásicas, que viven aparte del
-// listado normal de salas — pedido explícito de Iñi) + salas que cierran
-// pronto. Misma estructura y estilos exactos que la maqueta visual.
-
-type SalaFila = {
-  id: string;
-  nombre: string;
-  competicion: string;
-  deporte: string;
-  tipo: string;
-  aforo: number | null;
-  buy_in: number;
-  estado: string;
-  fecha_limite_inscripcion: string | null;
-};
+// Iñi, 27/09 (tras cerrar el tema del vídeo): "vamos a darle una vuelta a
+// la pantalla de inicio... la parte de arriba donde seguimos viendo los
+// equipos que tienes hechos o te da la opción de crear tu propio equipo,
+// la mantenemos igual. Y debajo, lo único que se va a ver van a ser dos
+// recuadros... el de la izquierda Mesas Drafters, el de la derecha Porras
+// clásicas de golf." Se mantiene intacta la cabecera + bienvenida + "mis
+// equipos en juego" (con aviso de lesionado y acceso a "clasificación en
+// directo", ahora también para equipos de porra — ver más abajo); todo lo
+// que antes iba debajo (selector de deporte, Grandes torneos, Cierran
+// pronto, y el vídeo publicitario de prueba) se ha movido a /mesas, que
+// pasa a ser la landing de "Mesas Drafters" — el vídeo publicitario del
+// feed de inicio se ha quitado sin más, tal y como pidió Iñi ("lo único
+// que se va a ver van a ser dos recuadros").
+//
+// Mesas Drafters lleva a /mesas (todo lo construido hasta ahora, sin
+// porras); Porras clásicas de golf lleva a /porras (nueva pantalla índice,
+// antes una pestaña dentro de /mesas).
 
 type EquipoFila = {
   id: string;
@@ -48,7 +41,7 @@ type EquipoFila = {
   jugadores: string[];
   gasto_total: number;
   salas: { id: string; nombre: string; competicion: string; deporte: string; estado: string; tipo: string } | null;
-  porras: { id: string; major: string; estado: string; competicion: string | null } | null;
+  porras: { id: string; major: string; estado: string; competicion: string | null; fecha_limite_inscripcion: string | null } | null;
   inscripciones: { estado: string }[];
 };
 
@@ -57,8 +50,6 @@ export default function InicioPage() {
   const [perfil, setPerfil] = useState<Perfil | null>(null);
   const [equipos, setEquipos] = useState<EquipoFila[]>([]);
   const [lesionMap, setLesionMap] = useState<Map<string, { nombre: string; lesionado: boolean }>>(new Map());
-  const [salasAbiertas, setSalasAbiertas] = useState<SalaFila[]>([]);
-  const [inscritosPorSala, setInscritosPorSala] = useState<Map<string, number>>(new Map());
   const [cargando, setCargando] = useState(true);
 
   useEffect(() => {
@@ -74,26 +65,15 @@ export default function InicioPage() {
         return;
       }
 
-      const [{ data: perfilData }, { data: equiposData }, { data: salasData }, { data: inscritosData }] = await Promise.all([
+      const [{ data: perfilData }, { data: equiposData }] = await Promise.all([
         supabase.from('perfiles').select('*').eq('id', session.user.id).single(),
         supabase
           .from('equipos')
           .select(
-            'id, modo, sala_id, porra_id, nombre_equipo, jugadores, gasto_total, salas(id,nombre,competicion,deporte,estado,tipo), porras(id,major,estado,competicion), inscripciones(estado)'
+            'id, modo, sala_id, porra_id, nombre_equipo, jugadores, gasto_total, salas(id,nombre,competicion,deporte,estado,tipo), porras(id,major,estado,competicion,fecha_limite_inscripcion), inscripciones(estado)'
           )
           .eq('usuario_id', session.user.id)
           .order('created_at', { ascending: false }),
-        supabase
-          .from('salas')
-          .select('id,nombre,competicion,deporte,tipo,aforo,buy_in,estado,fecha_limite_inscripcion')
-          .neq('tipo', 'maraton')
-          .neq('estado', 'finalizada'),
-        // inscritos_por_sala() es una función de base de datos (RPC) — hace
-        // falta porque equipos/inscripciones tienen RLS que solo deja ver
-        // las filas propias de cada usuario (correcto: nadie debería poder
-        // cotillear el equipo de un rival), pero el número de inscritos de
-        // cada sala sí es un dato público. Ver drafters-schema.sql.
-        supabase.rpc('inscritos_por_sala'),
       ]);
 
       if (!activo) return;
@@ -112,12 +92,6 @@ export default function InicioPage() {
         (jugData ?? []).forEach((j) => mapa.set(j.id, { nombre: j.nombre as string, lesionado: j.lesionado as boolean }));
         if (activo) setLesionMap(mapa);
       }
-
-      setSalasAbiertas((salasData as SalaFila[]) ?? []);
-
-      const mapaInscritos = new Map<string, number>();
-      ((inscritosData as { sala_id: string; inscritos: number }[]) ?? []).forEach((fila) => mapaInscritos.set(fila.sala_id, Number(fila.inscritos)));
-      setInscritosPorSala(mapaInscritos);
 
       setCargando(false);
     }
@@ -151,16 +125,6 @@ export default function InicioPage() {
     }
     return null;
   }
-
-  const conteoPorDeporte: Record<string, number> = {};
-  DEPORTES.forEach((d) => {
-    conteoPorDeporte[d] = salasAbiertas.filter((s) => s.deporte === d).length;
-  });
-
-  const cierranPronto = salasAbiertas
-    .filter((s) => s.fecha_limite_inscripcion && closesInLabel(s.fecha_limite_inscripcion))
-    .sort((a, b) => new Date(a.fecha_limite_inscripcion!).getTime() - new Date(b.fecha_limite_inscripcion!).getTime())
-    .slice(0, 4);
 
   return (
     <main style={S.mainReset}>
@@ -201,7 +165,7 @@ export default function InicioPage() {
               <span style={{ fontSize: 13, lineHeight: 1.5, color: S.MUTED_2 }}>
                 Crea tu equipo para unirte a tu primera liga de fútbol, golf o tenis.
               </span>
-              <Link href="/salas" style={{ ...S.primaryButton, marginTop: 6, textAlign: 'center', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Link href="/mesas" style={{ ...S.primaryButton, marginTop: 6, textAlign: 'center', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 Crear mi equipo
               </Link>
             </div>
@@ -213,8 +177,12 @@ export default function InicioPage() {
                 const competicionLabel = eq.salas?.competicion ?? eq.porras?.competicion ?? eq.porras?.major ?? '';
                 const salaNombre = eq.salas?.nombre ?? (eq.porras ? `Porra · ${eq.porras.major}` : eq.nombre_equipo ?? 'Mi equipo');
                 const href = eq.salas ? `/salas/${eq.sala_id}` : eq.porras ? `/porras/${eq.porra_id}` : '#';
-                const clasificacionHref = eq.salas ? `/salas/${eq.sala_id}/clasificacion` : '#';
-                const enDirecto = eq.salas?.estado === 'completa';
+                const porraEmpezada =
+                  !!eq.porras &&
+                  (eq.porras.estado === 'finalizada' ||
+                    (!!eq.porras.fecha_limite_inscripcion && new Date(eq.porras.fecha_limite_inscripcion).getTime() <= Date.now()));
+                const clasificacionHref = eq.salas ? `/salas/${eq.sala_id}/clasificacion` : eq.porras ? `/porras/${eq.porra_id}/clasificacion` : '#';
+                const enDirecto = eq.salas?.estado === 'completa' || porraEmpezada;
                 const lesionado = lesionadoDe(eq);
                 return (
                   <div key={eq.id} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
@@ -296,300 +264,87 @@ export default function InicioPage() {
             </div>
           )}
 
-          {/* Vídeo publicitario en el feed de inicio (nuevo, 27/09) — la
-              "idea B" original de Iñi, puesta a prueba entre "tus equipos en
-              juego" y el selector de deporte, exactamente donde la había
-              planteado la primera vez: "ponlo a ver para luego decidir si
-              dejarlo o no". Si no hay ningún vídeo con "Mostrar en inicio"
-              marcado, el componente no pinta nada. */}
-          <AnuncioVideoInline ubicacion="inicio" />
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 8 }}>
-            <h2 style={{ fontSize: 20, fontWeight: 700, color: S.TEXT }}>Elige tu deporte.</h2>
-
-            <Link
-              href="/salas?deporte=futbol"
-              style={{
-                position: 'relative',
-                display: 'block',
-                height: 138,
-                borderRadius: 18,
-                overflow: 'hidden',
-                border: '1px solid rgba(61,220,132,0.35)',
-                background: 'linear-gradient(135deg, #0B2318 0%, #0F3320 55%, #12452A 100%)',
-                textDecoration: 'none',
-              }}
-            >
-              <div
-                style={{
-                  position: 'absolute',
-                  top: 12,
-                  right: 14,
-                  background: 'rgba(6,10,8,0.55)',
-                  border: '1px solid rgba(255,255,255,0.14)',
-                  borderRadius: 999,
-                  padding: '4px 10px',
-                  fontFamily: "'Manrope', sans-serif",
-                  fontWeight: 700,
-                  fontSize: 11,
-                  color: '#EAF7EE',
-                }}
-              >
-                {conteoPorDeporte.futbol} salas abiertas
-              </div>
-              <div style={{ position: 'relative', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', padding: '16px 20px' }}>
-                <span
-                  style={{
-                    fontFamily: "'Barlow Condensed', sans-serif",
-                    fontWeight: 800,
-                    fontStyle: 'italic',
-                    fontSize: 38,
-                    lineHeight: 1,
-                    color: '#3DDC84',
-                    textShadow: '0 3px 0 rgba(0,0,0,0.45), 0 6px 16px rgba(0,0,0,0.55)',
-                  }}
-                >
-                  FÚTBOL
-                </span>
-                <span style={{ marginTop: 4, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 12, color: 'rgba(245,247,245,0.75)' }}>
-                  Puntuación jugada a jugada
-                </span>
-              </div>
-            </Link>
-
-            <Link
-              href="/salas?deporte=golf"
-              style={{
-                position: 'relative',
-                display: 'block',
-                height: 138,
-                borderRadius: 18,
-                overflow: 'hidden',
-                border: '1px solid rgba(255,122,69,0.35)',
-                background: 'linear-gradient(135deg, #241505 0%, #3B230A 55%, #4A2A0A 100%)',
-                textDecoration: 'none',
-              }}
-            >
-              <div
-                style={{
-                  position: 'absolute',
-                  top: 12,
-                  right: 14,
-                  background: 'rgba(10,7,3,0.55)',
-                  border: '1px solid rgba(255,255,255,0.14)',
-                  borderRadius: 999,
-                  padding: '4px 10px',
-                  fontFamily: "'Manrope', sans-serif",
-                  fontWeight: 700,
-                  fontSize: 11,
-                  color: '#FCEEE3',
-                }}
-              >
-                {conteoPorDeporte.golf} salas abiertas
-              </div>
-              <div style={{ position: 'relative', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', padding: '16px 20px' }}>
-                <span
-                  style={{
-                    fontFamily: "'Barlow Condensed', sans-serif",
-                    fontWeight: 800,
-                    fontStyle: 'italic',
-                    fontSize: 38,
-                    lineHeight: 1,
-                    color: '#FF7A45',
-                    textShadow: '0 3px 0 rgba(0,0,0,0.45), 0 6px 16px rgba(0,0,0,0.55)',
-                  }}
-                >
-                  GOLF
-                </span>
-                <span style={{ marginTop: 4, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 12, color: 'rgba(245,247,245,0.75)' }}>
-                  Golpe a golpe, hoyo a hoyo
-                </span>
-              </div>
-            </Link>
-
-            <Link
-              href="/salas?deporte=tenis"
-              style={{
-                position: 'relative',
-                display: 'block',
-                height: 138,
-                borderRadius: 18,
-                overflow: 'hidden',
-                border: '1px solid rgba(215,255,61,0.35)',
-                background: 'linear-gradient(135deg, #141607 0%, #1E2408 55%, #263109 100%)',
-                textDecoration: 'none',
-              }}
-            >
-              <div
-                style={{
-                  position: 'absolute',
-                  top: 12,
-                  right: 14,
-                  background: 'rgba(9,11,4,0.55)',
-                  border: '1px solid rgba(255,255,255,0.14)',
-                  borderRadius: 999,
-                  padding: '4px 10px',
-                  fontFamily: "'Manrope', sans-serif",
-                  fontWeight: 700,
-                  fontSize: 11,
-                  color: '#F3FADD',
-                }}
-              >
-                {conteoPorDeporte.tenis} salas abiertas
-              </div>
-              <div style={{ position: 'relative', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', padding: '16px 20px' }}>
-                <span
-                  style={{
-                    fontFamily: "'Barlow Condensed', sans-serif",
-                    fontWeight: 800,
-                    fontStyle: 'italic',
-                    fontSize: 38,
-                    lineHeight: 1,
-                    color: '#D7FF3D',
-                    textShadow: '0 3px 0 rgba(0,0,0,0.45), 0 6px 16px rgba(0,0,0,0.55)',
-                  }}
-                >
-                  TENIS
-                </span>
-                <span style={{ marginTop: 4, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 12, color: 'rgba(245,247,245,0.75)' }}>
-                  Punto a punto, set a set
-                </span>
-              </div>
-            </Link>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 8 }}>
-            <h2 style={{ fontSize: 20, fontWeight: 700, color: S.TEXT }}>Grandes torneos.</h2>
+          {/* Los dos únicos recuadros de más abajo (pedido de Iñi, 27/09):
+              izquierda = Mesas Drafters (todo lo construido hasta ahora,
+              salas + maratón, sin porras), derecha = Porras clásicas de
+              golf. Ocupan cada uno la mitad del ancho, con bastante alto
+              para que sean lo único que se vea debajo de "mis equipos". */}
+          <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
             <Link
               href="/mesas"
               style={{
+                flex: 1,
+                minWidth: 0,
                 position: 'relative',
-                display: 'block',
-                borderRadius: 16,
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'flex-end',
+                height: 240,
+                borderRadius: 18,
                 overflow: 'hidden',
-                border: '1px solid rgba(240,185,77,0.35)',
-                background: 'linear-gradient(135deg, #241A05 0%, #332405 55%, #40300A 100%)',
-                padding: '18px 20px',
+                border: `1px solid rgba(61,220,132,0.35)`,
+                background: 'linear-gradient(135deg, #0B2318 0%, #0F3320 55%, #12452A 100%)',
+                padding: '18px 16px',
                 textDecoration: 'none',
               }}
             >
-              <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontStyle: 'italic', fontSize: 26, color: '#F0B94D' }}>MARATÓN</span>
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#F0B94D" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M9 6l6 6-6 6" />
-                  </svg>
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: '#F0B94D', background: 'rgba(240,185,77,0.14)', border: '1px solid rgba(240,185,77,0.3)', borderRadius: 999, padding: '4px 10px' }}>
-                    Jugadores ilimitados
-                  </span>
-                  <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: '#F0B94D', background: 'rgba(240,185,77,0.14)', border: '1px solid rgba(240,185,77,0.3)', borderRadius: 999, padding: '4px 10px' }}>
-                    Torneo o jornada concreta
-                  </span>
-                </div>
-                <span style={{ fontSize: 12, color: 'rgba(245,247,245,0.7)' }}>Un único bote acumulado por torneo o jornada. Sin límite de inscritos.</span>
-              </div>
+              <span
+                style={{
+                  fontFamily: "'Barlow Condensed', sans-serif",
+                  fontWeight: 800,
+                  fontStyle: 'italic',
+                  fontSize: 26,
+                  lineHeight: 1.05,
+                  color: ACCENT,
+                  textShadow: '0 3px 0 rgba(0,0,0,0.45), 0 6px 16px rgba(0,0,0,0.55)',
+                }}
+              >
+                MESAS
+                <br />
+                DRAFTERS
+              </span>
+              <span style={{ marginTop: 8, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 12, color: 'rgba(245,247,245,0.75)' }}>
+                Fútbol, golf y tenis. Salas, maratón y draft de fantasía.
+              </span>
             </Link>
 
             <Link
-              href="/mesas?tab=porras"
+              href="/porras"
               style={{
+                flex: 1,
+                minWidth: 0,
                 position: 'relative',
-                display: 'block',
-                borderRadius: 16,
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'flex-end',
+                height: 240,
+                borderRadius: 18,
                 overflow: 'hidden',
-                border: '1px solid rgba(61,220,132,0.35)',
-                background: 'linear-gradient(135deg, #071A10 0%, #0C2A18 55%, #123B20 100%)',
-                padding: '18px 20px',
+                border: `1px solid rgba(255,122,69,0.35)`,
+                background: 'linear-gradient(135deg, #241505 0%, #3B230A 55%, #4A2A0A 100%)',
+                padding: '18px 16px',
                 textDecoration: 'none',
               }}
             >
-              <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontStyle: 'italic', fontSize: 26, color: ACCENT }}>PORRAS</span>
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M9 6l6 6-6 6" />
-                  </svg>
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: ACCENT, background: 'rgba(61,220,132,0.14)', border: '1px solid rgba(61,220,132,0.3)', borderRadius: 999, padding: '4px 10px' }}>
-                    Sin límite de participantes
-                  </span>
-                  <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: ACCENT, background: 'rgba(61,220,132,0.14)', border: '1px solid rgba(61,220,132,0.3)', borderRadius: 999, padding: '4px 10px' }}>
-                    Los 4 grandes majors
-                  </span>
-                </div>
-                <span style={{ fontSize: 12, color: 'rgba(245,247,245,0.7)' }}>
-                  Las porras clásicas de golf de toda la vida: Masters, PGA Championship, Open Championship y US Open.
-                </span>
-              </div>
+              <span
+                style={{
+                  fontFamily: "'Barlow Condensed', sans-serif",
+                  fontWeight: 800,
+                  fontStyle: 'italic',
+                  fontSize: 26,
+                  lineHeight: 1.05,
+                  color: PORRAS_COLOR,
+                  textShadow: '0 3px 0 rgba(0,0,0,0.45), 0 6px 16px rgba(0,0,0,0.55)',
+                }}
+              >
+                PORRAS
+                <br />
+                CLÁSICAS DE GOLF
+              </span>
+              <span style={{ marginTop: 8, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 12, color: 'rgba(245,247,245,0.75)' }}>
+                La porra de toda la vida: elige tu equipo por grupos.
+              </span>
             </Link>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-              <h2 style={{ fontSize: 20, fontWeight: 700, color: S.TEXT }}>Cierran pronto.</h2>
-              <Link href="/salas" style={{ fontSize: 13, fontWeight: 600, color: S.TEXT }}>
-                Ver todas
-              </Link>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {cierranPronto.length === 0 && <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>No hay ninguna sala a punto de cerrar ahora mismo.</p>}
-              {cierranPronto.map((sala) => {
-                const signedUp = inscritosPorSala.get(sala.id) ?? 0;
-                const estadoInfo = estadoSalaInfo(sala.estado, sala.aforo, signedUp);
-                const juegoLabel = TIPO_SALA_LABELS[sala.tipo as TipoSala] ?? sala.tipo;
-                return (
-                  <Link
-                    key={sala.id}
-                    href={`/salas/${sala.id}`}
-                    style={{
-                      background: S.PANEL,
-                      border: '1px solid #1E2723',
-                      borderRadius: 10,
-                      padding: '12px 14px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 6,
-                      textDecoration: 'none',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                      <span style={{ flex: 1, minWidth: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, color: S.TEXT }}>{sala.nombre}</span>
-                      <span
-                        style={{
-                          flexShrink: 0,
-                          fontFamily: "'Manrope', sans-serif",
-                          fontWeight: 700,
-                          fontSize: 10,
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.03em',
-                          color: '#F0B94D',
-                          background: 'rgba(240,185,77,0.12)',
-                          border: '1px solid rgba(240,185,77,0.3)',
-                          borderRadius: 999,
-                          padding: '3px 8px',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {sala.competicion}
-                      </span>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: estadoInfo.color }}>{estadoInfo.label}</span>
-                      <span style={{ flexShrink: 0, width: 84, textAlign: 'center', fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 10.5, lineHeight: 1.2, color: S.MUTED_2 }}>{juegoLabel}</span>
-                      <span style={{ flexShrink: 0, width: 42, textAlign: 'center', fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 12, color: S.MUTED }}>
-                        {signedUp}/{capacidadLabel(sala.aforo)}
-                      </span>
-                      <span style={{ flexShrink: 0, width: 58, textAlign: 'right', fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13, color: '#F0B94D' }}>{formatEuros(sala.buy_in)}</span>
-                    </div>
-                    <span style={{ fontSize: 11, fontWeight: 600, color: '#FF9F6E' }}>Cierra en {closesInLabel(sala.fecha_limite_inscripcion)}</span>
-                  </Link>
-                );
-              })}
-            </div>
           </div>
         </div>
       </div>

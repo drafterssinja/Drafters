@@ -207,6 +207,21 @@ create table if not exists public.porras (
 alter table public.porras add column if not exists fecha_limite_inscripcion timestamptz;
 alter table public.porras add column if not exists competicion text;
 
+-- Formato de la porra (nuevo, 28/09 — pedido de Iñi: "me va a dar dos
+-- posibilidades, crearla en el formato que actualmente estamos haciendo de
+-- porras clásicas o en el formato de sueldo de 100.000 con un valor de cada
+-- uno de los jugadores"): 'clasica' es el reparto por grupos de color de
+-- siempre (lib/porraGrupos.ts, sin cambios); 'presupuesto' es un draft por
+-- presupuesto de fantasía de 100.000 €, igual mecanismo que ya usan las
+-- Mesas Drafters de golf/tenis (lib/draftConfig.ts) pero dentro de una
+-- porra (sin aforo, con precio de entrada fijo = porras.precio, y equipos
+-- ilimitados por participante — eso no cambia con el formato). Todas las
+-- porras existentes antes de esta columna se quedan como 'clasica' (valor
+-- por defecto), que es lo que ya eran.
+alter table public.porras add column if not exists formato text not null default 'clasica';
+alter table public.porras drop constraint if exists porras_formato_check;
+alter table public.porras add constraint porras_formato_check check (formato in ('clasica', 'presupuesto'));
+
 -- ----------------------------------------------------------------------------
 -- 4. JUGADORES (ficha maestra, editable solo por el superadministrador)
 -- ----------------------------------------------------------------------------
@@ -1183,6 +1198,46 @@ $$;
 revoke all on function public.participantes_porra(uuid) from public;
 grant execute on function public.participantes_porra(uuid) to authenticated;
 
+-- Equipos participantes de una porra clásica CON su plantilla de 5
+-- jugadores (nuevo, 28/09) — para la pantalla real de "Clasificación en
+-- directo" (app/porras/[id]/clasificacion/page.tsx), que necesita poder
+-- mostrar, al pulsar un equipo del ranking, sus 5 jugadores — algo que
+-- participantes_porra() no da (solo el nombre del equipo, nunca su
+-- plantilla, porque esa función también se usa en la pestaña "Equipos" del
+-- detalle de porra, ANTES de que empiece, donde la plantilla de un rival
+-- nunca debe verse). Aquí, en cambio, la plantilla completa solo se expone
+-- una vez la porra ha "empezado" (mismo criterio que participantes_porra:
+-- fecha límite de inscripción ya pasada, o porra finalizada) — antes de
+-- eso, esta función no devuelve ninguna fila, tal y como corresponde a una
+-- pantalla de clasificación que solo tiene sentido una vez la porra está en
+-- juego. Pedido de Iñi (27/09): "cuando pulsan un participante se vean los
+-- cinco jugadores que tienes". La puntuación en vivo de cada jugador
+-- (resultados_evento) todavía no existe — esta función solo da la
+-- composición de cada equipo; el total en puntos lo calcula el cliente a
+-- partir de datos reales en cuanto exista esa pieza (sección 12 de la
+-- arquitectura técnica).
+create or replace function public.equipos_porra_clasificacion(p_porra_id uuid)
+returns table (equipo_id uuid, nombre_equipo text, jugadores jsonb, created_at timestamptz)
+language sql
+security definer set search_path = public
+stable
+as $$
+  select e.id, e.nombre_equipo, to_jsonb(e.jugadores), e.created_at
+  from public.equipos e
+  join public.inscripciones i on i.equipo_id = e.id
+  where e.porra_id = p_porra_id
+    and i.estado <> 'reembolsada'
+    and exists (
+      select 1 from public.porras p
+      where p.id = p_porra_id
+        and (p.estado = 'finalizada' or (p.fecha_limite_inscripcion is not null and p.fecha_limite_inscripcion <= now()))
+    )
+  order by e.created_at asc;
+$$;
+
+revoke all on function public.equipos_porra_clasificacion(uuid) from public;
+grant execute on function public.equipos_porra_clasificacion(uuid) to authenticated;
+
 -- ============================================================================
 -- INSCRIBIRSE EN UNA SALA / EN UNA PORRA (draft: elegir equipo y pagar)
 -- ============================================================================
@@ -1319,6 +1374,7 @@ as $$
 declare
   v_porra record;
   v_saldo numeric;
+  v_gasto numeric;
   v_equipo public.equipos;
 begin
   if auth.uid() is null then
@@ -1369,19 +1425,38 @@ begin
     raise exception 'No puedes elegir el mismo jugador más de una vez';
   end if;
 
-  -- Un jugador de cada grupo de color, más un único "comodín" que puede
-  -- repetir grupo (regla corregida por Iñi el 23/09: el quinto jugador del
-  -- equipo siempre puede salir de cualquiera de las listas ya usadas) — así
-  -- que como mucho un grupo puede aparecer dos veces, nunca más de dos, y
-  -- nunca dos grupos repetidos a la vez.
-  if (
-    jsonb_array_length(p_jugadores) - (
-      select count(distinct j.grupo_porra)
-      from public.jugadores j
-      where j.id in (select (jsonb_array_elements_text(p_jugadores))::uuid)
-    )
-  ) > 1 then
-    raise exception 'Como mucho puedes repetir un grupo de color (tu jugador comodín)';
+  -- Regla de composición del equipo: depende del formato de la porra
+  -- (nuevo, 28/09 — porras.formato, ver más arriba en este esquema).
+  if v_porra.formato = 'clasica' then
+    -- Un jugador de cada grupo de color, más un único "comodín" que puede
+    -- repetir grupo (regla corregida por Iñi el 23/09: el quinto jugador del
+    -- equipo siempre puede salir de cualquiera de las listas ya usadas) — así
+    -- que como mucho un grupo puede aparecer dos veces, nunca más de dos, y
+    -- nunca dos grupos repetidos a la vez.
+    if (
+      jsonb_array_length(p_jugadores) - (
+        select count(distinct j.grupo_porra)
+        from public.jugadores j
+        where j.id in (select (jsonb_array_elements_text(p_jugadores))::uuid)
+      )
+    ) > 1 then
+      raise exception 'Como mucho puedes repetir un grupo de color (tu jugador comodín)';
+    end if;
+  else
+    -- Formato "presupuesto" (nuevo, 28/09, pedido de Iñi): sin grupos de
+    -- color ni comodín — el equipo se elige libremente, jugador a jugador,
+    -- dentro de un presupuesto de fantasía de 100.000 €, mismo mecanismo que
+    -- ya usan las Mesas Drafters de golf/tenis (lib/draftConfig.ts,
+    -- EQUIPO_PRESUPUESTO, e inscribirse_en_sala() más arriba en este mismo
+    -- archivo) — el precio de entrada de la porra (v_porra.precio) es aparte
+    -- y no cambia con esto.
+    select coalesce(sum(precio), 0) into v_gasto
+      from public.jugadores
+      where id in (select (jsonb_array_elements_text(p_jugadores))::uuid);
+
+    if v_gasto > 100000 then
+      raise exception 'El equipo supera el presupuesto de 100.000 €';
+    end if;
   end if;
 
   select saldo_simulado into v_saldo from public.perfiles where id = auth.uid() for update;
@@ -1422,6 +1497,7 @@ as $$
 declare
   v_equipo public.equipos;
   v_porra record;
+  v_gasto numeric;
 begin
   if auth.uid() is null then
     raise exception 'No autenticado';
@@ -1466,14 +1542,26 @@ begin
     raise exception 'No puedes elegir el mismo jugador más de una vez';
   end if;
 
-  if (
-    jsonb_array_length(p_jugadores) - (
-      select count(distinct j.grupo_porra)
-      from public.jugadores j
-      where j.id in (select (jsonb_array_elements_text(p_jugadores))::uuid)
-    )
-  ) > 1 then
-    raise exception 'Como mucho puedes repetir un grupo de color (tu jugador comodín)';
+  -- Misma regla de composición que inscribirse_en_porra(), según el formato
+  -- de la porra (28/09).
+  if v_porra.formato = 'clasica' then
+    if (
+      jsonb_array_length(p_jugadores) - (
+        select count(distinct j.grupo_porra)
+        from public.jugadores j
+        where j.id in (select (jsonb_array_elements_text(p_jugadores))::uuid)
+      )
+    ) > 1 then
+      raise exception 'Como mucho puedes repetir un grupo de color (tu jugador comodín)';
+    end if;
+  else
+    select coalesce(sum(precio), 0) into v_gasto
+      from public.jugadores
+      where id in (select (jsonb_array_elements_text(p_jugadores))::uuid);
+
+    if v_gasto > 100000 then
+      raise exception 'El equipo supera el presupuesto de 100.000 €';
+    end if;
   end if;
 
   update public.equipos
