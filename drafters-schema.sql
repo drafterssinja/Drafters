@@ -2033,7 +2033,14 @@ grant execute on function public.registrar_visualizacion_anuncio(uuid, text, boo
 -- completado=true (ver registrar_visualizacion_anuncio() y
 -- recargar_por_video() más abajo), así que se retira de aquí para no dar
 -- una columna que siempre coincide con el total.
-create or replace function public.estadisticas_anuncios_video()
+-- El `drop` de antes es necesario porque esta función cambió las columnas
+-- que devuelve (antes era total_visualizaciones/total_completadas, ahora es
+-- visualizaciones_pasivas/visualizaciones_recarga/total_visualizaciones) —
+-- Postgres no permite que `create or replace function` cambie las columnas
+-- de salida de una función ya existente, así que hay que borrarla primero.
+drop function if exists public.estadisticas_anuncios_video();
+
+create function public.estadisticas_anuncios_video()
 returns table (video_id uuid, visualizaciones_pasivas bigint, visualizaciones_recarga bigint, total_visualizaciones bigint)
 language plpgsql
 security definer set search_path = public
@@ -2182,9 +2189,24 @@ grant execute on function public.registrar_evento_actividad(text, jsonb) to auth
 
 -- Lectura para el panel de admin (app/admin/actividad/page.tsx): un único
 -- listado global, más reciente primero, opcionalmente filtrado por usuario
--- — junta nombre/apellido/email para no tener que hacer una segunda
--- consulta a `perfiles` por cada fila.
-create or replace function public.eventos_actividad_admin(p_usuario_id uuid default null, p_limite int default 200)
+-- y/o por un rango de fechas (p_fecha_desde/p_fecha_hasta, añadido 28/09 a
+-- petición de Iñi: "que haya también un filtro por fechas, de tal día a
+-- tal día") — junta nombre/apellido/email para no tener que hacer una
+-- segunda consulta a `perfiles` por cada fila.
+--
+-- El `drop` de antes es necesario porque se añaden parámetros nuevos: para
+-- Postgres, una función con distinta lista de parámetros es una función
+-- distinta (podría quedarse la de dos parámetros conviviendo con esta como
+-- una sobrecarga), así que se borra primero la versión vieja para que no
+-- quede duplicada.
+drop function if exists public.eventos_actividad_admin(uuid, int);
+
+create function public.eventos_actividad_admin(
+  p_usuario_id uuid default null,
+  p_limite int default 200,
+  p_fecha_desde timestamptz default null,
+  p_fecha_hasta timestamptz default null
+)
 returns table (
   id uuid,
   usuario_id uuid,
@@ -2199,7 +2221,13 @@ language plpgsql
 security definer set search_path = public
 as $$
 begin
-  if not exists (select 1 from public.perfiles where id = auth.uid() and rol = 'admin') then
+  -- Ojo (28/09): NO usar "where id = auth.uid()" aquí — como esta función
+  -- devuelve una columna que también se llama "id" (returns table (id
+  -- uuid, ...)), Postgres no sabe si "id" se refiere a esa columna de
+  -- salida o a perfiles.id, y falla con "column reference id is
+  -- ambiguous". Se usa es_admin() en su lugar, que vive en su propia
+  -- función y no tiene ese conflicto.
+  if not public.es_admin() then
     raise exception 'No autorizado';
   end if;
 
@@ -2207,14 +2235,16 @@ begin
   select e.id, e.usuario_id, p.nombre, p.apellido, p.email, e.tipo, e.detalle, e.creado_en
   from public.eventos_actividad e
   join public.perfiles p on p.id = e.usuario_id
-  where p_usuario_id is null or e.usuario_id = p_usuario_id
+  where (p_usuario_id is null or e.usuario_id = p_usuario_id)
+    and (p_fecha_desde is null or e.creado_en >= p_fecha_desde)
+    and (p_fecha_hasta is null or e.creado_en <= p_fecha_hasta)
   order by e.creado_en desc
   limit greatest(1, least(coalesce(p_limite, 200), 1000));
 end;
 $$;
 
-revoke all on function public.eventos_actividad_admin(uuid, int) from public;
-grant execute on function public.eventos_actividad_admin(uuid, int) to authenticated;
+revoke all on function public.eventos_actividad_admin(uuid, int, timestamptz, timestamptz) from public;
+grant execute on function public.eventos_actividad_admin(uuid, int, timestamptz, timestamptz) to authenticated;
 
 -- ============================================================================
 -- CONVERTIR TU CUENTA EN SUPERADMINISTRADOR

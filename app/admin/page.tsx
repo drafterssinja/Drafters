@@ -12,7 +12,7 @@ import { PorraFormato, PORRA_FORMATO_LABELS, PORRA_FORMATO_COLOR } from '@/lib/p
 // PANEL DE ADMINISTRACIÓN — dashboard + menú (reordenado 28/09)
 // ============================================================================
 // Pedido de Iñi, 28/09: "desordenado, todo puesto ahí seguido" — que se
-// reorganice como un menú, igual que ya funcionan /admin/publicidad,
+// reorganice como un menú, igual que ya funcionan /admin/videos,
 // /admin/usuarios y /admin/porras-golf: esta pantalla se queda solo como
 // dashboard (resumen financiero + filtros) y tarjetas de navegación hacia
 // cada área — "crear mesas drafters" y "modificar el ranking de los
@@ -76,7 +76,14 @@ const TARJETAS_GESTION: { href: string; titulo: string; subtitulo: string }[] = 
   { href: '/admin/mesas-drafters', titulo: 'Mesas Drafters', subtitulo: 'Crear torneos/jornadas, mesas, y gestionar jugadores' },
   { href: '/admin/porras-golf', titulo: 'Porras de golf', subtitulo: 'Crear porras (clásica o modo draft) y gestionar las existentes' },
   { href: '/admin/rankings', titulo: 'Ranking de jugadores', subtitulo: 'Ranking mundial de golf y tenis' },
-  { href: '/admin/publicidad', titulo: 'Vídeos publicitarios', subtitulo: 'Subir vídeos, prioridad y estadísticas de visualización' },
+  // Ruta renombrada de /admin/publicidad a /admin/videos (28/09, aviso de
+  // Iñi) — la palabra "publicidad" en la URL hacía que algunos
+  // bloqueadores de anuncios del navegador (net::ERR_BLOCKED_BY_CLIENT)
+  // bloquearan directamente el trozo de JavaScript de esta pantalla,
+  // dejándola en negro sin cargar nada para cualquier admin con un
+  // bloqueador de anuncios activo. El contenido y la función no cambian,
+  // solo el nombre de la ruta.
+  { href: '/admin/videos', titulo: 'Vídeos publicitarios', subtitulo: 'Subir vídeos, prioridad y estadísticas de visualización' },
   { href: '/admin/usuarios', titulo: 'Usuarios', subtitulo: 'Listado completo de usuarios registrados' },
   { href: '/admin/actividad', titulo: 'Registro de actividad', subtitulo: 'Historial de accesos e inscripciones, filtrable por usuario' },
 ];

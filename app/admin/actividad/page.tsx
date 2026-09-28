@@ -47,15 +47,24 @@ export default function AdminActividadPage() {
   const [usuarios, setUsuarios] = useState<Perfil[]>([]);
   const [eventos, setEventos] = useState<EventoActividad[]>([]);
   const [usuarioFiltro, setUsuarioFiltro] = useState<string>('todos');
+  // Filtro por fechas (28/09, pedido de Iñi: "de tal día a tal día") — los
+  // <input type="date"> dan "AAAA-MM-DD" en hora local; para "desde" se
+  // manda tal cual (medianoche de ese día) y para "hasta" se manda con
+  // "T23:59:59" añadido, para que ese último día quede incluido entero y
+  // no se quede fuera todo lo que pasó después de medianoche.
+  const [fechaDesde, setFechaDesde] = useState('');
+  const [fechaHasta, setFechaHasta] = useState('');
   const [cargandoEventos, setCargandoEventos] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorAcceso, setErrorAcceso] = useState<string | null>(null);
 
-  async function cargarEventos(usuarioId: string) {
+  async function cargarEventos(usuarioId: string, desde: string, hasta: string) {
     setCargandoEventos(true);
     const { data, error: eventosError } = await supabase.rpc('eventos_actividad_admin', {
       p_usuario_id: usuarioId === 'todos' ? null : usuarioId,
       p_limite: LIMITE_EVENTOS,
+      p_fecha_desde: desde ? new Date(desde).toISOString() : null,
+      p_fecha_hasta: hasta ? new Date(`${hasta}T23:59:59`).toISOString() : null,
     });
     setCargandoEventos(false);
 
@@ -76,7 +85,7 @@ export default function AdminActividadPage() {
     let activo = true;
 
     async function cargar() {
-      // Mismo endurecimiento que en /admin/publicidad (28/09, aviso de
+      // Mismo endurecimiento que en /admin/videos (28/09, aviso de
       // Iñi): todo el bloque de comprobación de acceso va con un tiempo
       // máximo de espera y capturando cualquier error, para no quedarse
       // colgado en "Comprobando acceso..." sin explicación.
@@ -123,7 +132,7 @@ export default function AdminActividadPage() {
         if (usuariosError) setError('No se han podido cargar los usuarios para el filtro.');
         else setUsuarios((usuariosData as Perfil[]) ?? []);
 
-        await cargarEventos('todos');
+        await cargarEventos('todos', '', '');
       } catch (e) {
         if (!activo) return;
         setErrorAcceso(e instanceof Error ? `No se ha podido comprobar tu acceso: ${e.message}` : 'No se ha podido comprobar tu acceso.');
@@ -139,7 +148,13 @@ export default function AdminActividadPage() {
 
   async function onCambiarFiltro(usuarioId: string) {
     setUsuarioFiltro(usuarioId);
-    await cargarEventos(usuarioId);
+    await cargarEventos(usuarioId, fechaDesde, fechaHasta);
+  }
+
+  async function onCambiarFechas(desde: string, hasta: string) {
+    setFechaDesde(desde);
+    setFechaHasta(hasta);
+    await cargarEventos(usuarioFiltro, desde, hasta);
   }
 
   if (errorAcceso) {
@@ -226,6 +241,26 @@ export default function AdminActividadPage() {
                 </option>
               ))}
             </select>
+          </div>
+
+          <div style={{ display: 'flex', gap: 10 }}>
+            <div style={{ ...S.field, flex: 1 }}>
+              <span style={S.label}>Desde</span>
+              <input type="date" value={fechaDesde} onChange={(e) => onCambiarFechas(e.target.value, fechaHasta)} style={S.input} />
+            </div>
+            <div style={{ ...S.field, flex: 1 }}>
+              <span style={S.label}>Hasta</span>
+              <input type="date" value={fechaHasta} onChange={(e) => onCambiarFechas(fechaDesde, e.target.value)} style={S.input} />
+            </div>
+            {(fechaDesde || fechaHasta) && (
+              <button
+                type="button"
+                onClick={() => onCambiarFechas('', '')}
+                style={{ alignSelf: 'flex-end', background: 'transparent', border: `1px solid ${S.BORDER}`, borderRadius: 8, color: S.MUTED_2, fontSize: 11.5, padding: '10px 12px', cursor: 'pointer' }}
+              >
+                Quitar fechas
+              </button>
+            )}
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
