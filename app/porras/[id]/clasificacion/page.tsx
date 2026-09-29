@@ -9,7 +9,7 @@ import AnuncioVideoInline from '@/components/AnuncioVideoInline';
 import * as S from '@/lib/mockupStyles';
 import { formatEuros } from '@/lib/salaShared';
 import { GRUPO_PORRA_LABELS, ORDEN_GRUPOS, COLOR_GRUPO, type GrupoPorra } from '@/lib/porraGrupos';
-import { formatGolfScore } from '@/lib/golfScoring';
+import { formatGolfScore, COLOR_TIPO_RESULTADO, ETIQUETA_TIPO_RESULTADO, type TipoResultadoHoyo } from '@/lib/golfScoring';
 
 // ============================================================================
 // PORRA CLÁSICA — CLASIFICACIÓN EN DIRECTO (nuevo, 27/09, undécima vuelta)
@@ -23,20 +23,20 @@ import { formatGolfScore } from '@/lib/golfScoring';
 // vean la parte de los jugadores con los resultados que van haciendo. Todo
 // eso tiene que ser así."
 //
-// Lo que SÍ es real aquí: la porra, sus jugadores/grupos de color, y —
-// desde que empieza la porra — la plantilla real de 5 jugadores de cada
-// equipo inscrito (equipos_porra_clasificacion(), nueva función de
-// drafters-schema.sql, con el mismo criterio de "empezada" que ya usa
-// participantes_porra()). Lo que TODAVÍA no es real: la puntuación en vivo
-// (resultados_evento no existe todavía, ver sección 12 de la arquitectura
-// técnica) — así que el total de cada equipo/jugador se ve como "E" (par,
-// el placeholder de lib/golfScoring.ts) y el panel "hoyo a hoyo" muestra un
-// aviso en vez de datos inventados, hasta que se construya "cómo introducir
-// los resultados" (la siguiente pieza pendiente, pedida explícitamente por
-// Iñi para después de esto). El botón "simular resultado" de la maqueta
-// (pensado para pruebas internas) se ha quitado a propósito — no es algo
-// que deba ver un usuario real, mismo criterio que ya aplicó Iñi para el
-// vídeo explicativo.
+// Lo que es real aquí: la porra, sus jugadores/grupos de color, la
+// plantilla real de 5 jugadores de cada equipo inscrito
+// (equipos_porra_clasificacion()) y — desde el 28/09 — la puntuación en
+// vivo de verdad: `jugadores.resultado_en_vivo_*` y
+// `resultados_golf_hoyo` se rellenan solos cada 5 minutos desde ESPN (ver
+// app/api/admin/actualizar-golf-en-vivo/route.ts y el admin
+// /admin/resultados-golf, donde se conecta cada competición con su torneo
+// de ESPN). Mientras un jugador no tenga ningún resultado todavía
+// (torneo sin empezar, o su competición sin conectar en el admin) se ve
+// como "E" (par) — mismo placeholder de antes, pero ahora es el estado
+// real de "sin datos todavía", no un valor inventado. El botón "simular
+// resultado" de la maqueta (pensado para pruebas internas) se ha quitado a
+// propósito — no es algo que deba ver un usuario real, mismo criterio que
+// ya aplicó Iñi para el vídeo explicativo.
 //
 // Corrección de Iñi (28/09): la porra clásica NO puntúa por el sistema de
 // puntos de las Mesas Drafters — puntúa con el resultado de golf de
@@ -50,10 +50,37 @@ import { formatGolfScore } from '@/lib/golfScoring';
 // puntuación en vivo todavía a la que aplicarle un bono o una penalización.
 
 type PorraRow = { id: string; major: string; competicion: string | null; estado: string; fecha_limite_inscripcion: string | null };
-type JugadorRow = { id: string; nombre: string; grupo_porra: GrupoPorra | null; precio: number };
+type JugadorRow = {
+  id: string;
+  nombre: string;
+  grupo_porra: GrupoPorra | null;
+  precio: number;
+  resultado_en_vivo_total: number | null;
+  resultado_en_vivo_thru: number | null;
+  resultado_en_vivo_ronda: number | null;
+  resultado_en_vivo_posicion: string | null;
+};
 type EquipoClasif = { equipoId: string; nombreEquipo: string | null; jugadores: string[]; createdAt: string };
+type HoyoRow = { ronda: number; hoyo: number; par: number; golpes: number; tipo_resultado: TipoResultadoHoyo };
 
 type Vista = 'porra' | 'torneo';
+
+// Total de un equipo: suma de los totales (respecto al par) de sus 5
+// jugadores — a los que todavía no tienen resultado (no han salido, o su
+// torneo no está conectado) se les cuenta como 0 (par) en la suma, para no
+// dejar el total del equipo en blanco solo porque a uno le falte por
+// empezar.
+function totalEquipo(jugadoresIds: string[], jugadoresPorId: Map<string, JugadorRow>): number {
+  return jugadoresIds.reduce((acc, id) => acc + (jugadoresPorId.get(id)?.resultado_en_vivo_total ?? 0), 0);
+}
+
+function estadoJugador(j: JugadorRow): string | null {
+  if (j.resultado_en_vivo_posicion === null && j.resultado_en_vivo_thru === null) return null;
+  const posicion = j.resultado_en_vivo_posicion ? `Pos. ${j.resultado_en_vivo_posicion}` : null;
+  const ronda = j.resultado_en_vivo_ronda ? `Ronda ${j.resultado_en_vivo_ronda}` : null;
+  const thru = j.resultado_en_vivo_thru !== null ? (j.resultado_en_vivo_thru >= 18 ? 'Hoyo 18 (terminada)' : `Va por el hoyo ${j.resultado_en_vivo_thru}`) : null;
+  return [posicion, ronda, thru].filter(Boolean).join(' · ') || null;
+}
 
 export default function PorraClasificacionPage() {
   const router = useRouter();
@@ -71,6 +98,8 @@ export default function PorraClasificacionPage() {
   const [bonosPodio, setBonosPodio] = useState(false);
   const [equipoSeleccionadoId, setEquipoSeleccionadoId] = useState<string | null>(null);
   const [jugadorFocoId, setJugadorFocoId] = useState<string | null>(null);
+  const [hoyosFoco, setHoyosFoco] = useState<HoyoRow[] | 'cargando' | null>(null);
+  const [rondaSeleccionada, setRondaSeleccionada] = useState<number | null>(null);
 
   useEffect(() => {
     let activo = true;
@@ -102,7 +131,11 @@ export default function PorraClasificacionPage() {
 
       const [{ data: jugData }, { data: equiposData }] = await Promise.all([
         porraRow.competicion
-          ? supabase.from('jugadores').select('id,nombre,grupo_porra,precio').eq('deporte', 'golf').eq('competicion', porraRow.competicion)
+          ? supabase
+              .from('jugadores')
+              .select('id,nombre,grupo_porra,precio,resultado_en_vivo_total,resultado_en_vivo_thru,resultado_en_vivo_ronda,resultado_en_vivo_posicion')
+              .eq('deporte', 'golf')
+              .eq('competicion', porraRow.competicion)
           : Promise.resolve({ data: [] as JugadorRow[] }),
         // equipos_porra_clasificacion() es una función de base de datos
         // (RPC): solo devuelve filas una vez la porra ha "empezado" (misma
@@ -134,6 +167,38 @@ export default function PorraClasificacionPage() {
 
   const jugadoresPorId = useMemo(() => new Map(jugadores.map((j) => [j.id, j])), [jugadores]);
   const campoOrdenado = useMemo(() => jugadores.slice().sort((a, b) => b.precio - a.precio), [jugadores]);
+
+  // Hoyo a hoyo del jugador con el foco puesto (pedido de Iñi, 28/09: "cuando
+  // pinchas en un resultado, abajo se ven los resultados hoyo a hoyo... de
+  // qué par es cada hoyo... y el color según sea eagle/birdie/par/bogey/doble
+  // bogey"). Se pide solo cuando hace falta (no de golpe para los 5 del
+  // equipo), y solo se guarda lo más reciente por si el usuario cambia de
+  // jugador rápido mientras todavía está cargando el anterior.
+  useEffect(() => {
+    let activo = true;
+    if (!jugadorFocoId) {
+      setHoyosFoco(null);
+      setRondaSeleccionada(null);
+      return;
+    }
+    setHoyosFoco('cargando');
+    setRondaSeleccionada(null);
+    supabase
+      .from('resultados_golf_hoyo')
+      .select('ronda,hoyo,par,golpes,tipo_resultado')
+      .eq('jugador_id', jugadorFocoId)
+      .order('ronda', { ascending: true })
+      .order('hoyo', { ascending: true })
+      .then(({ data }) => {
+        if (!activo) return;
+        const filas = (data as HoyoRow[]) ?? [];
+        setHoyosFoco(filas);
+        if (filas.length > 0) setRondaSeleccionada(filas[filas.length - 1].ronda);
+      });
+    return () => {
+      activo = false;
+    };
+  }, [jugadorFocoId]);
 
   if (cargando || !perfil) {
     return (
@@ -256,7 +321,9 @@ export default function PorraClasificacionPage() {
                       <span style={{ flex: 1, minWidth: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {eq.nombreEquipo}
                       </span>
-                      <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 12, color: S.MUTED_2 }}>{formatGolfScore(0)}</span>
+                      <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 12, color: S.MUTED_2 }}>
+                        {formatGolfScore(totalEquipo(eq.jugadores, jugadoresPorId))}
+                      </span>
                     </a>
                   );
                 })}
@@ -267,7 +334,9 @@ export default function PorraClasificacionPage() {
                   <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {equipoSeleccionado.nombreEquipo}
                   </span>
-                  <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, color: S.MUTED_2 }}>{formatGolfScore(0)}</span>
+                  <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, color: S.MUTED_2 }}>
+                    {formatGolfScore(totalEquipo(equipoSeleccionado.jugadores, jugadoresPorId))}
+                  </span>
                 </div>
                 {jugadoresDelEquipoSeleccionado.map((j) => (
                   <a
@@ -291,8 +360,9 @@ export default function PorraClasificacionPage() {
                     <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
                       <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.nombre}</span>
                       {j.grupo_porra && <span style={{ fontSize: 9.5, fontWeight: 700, color: COLOR_GRUPO[j.grupo_porra] }}>{GRUPO_PORRA_LABELS[j.grupo_porra]}</span>}
+                      {estadoJugador(j) && <span style={{ fontSize: 9, color: S.MUTED_3 }}>{estadoJugador(j)}</span>}
                     </div>
-                    <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 13, color: S.MUTED_2 }}>{formatGolfScore(0)}</span>
+                    <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 13, color: S.MUTED_2 }}>{formatGolfScore(j.resultado_en_vivo_total ?? 0)}</span>
                   </a>
                 ))}
               </div>
@@ -325,8 +395,9 @@ export default function PorraClasificacionPage() {
                   <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
                     <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.nombre}</span>
                     {j.grupo_porra && <span style={{ fontSize: 9.5, fontWeight: 700, color: COLOR_GRUPO[j.grupo_porra] }}>{GRUPO_PORRA_LABELS[j.grupo_porra]}</span>}
+                    {estadoJugador(j) && <span style={{ fontSize: 9, color: S.MUTED_3 }}>{estadoJugador(j)}</span>}
                   </div>
-                  <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 13, color: S.MUTED_2 }}>{formatGolfScore(0)}</span>
+                  <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 13, color: S.MUTED_2 }}>{formatGolfScore(j.resultado_en_vivo_total ?? 0)}</span>
                 </a>
               ))}
             </div>
@@ -347,16 +418,86 @@ export default function PorraClasificacionPage() {
                   ✕
                 </a>
               </div>
-              <p style={{ fontSize: 12.5, lineHeight: 1.5, color: S.MUTED_2, margin: 0 }}>
-                Resultados en directo: próximamente. En cuanto conectemos la puntuación en vivo del torneo, aquí verás el desglose hoyo a hoyo de{' '}
-                {jugadorFoco.nombre}, golpe a golpe.
-              </p>
+              {estadoJugador(jugadorFoco) && <span style={{ fontSize: 11, color: S.MUTED_3 }}>{estadoJugador(jugadorFoco)}</span>}
+
+              {hoyosFoco === 'cargando' && <p style={{ fontSize: 12.5, color: S.MUTED_3, margin: 0 }}>Cargando el hoyo a hoyo...</p>}
+
+              {hoyosFoco !== 'cargando' && (!hoyosFoco || hoyosFoco.length === 0) && (
+                <p style={{ fontSize: 12.5, lineHeight: 1.5, color: S.MUTED_2, margin: 0 }}>
+                  Todavía no hay ningún hoyo registrado para {jugadorFoco.nombre} — en cuanto empiece a jugar (o su torneo se conecte con ESPN
+                  desde el panel de administración), aquí verás el desglose hoyo a hoyo, golpe a golpe.
+                </p>
+              )}
+
+              {Array.isArray(hoyosFoco) &&
+                hoyosFoco.length > 0 &&
+                (() => {
+                  const hoyos: HoyoRow[] = hoyosFoco;
+                  const rondas = Array.from(new Set(hoyos.map((h) => h.ronda))).sort((a, b) => a - b);
+                  const hoyosRonda = hoyos.filter((h) => h.ronda === rondaSeleccionada);
+                  return (
+                    <>
+                      {rondas.length > 1 && (
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          {rondas.map((r) => (
+                            <button key={r} type="button" onClick={() => setRondaSeleccionada(r)} style={vistaPillStyle(rondaSeleccionada === r)}>
+                              Ronda {r}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 6 }}>
+                        {hoyosRonda.map((h) => {
+                          const color = COLOR_TIPO_RESULTADO[h.tipo_resultado];
+                          return (
+                            <div
+                              key={h.hoyo}
+                              title={`Hoyo ${h.hoyo} · Par ${h.par} · ${ETIQUETA_TIPO_RESULTADO[h.tipo_resultado]}`}
+                              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}
+                            >
+                              <span style={{ fontSize: 8.5, color: S.MUTED_3 }}>
+                                {h.hoyo} · P{h.par}
+                              </span>
+                              <div
+                                style={{
+                                  width: 30,
+                                  height: 30,
+                                  borderRadius: '50%',
+                                  background: color.fondo,
+                                  color: color.texto,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontFamily: "'Barlow Condensed', sans-serif",
+                                  fontWeight: 800,
+                                  fontSize: 13,
+                                }}
+                              >
+                                {h.golpes}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', paddingTop: 4, borderTop: `1px solid ${S.CARD_BORDER}` }}>
+                        {(Object.keys(ETIQUETA_TIPO_RESULTADO) as TipoResultadoHoyo[]).map((t) => (
+                          <span key={t} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 9.5, color: S.MUTED_3 }}>
+                            <span style={{ width: 9, height: 9, borderRadius: '50%', background: COLOR_TIPO_RESULTADO[t].fondo, display: 'inline-block' }} />
+                            {ETIQUETA_TIPO_RESULTADO[t]}
+                          </span>
+                        ))}
+                      </div>
+                    </>
+                  );
+                })()}
             </div>
           )}
 
           <span style={{ fontSize: 10, color: S.FAINT }}>
-            *Clasificación en directo: resultado respecto al par de cada jugador/equipo (no puntos) — se ve "E" (par) para todos hasta que se conecten los resultados
-            oficiales del torneo.
+            *Clasificación en directo: resultado respecto al par de cada jugador/equipo (no puntos), actualizado automáticamente cada 5 minutos. Se ve "E" (par)
+            mientras un jugador todavía no tiene ningún resultado registrado.
           </span>
 
           {/* Vídeo publicitario debajo de todo (mismo criterio que en

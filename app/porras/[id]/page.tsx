@@ -8,7 +8,7 @@ import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
 import { calcularTramosPorInscritos } from '@/lib/repartoPremios';
 import { GRUPO_PORRA_LABELS, GrupoPorra, ORDEN_GRUPOS, COLOR_GRUPO } from '@/lib/porraGrupos';
-import { formatEuros, posicionLabel, closesInLabel, parteParaPremios, parteComision } from '@/lib/salaShared';
+import { formatEuros, posicionLabel, closesAtLabel, parteParaPremios, parteComision } from '@/lib/salaShared';
 import { PorraFormato, PORRA_FORMATO_LABELS, PORRA_FORMATO_COLOR, PORRA_FORMATO_DESCRIPCION_LARGA } from '@/lib/porraFormato';
 
 // ============================================================================
@@ -173,7 +173,7 @@ export default function PorraDetallePage() {
   const tramos = calcularTramosPorInscritos(signedUp);
   const estadoColor = porra.estado === 'disponible' ? '#3DDC84' : porra.estado === 'proximamente' ? '#F0B94D' : S.MUTED_3;
   const estadoLabel = porra.estado === 'disponible' ? 'Disponible' : porra.estado === 'proximamente' ? 'Próximamente' : 'Finalizada';
-  const cierra = closesInLabel(porra.fecha_limite_inscripcion);
+  const cierra = closesAtLabel(porra.fecha_limite_inscripcion);
 
   const gruposConJugadores = ORDEN_GRUPOS.map((g) => ({
     grupo: g,
@@ -222,7 +222,7 @@ export default function PorraDetallePage() {
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: estadoColor, flexShrink: 0 }} />
               <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 12.5, color: estadoColor }}>{estadoLabel}</span>
               <span style={{ fontSize: 12.5, color: S.MUTED_3 }}>· Golf</span>
-              {cierra && <span style={{ fontSize: 12.5, color: '#FF9F6E' }}>· Cierra en {cierra}</span>}
+              {cierra && <span style={{ fontSize: 12.5, color: '#FF9F6E' }}>· Cierra el {cierra}</span>}
             </div>
           </div>
 

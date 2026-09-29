@@ -2033,7 +2033,7 @@ grant execute on function public.registrar_visualizacion_anuncio(uuid, text, boo
 -- de salida de una función ya existente, así que hay que borrarla primero.
 drop function if exists public.estadisticas_anuncios_video();
 
-create function public.estadisticas_anuncios_video()
+create or replace function public.estadisticas_anuncios_video()
 returns table (video_id uuid, visualizaciones_pasivas bigint, visualizaciones_recarga bigint, total_visualizaciones bigint)
 language plpgsql
 security definer set search_path = public
@@ -2219,7 +2219,7 @@ grant execute on function public.registrar_evento_actividad(text, jsonb) to auth
 -- quede duplicada.
 drop function if exists public.eventos_actividad_admin(uuid, int);
 
-create function public.eventos_actividad_admin(
+create or replace function public.eventos_actividad_admin(
   p_usuario_id uuid default null,
   p_limite int default 200,
   p_fecha_desde timestamptz default null,
@@ -2265,6 +2265,115 @@ revoke all on function public.eventos_actividad_admin(uuid, int, timestamptz, ti
 grant execute on function public.eventos_actividad_admin(uuid, int, timestamptz, timestamptz) to authenticated;
 
 -- ============================================================================
+-- RESULTADOS EN VIVO DE GOLF, SACADOS AUTOMÁTICAMENTE DE ESPN (28/09)
+-- ============================================================================
+-- Pedido de Iñi: que la clasificación en directo de las porras se actualice
+-- sola, hoyo a hoyo, sin que él tenga que cargar nada a mano — usando los
+-- endpoints públicos (no oficiales, gratuitos) del sitio de ESPN, que cubren
+-- tanto el PGA Tour ('pga') como el DP World Tour ('eur'). Ya se dejó
+-- documentado como opción de pago más adelante Data Golf (30€/mes, con más
+-- garantías) para cuando interese más fiabilidad — ver el addendum de este
+-- mismo día en el proyecto.
+--
+-- Cómo encaja todo:
+--   1. `torneos_golf_live`: el admin apunta, por cada torneo que se importe
+--      a Drafters, a qué evento de ESPN corresponde (tour + id de evento).
+--      Es la única parte manual de todo esto — ver app/admin/resultados-golf.
+--   2. app/api/admin/actualizar-golf-en-vivo/route.ts (código, no SQL): la
+--      ruta de servidor que de verdad llama a ESPN, empareja jugadores por
+--      nombre y escribe los resultados. La llama tanto un botón "Actualizar
+--      ahora" en /admin/resultados-golf como, automáticamente, un cron de
+--      Supabase (pg_cron + pg_net) cada 5 minutos — ver el bloque final de
+--      este archivo, "CRON DE RESULTADOS DE GOLF", que necesita rellenarse
+--      con la URL real de la app y una clave secreta antes de ejecutarse.
+--   3. Resultado total (golpes respecto al par, en qué hoyo va, posición) se
+--      guarda directamente en `jugadores` (columnas resultado_en_vivo_*) —
+--      cada fila de `jugadores` ya pertenece a un único torneo (ver el
+--      comentario de la propia tabla), así que no hace falta ninguna tabla
+--      aparte para esto.
+--   4. El desglose hoyo a hoyo (lo que se ve al pulsar un resultado) vive en
+--      `resultados_golf_hoyo`, con el par de cada hoyo y el tipo de
+--      resultado ya calculado (para no repetir esa lógica en el cliente).
+
+create table if not exists public.torneos_golf_live (
+  id uuid primary key default gen_random_uuid(),
+  -- Tiene que coincidir EXACTO con el valor de `jugadores.competicion` de
+  -- ese mismo torneo (el que se usó al importar el listado desde /admin) —
+  -- mismo criterio de enlace por texto que ya usan `porras.competicion` y
+  -- `salas.competicion`.
+  competicion text not null unique,
+  -- Slug del circuito en ESPN: 'pga' (PGA Tour) o 'eur' (DP World Tour).
+  tour text not null check (tour in ('pga', 'eur')),
+  -- Id numérico del torneo en ESPN — se encuentra en la propia URL de la
+  -- clasificación pública de ESPN para ese torneo, p.ej.
+  -- espn.com/golf/leaderboard/_/tournamentid/401811952 → sería "401811952"
+  -- (también aparece como events[].id al llamar al endpoint de scoreboard
+  -- del circuito correspondiente).
+  espn_event_id text not null,
+  temporada int not null,
+  -- Apagar un torneo (sin borrar la fila) para que el cron deje de gastar
+  -- llamadas a ESPN en un torneo ya terminado, sin perder el mapeo por si
+  -- hiciera falta reactivarlo.
+  activo boolean not null default true,
+  ultima_actualizacion timestamptz,
+  -- Último error de la sincronización, si lo hubo (para poder diagnosticar
+  -- desde /admin/resultados-golf sin tener que mirar los logs de Vercel).
+  ultimo_error text,
+  created_at timestamptz not null default now()
+);
+
+alter table public.torneos_golf_live enable row level security;
+drop policy if exists "torneos_golf_live_admin_todo" on public.torneos_golf_live;
+create policy "torneos_golf_live_admin_todo" on public.torneos_golf_live
+  for all using (public.es_admin()) with check (public.es_admin());
+-- Sin política de lectura pública: es una tabla de configuración interna,
+-- nunca se muestra a un usuario normal. La ruta de sincronización la lee
+-- con la clave de servicio (sin pasar por RLS).
+
+-- Resultado en vivo de cada jugador en SU torneo (cada fila de `jugadores`
+-- ya es específica de un torneo, ver el comentario de esa tabla más
+-- arriba) — golpes respecto al par (positivo o negativo), en qué hoyo va
+-- de la ronda actual, en qué ronda está, y la posición tal cual la da ESPN
+-- (admite "T5", "CUT", "WD", etc., así que se guarda como texto).
+alter table public.jugadores add column if not exists resultado_en_vivo_total int;
+alter table public.jugadores add column if not exists resultado_en_vivo_thru int;
+alter table public.jugadores add column if not exists resultado_en_vivo_ronda int;
+alter table public.jugadores add column if not exists resultado_en_vivo_posicion text;
+alter table public.jugadores add column if not exists resultado_en_vivo_actualizado_en timestamptz;
+
+-- Desglose hoyo a hoyo — una fila por jugador+ronda+hoyo. `tipo_resultado`
+-- ya viene calculado aquí (golpes respecto al par de ESE hoyo) para que el
+-- cliente solo tenga que pintar el color, sin repetir la lógica de
+-- lib/golfScoring.ts en cada sitio que lo necesite.
+create table if not exists public.resultados_golf_hoyo (
+  id uuid primary key default gen_random_uuid(),
+  jugador_id uuid not null references public.jugadores(id) on delete cascade,
+  ronda int not null,
+  hoyo int not null check (hoyo between 1 and 18),
+  par int not null check (par between 3 and 5),
+  golpes int not null check (golpes > 0),
+  tipo_resultado text not null check (tipo_resultado in ('eagle_o_mejor', 'birdie', 'par', 'bogey', 'doble_bogey_o_peor')),
+  actualizado_en timestamptz not null default now(),
+  unique (jugador_id, ronda, hoyo)
+);
+
+create index if not exists resultados_golf_hoyo_jugador_idx on public.resultados_golf_hoyo (jugador_id, ronda, hoyo);
+
+alter table public.resultados_golf_hoyo enable row level security;
+drop policy if exists "resultados_golf_hoyo_select_publico" on public.resultados_golf_hoyo;
+create policy "resultados_golf_hoyo_select_publico" on public.resultados_golf_hoyo
+  -- Lectura pública, mismo criterio que `jugadores` (sección 6): hace falta
+  -- que cualquier usuario logueado pueda ver el hoyo a hoyo de cualquier
+  -- jugador desde la clasificación en directo de una porra.
+  for select using (true);
+drop policy if exists "resultados_golf_hoyo_admin_todo" on public.resultados_golf_hoyo;
+create policy "resultados_golf_hoyo_admin_todo" on public.resultados_golf_hoyo
+  for all using (public.es_admin()) with check (public.es_admin());
+-- La ruta de sincronización escribe con la clave de servicio (sin pasar
+-- por RLS) — la política de admin de aquí arriba es solo por si algún día
+-- hiciera falta corregir un dato a mano desde el propio SQL Editor.
+
+-- ============================================================================
 -- CONVERTIR TU CUENTA EN SUPERADMINISTRADOR
 -- ============================================================================
 -- Activo (sin comentar): cada vez que se vuelva a pegar y ejecutar este
@@ -2282,3 +2391,51 @@ update public.perfiles set rol = 'admin' where id = (
 -- admin, añado aquí una línea igual que esta con su email — no hace falta
 -- tocar nada más del código, la tarjeta de "Mi cuenta" y la protección de
 -- /admin ya funcionan para cualquier cuenta con rol = 'admin'.
+
+-- ============================================================================
+-- CRON DE RESULTADOS DE GOLF — PASO MANUAL, RELLENAR ANTES DE EJECUTAR
+-- ============================================================================
+-- Este bloque programa, dentro de la propia base de datos de Supabase, que
+-- se llame cada 5 minutos a la ruta que sincroniza los resultados de golf
+-- desde ESPN (app/api/admin/actualizar-golf-en-vivo/route.ts) — así no
+-- depende de tener activado ningún plan de pago de Vercel (su "Cron Jobs"
+-- gratuito solo deja programar como mucho una vez al día, no cada 5
+-- minutos; con esto se programa desde Supabase en su lugar, que si lo
+-- permite gratis).
+--
+-- ANTES DE EJECUTAR ESTE BLOQUE EN CONCRETO (el resto del archivo, por
+-- encima de este punto, se puede pegar y ejecutar tal cual como siempre):
+--   1. En Vercel (tu proyecto → Settings → Environment Variables), añade
+--      una variable nueva CRON_SECRET con cualquier cadena larga y
+--      aleatoria que tú elijas (por ejemplo, generada en
+--      https://1password.com/password-generator o similar) — y vuelve a
+--      desplegar la app para que la recoja.
+--   2. Sustituye 'PON_AQUI_TU_CRON_SECRET' aquí abajo por ESE MISMO valor
+--      exacto.
+--   3. Si tu dominio de producción no es drafters-rho.vercel.app (por
+--      ejemplo, si ya has puesto un dominio propio), cambia también la URL.
+--   4. Entonces sí, ejecuta este bloque (una vez basta — no hace falta
+--      repetirlo cada vez que vuelvas a pegar el resto del archivo; si lo
+--      ejecutas de nuevo no pasa nada raro, cron.schedule() con el mismo
+--      nombre de tarea simplemente la reemplaza por la misma).
+--
+-- Para comprobar que está funcionando: `select * from cron.job;` lista las
+-- tareas programadas, y `select * from cron.job_run_details order by
+-- start_time desc limit 20;` enseña las últimas ejecuciones.
+-- Para quitarlo: `select cron.unschedule('actualizar-golf-en-vivo');`
+
+create extension if not exists pg_cron;
+create extension if not exists pg_net;
+
+select cron.schedule(
+  'actualizar-golf-en-vivo',
+  '*/5 * * * *',
+  $cron$
+  select net.http_post(
+    url := 'https://drafters-rho.vercel.app/api/admin/actualizar-golf-en-vivo',
+    headers := jsonb_build_object('Content-Type', 'application/json', 'x-cron-secret', 'hasiygqef1ojipcs332pj'),
+    body := '{}'::jsonb,
+    timeout_milliseconds := 55000
+  ) as request_id;
+  $cron$
+);

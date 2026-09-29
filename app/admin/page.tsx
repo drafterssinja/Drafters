@@ -76,6 +76,10 @@ const TARJETAS_GESTION: { href: string; titulo: string; subtitulo: string }[] = 
   { href: '/admin/mesas-drafters', titulo: 'Mesas Drafters', subtitulo: 'Crear torneos/jornadas, mesas, y gestionar jugadores' },
   { href: '/admin/porras-golf', titulo: 'Porras de golf', subtitulo: 'Crear porras (clásica o modo draft) y gestionar las existentes' },
   { href: '/admin/rankings', titulo: 'Ranking de jugadores', subtitulo: 'Ranking mundial de golf y tenis' },
+  // Nueva (28/09, pedido de Iñi): conectar cada competición con su torneo
+  // en ESPN para que la clasificación en directo se rellene sola, sin
+  // introducir el resultado a mano — ver drafters-schema.sql.
+  { href: '/admin/resultados-golf', titulo: 'Resultados de golf en vivo', subtitulo: 'Conectar cada competición con ESPN para la clasificación en directo' },
   // Ruta renombrada de /admin/publicidad a /admin/videos (28/09, aviso de
   // Iñi) — la palabra "publicidad" en la URL hacía que algunos
   // bloqueadores de anuncios del navegador (net::ERR_BLOCKED_BY_CLIENT)

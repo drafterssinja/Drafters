@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { supabase, Perfil } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
-import { formatEuros, closesInLabel } from '@/lib/salaShared';
+import { formatEuros, closesAtLabel } from '@/lib/salaShared';
 import { PorraFormato, PORRA_FORMATO_LABELS, PORRA_FORMATO_COLOR } from '@/lib/porraFormato';
 
 // ============================================================================
@@ -107,7 +107,7 @@ export default function PorrasIndexPage() {
             {porras.length === 0 && <p style={{ fontSize: 13, color: S.MUTED_2 }}>No hay ninguna porra clásica disponible ahora mismo.</p>}
             {porras.map((p) => {
               const signedUp = inscritosPorPorra.get(p.id) ?? 0;
-              const cierra = closesInLabel(p.fecha_limite_inscripcion);
+              const cierra = closesAtLabel(p.fecha_limite_inscripcion);
               const estadoColor = p.estado === 'disponible' ? '#3DDC84' : p.estado === 'proximamente' ? '#F0B94D' : S.MUTED_3;
               const estadoLabel = p.estado === 'disponible' ? 'Disponible' : p.estado === 'proximamente' ? 'Próximamente' : 'Finalizada';
               return (
@@ -120,7 +120,7 @@ export default function PorrasIndexPage() {
                     <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, color: S.TEXT }}>{p.major}</span>
                     {cierra && (
                       <span style={{ flexShrink: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: '#FF9F6E', background: 'rgba(255,159,110,0.12)', padding: '4px 8px', borderRadius: 999, whiteSpace: 'nowrap' }}>
-                        Cierra en {cierra}
+                        Cierra el {cierra}
                       </span>
                     )}
                   </div>

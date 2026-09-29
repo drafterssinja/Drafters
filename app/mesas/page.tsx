@@ -14,7 +14,7 @@ import {
   TIPO_SALA_LABELS,
   formatEuros,
   estadoSalaInfo,
-  closesInLabel,
+  closesAtLabel,
   capacidadLabel,
 } from '@/lib/salaShared';
 import type { TipoSala } from '@/lib/repartoPremios';
@@ -180,7 +180,7 @@ function MesasPageInner() {
     });
 
   const cierranPronto = salasAbiertas
-    .filter((s) => s.fecha_limite_inscripcion && closesInLabel(s.fecha_limite_inscripcion))
+    .filter((s) => s.fecha_limite_inscripcion && closesAtLabel(s.fecha_limite_inscripcion))
     .sort((a, b) => new Date(a.fecha_limite_inscripcion!).getTime() - new Date(b.fecha_limite_inscripcion!).getTime())
     .slice(0, 6);
 
@@ -469,7 +469,7 @@ function MesasPageInner() {
               {maratonesDelDeporte.map((m) => {
                 const signedUp = inscritosPorSala.get(m.id) ?? 0;
                 const estadoInfo = estadoSalaInfo(m.estado, null, signedUp);
-                const cierra = closesInLabel(m.fecha_limite_inscripcion);
+                const cierra = closesAtLabel(m.fecha_limite_inscripcion);
                 return (
                   <Link
                     key={m.id}
@@ -492,7 +492,7 @@ function MesasPageInner() {
                             whiteSpace: 'nowrap',
                           }}
                         >
-                          Cierra en {cierra}
+                          Cierra el {cierra}
                         </span>
                       )}
                     </div>
@@ -582,7 +582,7 @@ function MesasPageInner() {
                       </span>
                       <span style={{ flexShrink: 0, width: 58, textAlign: 'right', fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13, color: '#F0B94D' }}>{formatEuros(sala.buy_in)}</span>
                     </div>
-                    <span style={{ fontSize: 11, fontWeight: 600, color: '#FF9F6E' }}>Cierra en {closesInLabel(sala.fecha_limite_inscripcion)}</span>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: '#FF9F6E' }}>Cierra el {closesAtLabel(sala.fecha_limite_inscripcion)}</span>
                   </Link>
                 );
               })}

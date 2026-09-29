@@ -110,20 +110,25 @@ export function capacidadLabel(aforo: number | null): string {
   return aforo != null ? String(aforo) : '∞';
 }
 
-// Cuenta atrás legible a partir de fecha_limite_inscripcion. Null cuando no
-// hay fecha fijada todavía (el admin no la ha puesto) o ya ha pasado.
-export function closesInLabel(fechaLimiteIso: string | null): string | null {
+// Fecha y hora exactas de cierre, a partir de fecha_limite_inscripcion.
+// Null cuando no hay fecha fijada todavía (el admin no la ha puesto) o ya
+// ha pasado (misma condición que antes, ver más abajo).
+//
+// Corrección de Iñi (29/09): antes esto era una cuenta atrás relativa
+// ("2 días", "3 h 20 min"...) — pedido explícito de cambiarlo por la fecha
+// y hora exactas de cierre ("no pongas que queda un día, pon exactamente
+// el día y la hora en el que se cierra"), tanto en las porras como en
+// Mesas Drafters. Se mantiene el mismo criterio de antes de no devolver
+// nada si ya ha pasado la fecha (el hueco de "cierra..." simplemente
+// desaparece de la tarjeta) — lo único que cambia es el formato del texto,
+// no cuándo se muestra.
+export function closesAtLabel(fechaLimiteIso: string | null): string | null {
   if (!fechaLimiteIso) return null;
-  const ms = new Date(fechaLimiteIso).getTime() - Date.now();
-  if (ms <= 0) return null;
-  const minutos = Math.floor(ms / 60000);
-  if (minutos < 60) return `${minutos} min`;
-  const horas = Math.floor(minutos / 60);
-  if (horas < 24) return `${horas} h ${minutos % 60} min`;
-  const dias = Math.floor(horas / 24);
-  if (dias < 7) return `${dias} ${dias === 1 ? 'día' : 'días'}`;
-  const semanas = Math.floor(dias / 7);
-  return `${semanas} ${semanas === 1 ? 'semana' : 'semanas'}`;
+  const fecha = new Date(fechaLimiteIso);
+  if (fecha.getTime() <= Date.now()) return null;
+  const dia = fecha.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' });
+  const hora = fecha.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+  return `${dia} ${hora}h`;
 }
 
 // Iniciales cortas para avatares de jugadores (distinto de S.iniciales, que

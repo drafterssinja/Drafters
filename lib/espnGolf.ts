@@ -1,0 +1,151 @@
+// ============================================================================
+// CLIENTE DE LOS ENDPOINTS PÚBLICOS (NO OFICIALES) DE ESPN PARA GOLF (28/09)
+// ============================================================================
+// Pedido de Iñi: resultados en vivo de PGA Tour y DP World Tour sin coste,
+// para que la clasificación de las porras se actualice sola. Se usan los
+// endpoints de "site API" de ESPN (site.api.espn.com / site.web.api.espn.com)
+// — NO son una API oficial ni documentada por ESPN para terceros, así que:
+//   - No hay ninguna garantía de que sigan funcionando igual mañana.
+//   - No hay límite de peticiones publicado, pero conviene ser prudentes
+//     (de ahí el límite de concurrencia al pedir el hoyo a hoyo, más abajo).
+//   - Para Fase 1 (sin dinero real) es un riesgo aceptable — mismo criterio
+//     que ya se aplicó a los precios de fútbol, que tampoco vienen de una
+//     fuente con licencia. El día que haya dinero real de por medio, la
+//     alternativa ya investigada y documentada es Data Golf (30€/mes, con
+//     API oficial y soporte) — ver el addendum de este mismo día.
+//
+// Como la forma exacta de la respuesta de ESPN no está documentada de forma
+// oficial (solo verificada de forma independiente por terceros), todo el
+// parseo de aquí es defensivo: busca el dato en las rutas más habituales
+// del "site API" de ESPN y, si algo no encaja, lo descarta sin romper el
+// resto — un fallo en un jugador suelto nunca debe tirar abajo la
+// sincronización de todo el torneo.
+
+export type EspnTour = 'pga' | 'eur';
+
+export type CompetidorEnVivo = {
+  espnPlayerId: string;
+  nombre: string;
+  /** Golpes respecto al par acumulados en el torneo — null si no se pudo leer (p.ej. "WD"/"CUT" sin cifra). */
+  totalVsPar: number | null;
+  /** Hoyo por el que va en la ronda actual (0-18) — null si todavía no ha salido o no se pudo leer. */
+  thru: number | null;
+  /** Número de ronda actual (1-4 lo habitual) — null si no se pudo leer. */
+  ronda: number | null;
+  /** Posición tal cual la da ESPN ("T5", "1", "CUT", "WD"...). */
+  posicion: string | null;
+};
+
+/** Convierte "-5", "+3", "E" o 0 en un número de golpes respecto al par. */
+function parsearGolpesVsPar(valor: unknown): number | null {
+  if (valor === null || valor === undefined) return null;
+  if (typeof valor === 'number') return Number.isFinite(valor) ? valor : null;
+  const texto = String(valor).trim().toUpperCase();
+  if (texto === '' ) return null;
+  if (texto === 'E' || texto === 'PAR') return 0;
+  const limpio = texto.replace(/^\+/, '');
+  const n = Number(limpio);
+  return Number.isFinite(n) ? n : null;
+}
+
+function parsearThru(valor: unknown): number | null {
+  if (valor === null || valor === undefined) return null;
+  if (typeof valor === 'number') return Number.isFinite(valor) ? valor : null;
+  const texto = String(valor).trim().toUpperCase();
+  if (texto === 'F' || texto === 'FINAL') return 18;
+  const n = Number(texto);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Clasificación completa de un torneo en curso — UNA sola llamada a ESPN
+ * para todo el campo (barato: se puede pedir cada 5 minutos sin problema).
+ */
+export async function obtenerLeaderboardEspn(tour: EspnTour, eventId: string): Promise<CompetidorEnVivo[]> {
+  const url = `https://site.api.espn.com/apis/site/v2/sports/golf/${tour}/leaderboard?tournamentId=${encodeURIComponent(eventId)}`;
+  const res = await fetch(url, { cache: 'no-store' });
+  if (!res.ok) {
+    throw new Error(`ESPN respondió ${res.status} al pedir el leaderboard (tour=${tour}, eventId=${eventId})`);
+  }
+  const data: any = await res.json();
+
+  const competidoresRaw: any[] =
+    data?.events?.[0]?.competitions?.[0]?.competitors ?? data?.leaderboard?.[0]?.competitors ?? data?.competitors ?? [];
+
+  const resultado: CompetidorEnVivo[] = [];
+  for (const c of competidoresRaw) {
+    try {
+      const nombre: string | undefined = c?.athlete?.displayName ?? c?.athlete?.fullName ?? c?.displayName;
+      const espnPlayerId = c?.athlete?.id ?? c?.id;
+      if (!nombre || espnPlayerId === undefined || espnPlayerId === null) continue;
+
+      const totalRaw = c?.score?.displayValue ?? c?.score ?? c?.statistics?.find((s: any) => s?.name === 'scoreToPar')?.displayValue;
+      const thruRaw = c?.status?.thru ?? c?.status?.displayValue;
+      const rondaRaw = c?.status?.period ?? c?.status?.round;
+      const posicionRaw = c?.status?.position?.displayName ?? c?.status?.position?.id ?? c?.status?.position;
+      const ronda = Number(rondaRaw);
+
+      resultado.push({
+        espnPlayerId: String(espnPlayerId),
+        nombre,
+        totalVsPar: parsearGolpesVsPar(totalRaw),
+        thru: parsearThru(thruRaw),
+        ronda: Number.isFinite(ronda) ? ronda : null,
+        posicion: posicionRaw !== undefined && posicionRaw !== null ? String(posicionRaw) : null,
+      });
+    } catch {
+      // Un competidor con una forma inesperada se descarta y sigue el resto.
+    }
+  }
+  return resultado;
+}
+
+export type HoyoEnVivo = { ronda: number; hoyo: number; par: number; golpes: number };
+
+/**
+ * Desglose hoyo a hoyo de UN jugador — una llamada por jugador (el motivo de
+ * limitar cuántos jugadores se piden en cada ciclo, ver
+ * app/api/admin/actualizar-golf-en-vivo/route.ts). Devuelve todas las
+ * rondas que ESPN tenga registradas para ese jugador en este torneo.
+ */
+export async function obtenerHoyosJugadorEspn(tour: EspnTour, eventId: string, season: number, espnPlayerId: string): Promise<HoyoEnVivo[]> {
+  const url = `https://site.web.api.espn.com/apis/site/v2/sports/golf/${tour}/leaderboard/${encodeURIComponent(eventId)}/playersummary?season=${season}&player=${encodeURIComponent(espnPlayerId)}`;
+  const res = await fetch(url, { cache: 'no-store' });
+  if (!res.ok) {
+    throw new Error(`ESPN respondió ${res.status} en playersummary (player=${espnPlayerId})`);
+  }
+  const data: any = await res.json();
+  const rounds: any[] = data?.rounds ?? [];
+
+  const hoyos: HoyoEnVivo[] = [];
+  for (const r of rounds) {
+    const ronda = Number(r?.period);
+    if (!Number.isFinite(ronda)) continue;
+    const linescores: any[] = r?.linescores ?? [];
+    for (const l of linescores) {
+      const hoyo = Number(l?.period);
+      const par = Number(l?.par);
+      const golpes = Number(l?.value);
+      if (!Number.isFinite(hoyo) || !Number.isFinite(par) || !Number.isFinite(golpes) || golpes <= 0) continue;
+      hoyos.push({ ronda, hoyo, par, golpes });
+    }
+  }
+  return hoyos;
+}
+
+/** Ejecuta `tareas` con como mucho `limite` en marcha a la vez — para no lanzar
+ * de golpe una petición por jugador (hasta 150+ en un campo completo) contra
+ * un endpoint sin límite publicado pero que pide "ser razonable". */
+export async function conConcurrenciaLimitada<T, R>(items: T[], limite: number, tarea: (item: T) => Promise<R>): Promise<R[]> {
+  const resultados: R[] = new Array(items.length);
+  let indice = 0;
+  async function trabajador() {
+    while (indice < items.length) {
+      const miIndice = indice++;
+      resultados[miIndice] = await tarea(items[miIndice]);
+    }
+  }
+  const trabajadores = Array.from({ length: Math.min(limite, items.length) }, () => trabajador());
+  await Promise.all(trabajadores);
+  return resultados;
+}

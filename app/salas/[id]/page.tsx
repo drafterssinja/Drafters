@@ -18,7 +18,7 @@ import {
   inicialesJugador,
   huecosPorLinea,
   lineaDePosicion,
-  closesInLabel,
+  closesAtLabel,
   parteParaPremios,
   parteComision,
   numeroRomano,
@@ -210,7 +210,7 @@ export default function SalaDetallePage() {
   // calculado también "a sala llena".
   const bote = parteParaPremios(sala.buy_in) * (sala.aforo ?? signedUp);
   const tramos = calcularReparto(sala.tipo as TipoSala, sala.aforo, signedUp);
-  const cierraEn = closesInLabel(sala.fecha_limite_inscripcion);
+  const cierraEn = closesAtLabel(sala.fecha_limite_inscripcion);
   const isFull = sala.estado === 'completa';
   const isFinalizada = sala.estado === 'finalizada';
   const hasEquipo = misEquipos.length > 0;
@@ -349,7 +349,7 @@ export default function SalaDetallePage() {
               <InfoRow label="Formato" value={tipoLabel} />
               <InfoRow label="Competición" value={sala.competicion} />
               <InfoRow label="Jugadores inscritos" value={`${signedUp}/${capacidadLabel(sala.aforo)}`} />
-              {!isFinalizada && <InfoRow label="Se cierra en" value={cierraEn ?? 'Sin fecha fijada'} />}
+              {!isFinalizada && <InfoRow label="Se cierra el" value={cierraEn ?? 'Sin fecha fijada'} />}
             </div>
           )}
 
