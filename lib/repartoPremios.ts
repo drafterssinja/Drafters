@@ -6,15 +6,16 @@
 // mismo % del bote — p.ej. "10º-15º 2,1% c/u" es un tramo desde=10 hasta=15
 // porcentajeCadaUno=2.1.
 //
-// Esto solo describe CÓMO se reparte el bote cuando se liquida una sala —
-// todavía no hay pantalla ni función que liquide salas de verdad (eso es
-// parte del draft/clasificación, sección 12 de la arquitectura técnica), así
-// que de momento esto es la referencia que usará ese cálculo cuando se
-// construya.
+// Esto describe CÓMO se reparte el bote (los % por tramo de posición). La
+// aplicación real a euros — con empates ya resueltos — vive en
+// repartirPremiosConEmpates() al final de este archivo (nuevo, 29/09), que
+// usa /admin/pagos-pendientes para proponer el reparto de una sala/porra ya
+// finalizada, antes de que el admin lo confirme (liquidar_evento() en
+// drafters-schema.sql es quien de verdad mueve el dinero).
 //
-// Empates (regla de Iñi, pendiente de aplicar cuando exista la liquidación):
-// los jugadores empatados juntan los premios de las posiciones que ocupan
-// entre todos y se los reparten a partes iguales.
+// Empates (regla de Iñi): los equipos empatados juntan los premios de las
+// posiciones que ocupan entre todos y se los reparten a partes iguales — ver
+// repartirPremiosConEmpates() más abajo.
 //
 // Porras clásicas (confirmado por Iñi, 23/09): siguen EXACTAMENTE el mismo
 // reparto por tramos que el Maratón (misma tabla, mismos porcentajes según
@@ -291,4 +292,96 @@ export function calcularReparto(tipo: TipoSala, aforo: number | null, inscritos?
     default:
       return [];
   }
+}
+
+// ============================================================================
+// LIQUIDACIÓN: aplicar el reparto por tramos a euros de verdad, con empates
+// ============================================================================
+// Nuevo, 29/09 — pedido de Iñi al implementar el pago de premios: "en caso de
+// que dos puestos estén empatados, se repartirán el premio entre todos... el
+// premio de los puestos que les corresponden se reparte entre los
+// empatados". Usado por /admin/pagos-pendientes para PROPONER el reparto en
+// euros de una sala/porra ya acabada (el admin lo revisa y confirma; quien
+// de verdad mueve el dinero es liquidar_evento() en drafters-schema.sql,
+// llamado con este mismo resultado).
+
+export interface ClasificacionEntrada {
+  equipoId: string;
+  // Valor por el que se ordena la clasificación — cuanto MEJOR, según
+  // `orden` (ver más abajo). Para golf (menos golpes = mejor) se pasa con
+  // orden='asc'; para aciertos de la porra de fútbol o puntos de fantasía
+  // (más = mejor) se pasa con orden='desc' (valor por defecto).
+  valor: number;
+}
+
+export interface ReparteEuros {
+  equipoId: string;
+  // Puesto que ocupa (si está empatado con otros, es el mejor puesto de su
+  // grupo — mismo criterio "T3" que ya usa la clasificación en vivo de
+  // golf). Se guarda tal cual en equipos.posicion_final al liquidar.
+  posicion: number;
+  // Euros que le corresponden, redondeados a céntimos — 0 si su puesto (o
+  // el grupo con el que está empatado) cae fuera de los tramos premiados.
+  importe: number;
+}
+
+/**
+ * Reparte `bote` € entre `clasificacion` según los `tramos` de porcentaje
+ * (ver calcularTramosPorInscritos/calcularReparto más arriba), agrupando
+ * automáticamente los equipos empatados (mismo `valor`) y repartiéndoles a
+ * partes iguales la suma de los % de TODAS las posiciones que ocupan entre
+ * todos — igual si esas posiciones tienen distinto % cada una (p.ej.
+ * empatados a 2º y 3º) o si alguna cae fuera de premios (esa posición
+ * simplemente aporta 0% al grupo).
+ *
+ * Devuelve una fila por CADA equipo de `clasificacion` (con importe 0 si no
+ * gana nada), para que /admin/pagos-pendientes pueda mostrar y guardar la
+ * posición final de todo el mundo, no solo de quien cobra.
+ */
+export function repartirPremiosConEmpates(
+  clasificacion: ClasificacionEntrada[],
+  tramos: TramoPremio[],
+  bote: number,
+  orden: 'asc' | 'desc' = 'desc'
+): ReparteEuros[] {
+  if (clasificacion.length === 0 || tramos.length === 0 || bote <= 0) {
+    return clasificacion.map((c) => ({ equipoId: c.equipoId, posicion: 0, importe: 0 }));
+  }
+
+  const ordenados = [...clasificacion].sort((a, b) => (orden === 'desc' ? b.valor - a.valor : a.valor - b.valor));
+
+  const porcentajeDePosicion = (pos: number): number => {
+    const tramo = tramos.find((t) => pos >= t.desde && pos <= t.hasta);
+    return tramo ? tramo.porcentajeCadaUno : 0;
+  };
+
+  const resultado: ReparteEuros[] = [];
+  let i = 0;
+  while (i < ordenados.length) {
+    // Agrupa todos los que tengan exactamente el mismo valor, a partir de i
+    // (empate) — la clasificación ya está ordenada, así que están seguidos.
+    let j = i;
+    while (j + 1 < ordenados.length && ordenados[j + 1].valor === ordenados[i].valor) j++;
+
+    const grupoDesde = i + 1; // posición 1-indexada
+    const grupoHasta = j + 1;
+    const tamanoGrupo = grupoHasta - grupoDesde + 1;
+
+    let sumaPorcentaje = 0;
+    for (let pos = grupoDesde; pos <= grupoHasta; pos++) {
+      sumaPorcentaje += porcentajeDePosicion(pos);
+    }
+
+    const importePorEquipo =
+      sumaPorcentaje > 0 ? Math.round(bote * (sumaPorcentaje / 100) * 100) / 100 / tamanoGrupo : 0;
+    const importeRedondeado = Math.round(importePorEquipo * 100) / 100;
+
+    for (let k = i; k <= j; k++) {
+      resultado.push({ equipoId: ordenados[k].equipoId, posicion: grupoDesde, importe: importeRedondeado });
+    }
+
+    i = j + 1;
+  }
+
+  return resultado;
 }

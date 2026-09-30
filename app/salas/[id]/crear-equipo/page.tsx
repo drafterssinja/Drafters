@@ -855,6 +855,20 @@ export default function CrearEquipoPage() {
               recomendamos comprobar que los jugadores elegidos siguen confirmados antes de que empiece.
             </p>
 
+            {/* Aviso de autorrelleno entre mesas idénticas (nuevo, 30/09) —
+                pedido de Iñi: que quede claro, al confirmar la inscripción,
+                qué pasa si la mesa no llega a llenarse a tiempo. No aplica a
+                Maratón (sin aforo fijo, nunca se consolida — ver
+                consolidar_salas_incompletas() en drafters-schema.sql). */}
+            {sala.tipo !== 'maraton' && (
+              <p style={{ fontSize: 11, lineHeight: 1.5, color: S.MUTED_3, margin: 0 }}>
+                Si al cerrarse la inscripción esta mesa no se ha llenado, pero existe otra mesa exactamente igual
+                (mismo tipo, mismo torneo/jornada y mismo buy-in) que tampoco esté llena, ambas se fusionan
+                automáticamente en una sola, respetando el orden de inscripción de cada una. Si aun así no encajas en
+                ninguna mesa completa, se te reembolsa el importe íntegro de tu inscripción.
+              </p>
+            )}
+
             {errorEnvio && <p style={S.errorText}>{errorEnvio}</p>}
 
             <button type="button" disabled={enviando} onClick={confirmarInscripcion} style={{ ...submitButtonStyle(true), opacity: enviando ? 0.7 : 1 }}>

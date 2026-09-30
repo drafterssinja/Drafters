@@ -75,7 +75,13 @@ const FECHA_OPCIONES: { key: string; label: string; dias: number | null }[] = [
 const TARJETAS_GESTION: { href: string; titulo: string; subtitulo: string }[] = [
   { href: '/admin/mesas-drafters', titulo: 'Mesas Drafters', subtitulo: 'Crear torneos/jornadas, mesas, y gestionar jugadores' },
   { href: '/admin/porras-golf', titulo: 'Porras de golf', subtitulo: 'Crear porras (clásica o modo draft) y gestionar las existentes' },
+  // Nueva (29/09, pedido de Iñi): porra de fútbol de Primera División por
+  // jornada — ver app/admin/porras-futbol.
+  { href: '/admin/porras-futbol', titulo: 'Porras de fútbol', subtitulo: 'Crear la porra de cada jornada, cargar los 10 partidos y marcar resultados' },
   { href: '/admin/rankings', titulo: 'Ranking de jugadores', subtitulo: 'Ranking mundial de golf y tenis' },
+  // Nueva (29/09, pedido de Iñi): "diseña lo que haga falta para que esos
+  // pagos... queden hechos" — ver app/admin/pagos-pendientes.
+  { href: '/admin/pagos-pendientes', titulo: 'Pagos pendientes', subtitulo: 'Revisar y confirmar el reparto de premios de salas y porras acabadas' },
   // Nueva (28/09, pedido de Iñi): conectar cada competición con su torneo
   // en ESPN para que la clasificación en directo se rellene sola, sin
   // introducir el resultado a mano — ver drafters-schema.sql.
@@ -112,6 +118,16 @@ export default function AdminPage() {
   // justo debajo el separado de cada una") — colapsado de serie, se
   // despliega al pulsar la propia tarjeta.
   const [mostrarDesgloseRake, setMostrarDesgloseRake] = useState(false);
+
+  // Mismo patrón (30/09, pedido de Iñi: "no se está teniendo en cuenta
+  // cuánto dinero se juegan las porras... quiero que cuente todo, tanto
+  // partidas como dinero jugado, pero que luego pueda ver el desglosado de
+  // cuánto es de porras y cuánto de mesas drafters") — aplicado también a
+  // "Dinero jugado" y "Partidas jugadas", que hasta ahora solo contaban
+  // salas (el dato de porras ya se calculaba para el rake, pero no se
+  // sumaba a estas dos tarjetas).
+  const [mostrarDesgloseDineroJugado, setMostrarDesgloseDineroJugado] = useState(false);
+  const [mostrarDesglosePartidas, setMostrarDesglosePartidas] = useState(false);
 
   // Editar una porra ya creada, directamente desde su propia tarjeta en
   // "Porras creadas" (pedido de Iñi, ronda de correcciones: antes solo se
@@ -263,10 +279,13 @@ export default function AdminPage() {
 
   const movimientosFiltrados = movimientos.filter((m) => dentroDelPeriodo(m.creado_en));
 
-  const partidasJugadas = inscripcionesFiltradas.length;
-  const dineroJugado = inscripcionesFiltradas.reduce((acc, i) => acc + Number(i.importe), 0);
+  const partidasJugadasSalas = inscripcionesFiltradas.length;
+  const partidasJugadasPorras = inscripcionesPorrasFiltradas.length;
+  const partidasJugadas = partidasJugadasSalas + partidasJugadasPorras;
+  const dineroJugadoSalas = inscripcionesFiltradas.reduce((acc, i) => acc + Number(i.importe), 0);
   const dineroJugadoPorras = inscripcionesPorrasFiltradas.reduce((acc, i) => acc + Number(i.importe), 0);
-  const rakeGanadoSalas = dineroJugado * 0.1;
+  const dineroJugado = dineroJugadoSalas + dineroJugadoPorras;
+  const rakeGanadoSalas = dineroJugadoSalas * 0.1;
   const rakeGanadoPorras = dineroJugadoPorras * 0.1;
   const rakeGanado = rakeGanadoSalas + rakeGanadoPorras;
   const dineroDepositado = movimientosFiltrados.filter((m) => m.tipo === 'deposito').reduce((acc, m) => acc + Number(m.importe), 0);
@@ -278,8 +297,18 @@ export default function AdminPage() {
   const statCards: { value: string; label: string; href?: string; onClick?: () => void; expandido?: boolean }[] = [
     { value: `${dineroDepositado.toFixed(2)} €`, label: 'Dinero depositado' },
     { value: `${dineroRetirado.toFixed(2)} €`, label: 'Dinero retirado' },
-    { value: `${partidasJugadas}`, label: 'Partidas jugadas' },
-    { value: `${dineroJugado.toFixed(2)} €`, label: 'Dinero jugado (salas)' },
+    {
+      value: `${partidasJugadas}`,
+      label: 'Partidas jugadas',
+      onClick: () => setMostrarDesglosePartidas((v) => !v),
+      expandido: mostrarDesglosePartidas,
+    },
+    {
+      value: `${dineroJugado.toFixed(2)} €`,
+      label: 'Dinero jugado',
+      onClick: () => setMostrarDesgloseDineroJugado((v) => !v),
+      expandido: mostrarDesgloseDineroJugado,
+    },
     // Clicable (28/09, pedido de Iñi: "lleva también el control del rake
     // ganado por las porras... que si pulso encima me cargue justo debajo
     // el separado de cada una") — suma salas + porras, y despliega el
@@ -424,6 +453,44 @@ export default function AdminPage() {
             })}
           </div>
 
+          {/* Desglose de "Partidas jugadas" por salas/porras (30/09) —
+              mismo patrón que el de Rake ganado. */}
+          {mostrarDesglosePartidas && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 14, marginTop: -4 }}>
+              <span style={S.sectionLabel}>Partidas jugadas, por origen</span>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>Mesas Drafters (Doble o Nada, Triple o Nada, Oro y Plata, Tridente, Maratón)</span>
+                <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13.5, color: S.TEXT, flexShrink: 0 }}>{partidasJugadasSalas}</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>Porras (golf y fútbol)</span>
+                <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13.5, color: S.TEXT, flexShrink: 0 }}>{partidasJugadasPorras}</span>
+              </div>
+              <p style={{ fontSize: 10.5, color: S.MUTED_3, margin: 0 }}>
+                El de mesas respeta los filtros de deporte, tipo de sala y buy-in de arriba; el de porras solo respeta el periodo (una porra no tiene esos otros filtros).
+              </p>
+            </div>
+          )}
+
+          {/* Desglose de "Dinero jugado" por salas/porras (30/09) — mismo
+              patrón que el de Rake ganado. */}
+          {mostrarDesgloseDineroJugado && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 14, marginTop: -4 }}>
+              <span style={S.sectionLabel}>Dinero jugado, por origen</span>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>Mesas Drafters (Doble o Nada, Triple o Nada, Oro y Plata, Tridente, Maratón)</span>
+                <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13.5, color: S.TEXT, flexShrink: 0 }}>{dineroJugadoSalas.toFixed(2)} €</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>Porras (golf y fútbol)</span>
+                <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13.5, color: S.TEXT, flexShrink: 0 }}>{dineroJugadoPorras.toFixed(2)} €</span>
+              </div>
+              <p style={{ fontSize: 10.5, color: S.MUTED_3, margin: 0 }}>
+                El de mesas respeta los filtros de deporte, tipo de sala y buy-in de arriba; el de porras solo respeta el periodo (una porra no tiene esos otros filtros).
+              </p>
+            </div>
+          )}
+
           {/* Desglose de "Rake ganado" por salas/porras (28/09) — justo
               debajo del grid, se despliega al pulsar esa tarjeta. */}
           {mostrarDesgloseRake && (
@@ -434,7 +501,7 @@ export default function AdminPage() {
                 <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13.5, color: S.TEXT, flexShrink: 0 }}>{rakeGanadoSalas.toFixed(2)} €</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>Porras clásicas de golf</span>
+                <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>Porras (golf y fútbol)</span>
                 <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13.5, color: S.TEXT, flexShrink: 0 }}>{rakeGanadoPorras.toFixed(2)} €</span>
               </div>
               <p style={{ fontSize: 10.5, color: S.MUTED_3, margin: 0 }}>

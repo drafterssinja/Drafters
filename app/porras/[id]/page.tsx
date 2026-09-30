@@ -10,6 +10,7 @@ import { calcularTramosPorInscritos } from '@/lib/repartoPremios';
 import { GRUPO_PORRA_LABELS, GrupoPorra, ORDEN_GRUPOS, COLOR_GRUPO } from '@/lib/porraGrupos';
 import { formatEuros, posicionLabel, closesAtLabel, parteParaPremios, parteComision } from '@/lib/salaShared';
 import { PorraFormato, PORRA_FORMATO_LABELS, PORRA_FORMATO_COLOR, PORRA_FORMATO_DESCRIPCION_LARGA } from '@/lib/porraFormato';
+import EscudoEquipoFutbol from '@/components/EscudoEquipoFutbol';
 
 // ============================================================================
 // DETALLE DE PORRA CLÁSICA
@@ -27,6 +28,21 @@ type PorraFila = { id: string; major: string; estado: string; precio: number; co
 type JugadorRow = { id: string; nombre: string; grupo_porra: GrupoPorra | null; precio: number };
 type EquipoMio = { id: string; nombre_equipo: string | null; jugadores: string[]; gasto_total: number; created_at: string };
 type EquipoParticipante = { equipoId: string; nombreEquipo: string | null; createdAt: string; oculto: boolean };
+
+// Porra de fútbol por jornadas (29/09) — los 10 partidos de la porra
+// (públicos, iguales para todo el mundo) y, por equipo mío, mis 10
+// pronósticos (1/X/2). Ver drafters-schema.sql, tablas
+// partidos_porra_futbol/predicciones_porra_futbol.
+type PartidoFutbol = {
+  id: string;
+  orden: number;
+  equipo_local: string;
+  equipo_visitante: string;
+  escudo_local_url: string | null;
+  escudo_visitante_url: string | null;
+  resultado_real: '1' | 'x' | '2' | null;
+};
+type ClasificacionFutbolFila = { equipo_id: string; nombre_equipo: string; aciertos: number; partidos_resueltos: number; total_partidos: number };
 
 // La pestaña "Grupos" (por color) solo tiene sentido en el formato clásico;
 // el formato "presupuesto" muestra en su lugar "Jugadores" (el campo
@@ -48,6 +64,10 @@ export default function PorraDetallePage() {
   // que aquí se guarda la lista entera, no un único equipo.
   const [misEquipos, setMisEquipos] = useState<EquipoMio[]>([]);
   const [participantes, setParticipantes] = useState<EquipoParticipante[]>([]);
+  const [partidosFutbol, setPartidosFutbol] = useState<PartidoFutbol[]>([]);
+  // Mis pronósticos, por equipo: equipoId -> (partidoId -> '1'|'x'|'2').
+  const [prediccionesPorEquipo, setPrediccionesPorEquipo] = useState<Map<string, Map<string, string>>>(new Map());
+  const [clasificacionFutbol, setClasificacionFutbol] = useState<ClasificacionFutbolFila[]>([]);
   const [tab, setTab] = useState<Tab>('info');
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -78,6 +98,17 @@ export default function PorraDetallePage() {
         return;
       }
       const porraRow = porraData as PorraFila;
+
+      // La porra de fútbol todavía no está visible para usuarios normales
+      // (oculta a propósito mientras se termina de probar — el desarrollo
+      // sigue intacto, solo no es accesible desde aquí). Se bloquea también
+      // el acceso directo por URL, no solo el listado. (29/09)
+      if (porraRow.formato === 'futbol_jornada') {
+        setError('No se ha encontrado esta porra.');
+        setCargando(false);
+        return;
+      }
+
       setPorra(porraRow);
 
       // inscritos_por_porra() es una función de base de datos (RPC): las
@@ -88,7 +119,12 @@ export default function PorraDetallePage() {
       // participantes_porra() da la lista de equipos de TODOS (con el
       // nombre oculto hasta que empiece la porra, calculado en el propio
       // servidor — ver drafters-schema.sql).
-      const [{ data: inscritosPorraData }, { data: misEquiposData }, { data: jugData }, { data: participantesData }] = await Promise.all([
+      // (Tras el bloqueo de arriba, formato aquí nunca es 'futbol_jornada'
+      // en la práctica; se compara como string para no tocar el resto de
+      // la lógica de fútbol ya desarrollada más abajo.)
+      const esFutbolRow = (porraRow.formato as string) === 'futbol_jornada';
+
+      const [{ data: inscritosPorraData }, { data: misEquiposData }, { data: jugData }, { data: participantesData }, { data: partidosFutbolData }, { data: clasificacionFutbolData }] = await Promise.all([
         supabase.rpc('inscritos_por_porra'),
         supabase
           .from('equipos')
@@ -99,7 +135,11 @@ export default function PorraDetallePage() {
         porraRow.competicion
           ? supabase.from('jugadores').select('id,nombre,grupo_porra,precio').eq('deporte', 'golf').eq('competicion', porraRow.competicion)
           : Promise.resolve({ data: [] }),
-        supabase.rpc('participantes_porra', { p_porra_id: porraId }),
+        esFutbolRow ? Promise.resolve({ data: [] }) : supabase.rpc('participantes_porra', { p_porra_id: porraId }),
+        esFutbolRow
+          ? supabase.from('partidos_porra_futbol').select('*').eq('porra_id', porraId).order('orden', { ascending: true })
+          : Promise.resolve({ data: [] }),
+        esFutbolRow ? supabase.rpc('futbol_porra_clasificacion', { p_porra_id: porraId }) : Promise.resolve({ data: [] }),
       ]);
 
       if (!activo) return;
@@ -118,7 +158,24 @@ export default function PorraDetallePage() {
 
       const jugRows = (jugData as JugadorRow[]) ?? [];
       setJugadores(jugRows);
+      setPartidosFutbol((partidosFutbolData as PartidoFutbol[]) ?? []);
+      setClasificacionFutbol((clasificacionFutbolData as ClasificacionFutbolFila[]) ?? []);
       setTab(misEquiposActivos.length > 0 ? 'equipo' : 'info');
+
+      if (esFutbolRow && misEquiposActivos.length > 0) {
+        const { data: prediccionesData } = await supabase
+          .from('predicciones_porra_futbol')
+          .select('equipo_id, partido_id, prediccion')
+          .in('equipo_id', misEquiposActivos.map((e) => e.id));
+        if (activo) {
+          const mapa = new Map<string, Map<string, string>>();
+          ((prediccionesData as { equipo_id: string; partido_id: string; prediccion: string }[]) ?? []).forEach((p) => {
+            if (!mapa.has(p.equipo_id)) mapa.set(p.equipo_id, new Map());
+            mapa.get(p.equipo_id)!.set(p.partido_id, p.prediccion);
+          });
+          setPrediccionesPorEquipo(mapa);
+        }
+      }
 
       const idsMisJugadores = Array.from(new Set(misEquiposActivos.flatMap((e) => e.jugadores ?? [])));
       if (idsMisJugadores.length > 0) {
@@ -163,6 +220,8 @@ export default function PorraDetallePage() {
       </main>
     );
   }
+
+  const esFutbol = porra.formato === 'futbol_jornada';
 
   // Bote real = lo que va a premios (90% del precio de entrada, sin la
   // comisión de la casa) — corregido el 28/09, pedido de Iñi: "en las
@@ -221,7 +280,7 @@ export default function PorraDetallePage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: estadoColor, flexShrink: 0 }} />
               <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 12.5, color: estadoColor }}>{estadoLabel}</span>
-              <span style={{ fontSize: 12.5, color: S.MUTED_3 }}>· Golf</span>
+              <span style={{ fontSize: 12.5, color: S.MUTED_3 }}>· {esFutbol ? 'Fútbol' : 'Golf'}</span>
               {cierra && <span style={{ fontSize: 12.5, color: '#FF9F6E' }}>· Cierra el {cierra}</span>}
             </div>
           </div>
@@ -238,21 +297,26 @@ export default function PorraDetallePage() {
             <button type="button" onClick={() => setTab('premios')} style={tabButtonStyle(tab === 'premios')}>
               Premios
             </button>
-            <button type="button" onClick={() => setTab('grupos')} style={tabButtonStyle(tab === 'grupos')}>
-              {porra.formato === 'presupuesto' ? 'Jugadores' : 'Grupos'}
-            </button>
+            {!esFutbol && (
+              <button type="button" onClick={() => setTab('grupos')} style={tabButtonStyle(tab === 'grupos')}>
+                {porra.formato === 'presupuesto' ? 'Jugadores' : 'Grupos'}
+              </button>
+            )}
             <button type="button" onClick={() => setTab('equipos')} style={tabButtonStyle(tab === 'equipos')}>
-              Equipos
+              {esFutbol ? 'Clasificación' : 'Equipos'}
             </button>
           </div>
 
           {/* Acceso a la clasificación en directo (isPorraDetalle de
-              Main.dc.html, línea 1449) — solo tiene sentido una vez la
-              porra ha empezado de verdad (misma marca de tiempo que usa
+              Main.dc.html, línea 1449) — solo tiene sentido en golf (usa los
+              resultados en vivo de ESPN) una vez la porra ha empezado de
+              verdad (misma marca de tiempo que usa
               participantes_porra_con_plantilla(), que sigue ocultando la
               PLANTILLA de cada rival hasta ese momento — desde el 28/09 los
-              nombres de los equipos ya se ven siempre, ver más abajo). */}
-          {porraEmpezada && misEquipos.length > 0 && (
+              nombres de los equipos ya se ven siempre, ver más abajo). La
+              porra de fútbol tiene su propia "clasificación" — la pestaña
+              "Clasificación" de aquí arriba, por aciertos. */}
+          {!esFutbol && porraEmpezada && misEquipos.length > 0 && (
             <Link
               href={`/porras/${porra.id}/clasificacion`}
               style={{ display: 'flex', alignItems: 'center', gap: 6, alignSelf: 'flex-start', padding: '7px 12px', background: 'rgba(240,185,77,0.12)', border: '1px solid rgba(240,185,77,0.4)', borderRadius: 20, textDecoration: 'none' }}
@@ -262,7 +326,56 @@ export default function PorraDetallePage() {
             </Link>
           )}
 
-          {tab === 'equipo' && (
+          {tab === 'equipo' && esFutbol && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {misEquipos.map((eq) => {
+                const misPredicciones = prediccionesPorEquipo.get(eq.id) ?? new Map<string, string>();
+                const aciertos = partidosFutbol.filter((p) => p.resultado_real && misPredicciones.get(p.id) === p.resultado_real).length;
+                const resueltos = partidosFutbol.filter((p) => p.resultado_real).length;
+                return (
+                  <div key={eq.id} style={{ display: 'flex', flexDirection: 'column', gap: 8, background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: 14 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                      <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 16, color: S.TEXT }}>{eq.nombre_equipo}</span>
+                      {resueltos > 0 && (
+                        <span style={{ fontSize: 11.5, fontWeight: 700, color: '#F0B94D' }}>
+                          {aciertos} acierto{aciertos === 1 ? '' : 's'} de {resueltos}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {partidosFutbol.map((p) => {
+                        const miPronostico = misPredicciones.get(p.id);
+                        const acerto = p.resultado_real ? miPronostico === p.resultado_real : null;
+                        return (
+                          <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: '#10150F', border: '1px solid #1E2723', borderRadius: 9 }}>
+                            <EscudoEquipoFutbol nombre={p.equipo_local} url={p.escudo_local_url} size={24} />
+                            <span style={{ flex: 1, fontSize: 12.5, color: S.TEXT, textAlign: 'right' }}>{p.equipo_local}</span>
+                            <span
+                              style={{
+                                flexShrink: 0,
+                                minWidth: 22,
+                                textAlign: 'center',
+                                fontFamily: "'Barlow Condensed', sans-serif",
+                                fontWeight: 800,
+                                fontSize: 13,
+                                color: acerto === null ? '#F0B94D' : acerto ? '#3DDC84' : S.ERROR,
+                              }}
+                            >
+                              {miPronostico ? miPronostico.toUpperCase() : '—'}
+                            </span>
+                            <span style={{ flex: 1, fontSize: 12.5, color: S.TEXT }}>{p.equipo_visitante}</span>
+                            <EscudoEquipoFutbol nombre={p.equipo_visitante} url={p.escudo_visitante_url} size={24} />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {tab === 'equipo' && !esFutbol && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               {misEquipos.map((eq) => {
                 const jugadoresDeEsteEquipo = (eq.jugadores ?? [])
@@ -299,7 +412,42 @@ export default function PorraDetallePage() {
             </div>
           )}
 
-          {tab === 'equipos' && (
+          {tab === 'equipos' && esFutbol && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <span style={{ fontSize: 12, color: S.MUTED_3 }}>
+                {signedUp} equipo{signedUp === 1 ? '' : 's'} inscrito{signedUp === 1 ? '' : 's'} · clasificación por aciertos
+              </span>
+              {clasificacionFutbol.length === 0 && <p style={{ fontSize: 13, color: S.MUTED_2 }}>Todavía no hay ningún equipo inscrito.</p>}
+              {clasificacionFutbol.map((c, i) => (
+                <div key={c.equipo_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
+                  <span
+                    style={{
+                      flexShrink: 0,
+                      width: 26,
+                      height: 26,
+                      borderRadius: '50%',
+                      background: '#1E2723',
+                      color: S.MUTED_2,
+                      fontFamily: "'Barlow Condensed', sans-serif",
+                      fontWeight: 700,
+                      fontSize: 12,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    {i + 1}
+                  </span>
+                  <span style={{ flex: 1, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 13.5, color: S.TEXT }}>{c.nombre_equipo}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#F0B94D' }}>
+                    {c.aciertos}/{c.partidos_resueltos}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {tab === 'equipos' && !esFutbol && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <span style={{ fontSize: 12, color: S.MUTED_3 }}>{signedUp} equipo{signedUp === 1 ? '' : 's'} inscrito{signedUp === 1 ? '' : 's'}</span>
               {participantes.length > 0 && participantes[0].oculto && (
@@ -344,8 +492,8 @@ export default function PorraDetallePage() {
                 value={`${formatEuros(parteParaPremios(porra.precio))} + ${formatEuros(parteComision(porra.precio))}`}
                 accent
               />
-              <InfoRow label="Competición" value={porra.competicion ?? '—'} />
-              <InfoRow label="Jugadores inscritos" value={String(signedUp)} />
+              {!esFutbol && <InfoRow label="Competición" value={porra.competicion ?? '—'} />}
+              <InfoRow label={esFutbol ? 'Equipos inscritos' : 'Jugadores inscritos'} value={String(signedUp)} />
 
               {/* Instrucciones de cómo se eligen los equipos, con la
                   explicación condicional según si esta porra tiene 3 o más
@@ -354,7 +502,28 @@ export default function PorraDetallePage() {
                   equipo (app/porras/[id]/crear-equipo/page.tsx), para que
                   quien quiera participar lo vea también antes de entrar
                   ahí. */}
-              {porra.formato === 'presupuesto' ? (
+              {esFutbol ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+                  <div style={{ background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Cómo se elige el equipo</span>
+                    <p style={{ fontSize: 12.5, lineHeight: 1.5, color: S.MUTED_2, margin: 0 }}>{PORRA_FORMATO_DESCRIPCION_LARGA.futbol_jornada}</p>
+                  </div>
+                  {partidosFutbol.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Partidos de la jornada</span>
+                      {partidosFutbol.map((p) => (
+                        <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 9 }}>
+                          <EscudoEquipoFutbol nombre={p.equipo_local} url={p.escudo_local_url} size={22} />
+                          <span style={{ flex: 1, fontSize: 12.5, color: S.TEXT, textAlign: 'right' }}>{p.equipo_local}</span>
+                          <span style={{ flexShrink: 0, fontSize: 10.5, color: S.MUTED_3 }}>vs</span>
+                          <span style={{ flex: 1, fontSize: 12.5, color: S.TEXT }}>{p.equipo_visitante}</span>
+                          <EscudoEquipoFutbol nombre={p.equipo_visitante} url={p.escudo_visitante_url} size={22} />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : porra.formato === 'presupuesto' ? (
                 <div style={{ background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
                   <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Cómo se elige el equipo</span>
                   <p style={{ fontSize: 12.5, lineHeight: 1.5, color: S.MUTED_2, margin: 0 }}>{PORRA_FORMATO_DESCRIPCION_LARGA.presupuesto}</p>

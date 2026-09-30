@@ -59,6 +59,7 @@ type PorraGolfAdmin = {
   precio: number;
   fecha_limite_inscripcion: string | null;
   formato: PorraFormato;
+  bono_podio_activo: boolean;
 };
 
 export default function AdminPorrasGolfPage() {
@@ -71,6 +72,11 @@ export default function AdminPorrasGolfPage() {
 
   // Formulario de creación.
   const [formato, setFormato] = useState<PorraFormato>('clasica');
+  // Bono de podio (nuevo, 29/09): configurable por porra, pedido de Iñi —
+  // se guarda en porras.bono_podio_activo y lo usa tanto la clasificación
+  // en directo (como vista previa activable) como la liquidación final de
+  // premios (ver lib/golfScoring.ts, bonoPodioParaJugador()).
+  const [bonoPodioActivo, setBonoPodioActivo] = useState(false);
   const [torneoNombre, setTorneoNombre] = useState('');
   const [torneoFechaLimite, setTorneoFechaLimite] = useState('');
   const [precioEntrada, setPrecioEntrada] = useState('20');
@@ -90,7 +96,7 @@ export default function AdminPorrasGolfPage() {
   async function cargarPorras() {
     const { data } = await supabase
       .from('porras')
-      .select('id, major, competicion, estado, precio, fecha_limite_inscripcion, formato')
+      .select('id, major, competicion, estado, precio, fecha_limite_inscripcion, formato, bono_podio_activo')
       .order('created_at', { ascending: false });
     setPorras((data as PorraGolfAdmin[]) ?? []);
   }
@@ -281,6 +287,7 @@ export default function AdminPorrasGolfPage() {
         estado: 'disponible',
         precio: precioNum,
         formato,
+        bono_podio_activo: bonoPodioActivo,
       });
       if (!porraError) porraCreada = true;
     }
@@ -302,6 +309,7 @@ export default function AdminPorrasGolfPage() {
     setTorneoFechaLimite('');
     setPrecioEntrada('20');
     setFormato('clasica');
+    setBonoPodioActivo(false);
     await cargarPorras();
   }
 
@@ -316,6 +324,11 @@ export default function AdminPorrasGolfPage() {
     await supabase.from('porras').update({ fecha_limite_inscripcion: nuevaFechaIso }).eq('id', porraId);
     setGuardandoFecha(false);
     setEditandoFechaId(null);
+    await cargarPorras();
+  }
+
+  async function alternarBonoPodio(p: PorraGolfAdmin) {
+    await supabase.from('porras').update({ bono_podio_activo: !p.bono_podio_activo }).eq('id', p.id);
     await cargarPorras();
   }
 
@@ -372,6 +385,11 @@ export default function AdminPorrasGolfPage() {
               ))}
             </div>
             <p style={{ fontSize: 12.5, color: S.MUTED_2, margin: 0, lineHeight: 1.5 }}>{PORRA_FORMATO_DESCRIPCION_LARGA[formato]}</p>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: S.MUTED_2, cursor: 'pointer' }}>
+              <input type="checkbox" checked={bonoPodioActivo} onChange={(e) => setBonoPodioActivo(e.target.checked)} style={{ width: 16, height: 16, accentColor: S.ACCENT, cursor: 'pointer' }} />
+              Bono de podio (1º −10, 2º −5, 3er −3 golpes del torneo, en la clasificación y al liquidar)
+            </label>
 
             <div style={S.field}>
               <span style={S.label}>Nombre del torneo</span>
@@ -494,6 +512,24 @@ export default function AdminPorrasGolfPage() {
                         >
                           Abrir
                         </Link>
+                        <button
+                          type="button"
+                          onClick={() => alternarBonoPodio(p)}
+                          title="Bono de podio: 1º −10, 2º −5, 3er −3 golpes del torneo"
+                          style={{
+                            fontFamily: "'Manrope', sans-serif",
+                            fontWeight: 700,
+                            fontSize: 11,
+                            color: p.bono_podio_activo ? '#04140B' : '#C9D2CC',
+                            background: p.bono_podio_activo ? '#3DDC84' : 'transparent',
+                            border: `1px solid ${p.bono_podio_activo ? '#3DDC84' : S.BORDER}`,
+                            borderRadius: 8,
+                            padding: '6px 10px',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Bono podio {p.bono_podio_activo ? 'ON' : 'OFF'}
+                        </button>
                         <button
                           type="button"
                           onClick={() => (editando ? setEditandoFechaId(null) : empezarEdicionFecha(p))}

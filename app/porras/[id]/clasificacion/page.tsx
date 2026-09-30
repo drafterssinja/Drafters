@@ -9,7 +9,7 @@ import AnuncioVideoInline from '@/components/AnuncioVideoInline';
 import * as S from '@/lib/mockupStyles';
 import { formatEuros } from '@/lib/salaShared';
 import { GRUPO_PORRA_LABELS, ORDEN_GRUPOS, COLOR_GRUPO, type GrupoPorra } from '@/lib/porraGrupos';
-import { formatGolfScore, COLOR_TIPO_RESULTADO, ETIQUETA_TIPO_RESULTADO, type TipoResultadoHoyo } from '@/lib/golfScoring';
+import { formatGolfScore, bonoPodioParaJugador, COLOR_TIPO_RESULTADO, ETIQUETA_TIPO_RESULTADO, type TipoResultadoHoyo } from '@/lib/golfScoring';
 
 // ============================================================================
 // PORRA CLÁSICA — CLASIFICACIÓN EN DIRECTO (nuevo, 27/09, undécima vuelta)
@@ -44,12 +44,19 @@ import { formatGolfScore, COLOR_TIPO_RESULTADO, ETIQUETA_TIPO_RESULTADO, type Ti
 // bogey +2...), exactamente el mismo criterio con el que ya estaba
 // diseñado el panel "hoyo a hoyo" de la maqueta. Ver lib/golfScoring.ts.
 //
-// El toggle "Bonos de podio" se mantiene visualmente (Iñi no pidió
-// quitarlo, y "todo eso tiene que ser así" incluye el diseño completo de
-// esta pantalla) pero es solo informativo por ahora — no hay ninguna
-// puntuación en vivo todavía a la que aplicarle un bono o una penalización.
+// El toggle "Bonos de podio" ya es de verdad (nuevo, 29/09): cada porra
+// guarda si tiene el bono activo (porras.bono_podio_activo, configurable al
+// crear/editar la porra en /admin/porras-golf — pedido de Iñi: "el primer
+// jugador del torneo va a restar menos 10, el segundo menos 5 y el tercero
+// menos 3"). Este toggle inicia con el valor real guardado en la porra,
+// pero se puede seguir activando/desactivando aquí como VISTA PREVIA — "la
+// posibilidad de ver la clasificación... activando la resta de esos golpes
+// con la clasificación actual del momento o no" (pedido de Iñi). Lo que de
+// verdad se aplica al liquidar los premios de la porra es siempre el valor
+// guardado en la base de datos, no lo que un espectador tenga activado en
+// su propia pantalla (ver /admin/pagos-pendientes/porra/[id]).
 
-type PorraRow = { id: string; major: string; competicion: string | null; estado: string; fecha_limite_inscripcion: string | null };
+type PorraRow = { id: string; major: string; competicion: string | null; estado: string; fecha_limite_inscripcion: string | null; bono_podio_activo: boolean; formato: string };
 type JugadorRow = {
   id: string;
   nombre: string;
@@ -70,8 +77,13 @@ type Vista = 'porra' | 'torneo';
 // torneo no está conectado) se les cuenta como 0 (par) en la suma, para no
 // dejar el total del equipo en blanco solo porque a uno le falte por
 // empezar.
-function totalEquipo(jugadoresIds: string[], jugadoresPorId: Map<string, JugadorRow>): number {
-  return jugadoresIds.reduce((acc, id) => acc + (jugadoresPorId.get(id)?.resultado_en_vivo_total ?? 0), 0);
+function totalEquipo(jugadoresIds: string[], jugadoresPorId: Map<string, JugadorRow>, aplicarBonoPodio: boolean): number {
+  return jugadoresIds.reduce((acc, id) => {
+    const j = jugadoresPorId.get(id);
+    if (!j) return acc;
+    const bono = aplicarBonoPodio ? bonoPodioParaJugador(j.resultado_en_vivo_posicion) : 0;
+    return acc + (j.resultado_en_vivo_total ?? 0) + bono;
+  }, 0);
 }
 
 function estadoJugador(j: JugadorRow): string | null {
@@ -115,7 +127,7 @@ export default function PorraClasificacionPage() {
 
       const [{ data: perfilData }, { data: porraData }] = await Promise.all([
         supabase.from('perfiles').select('*').eq('id', session.user.id).single(),
-        supabase.from('porras').select('id,major,competicion,estado,fecha_limite_inscripcion').eq('id', porraId).single(),
+        supabase.from('porras').select('id,major,competicion,estado,fecha_limite_inscripcion,bono_podio_activo,formato').eq('id', porraId).single(),
       ]);
 
       if (!activo) return;
@@ -126,8 +138,18 @@ export default function PorraClasificacionPage() {
         setCargando(false);
         return;
       }
+
+      // Esta pantalla es la clasificación en directo de golf; la porra de
+      // fútbol todavía no está visible para usuarios normales (oculta a
+      // propósito mientras se termina de probar). (29/09)
+      if ((porraData as PorraRow).formato === 'futbol_jornada') {
+        setError('No se ha encontrado esta porra.');
+        setCargando(false);
+        return;
+      }
       const porraRow = porraData as PorraRow;
       setPorra(porraRow);
+      setBonosPodio(porraRow.bono_podio_activo);
 
       const [{ data: jugData }, { data: equiposData }] = await Promise.all([
         porraRow.competicion
@@ -284,7 +306,9 @@ export default function PorraClasificacionPage() {
           >
             <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
               <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 12.5, color: S.TEXT }}>Bonos de podio (−10 / −5 / −3)</span>
-              <span style={{ fontSize: 10, color: S.MUTED_3 }}>Pendiente de conectar con la puntuación en directo del torneo.</span>
+              <span style={{ fontSize: 10, color: S.MUTED_3 }}>
+                {porra.bono_podio_activo ? 'Activado en esta porra — así se liquidará al acabar.' : 'No activado en esta porra — esto es solo una vista previa.'}
+              </span>
             </div>
             <div style={{ flexShrink: 0, width: 40, height: 22, borderRadius: 999, background: bonosPodio ? 'rgba(61,220,132,0.35)' : '#232B26', position: 'relative' }}>
               <div style={{ position: 'absolute', top: 2, left: bonosPodio ? 20 : 2, width: 18, height: 18, borderRadius: '50%', background: '#F5F7F5', transition: 'left 0.15s ease' }} />
@@ -322,7 +346,7 @@ export default function PorraClasificacionPage() {
                         {eq.nombreEquipo}
                       </span>
                       <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 12, color: S.MUTED_2 }}>
-                        {formatGolfScore(totalEquipo(eq.jugadores, jugadoresPorId))}
+                        {formatGolfScore(totalEquipo(eq.jugadores, jugadoresPorId, bonosPodio))}
                       </span>
                     </a>
                   );
@@ -335,7 +359,7 @@ export default function PorraClasificacionPage() {
                     {equipoSeleccionado.nombreEquipo}
                   </span>
                   <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, color: S.MUTED_2 }}>
-                    {formatGolfScore(totalEquipo(equipoSeleccionado.jugadores, jugadoresPorId))}
+                    {formatGolfScore(totalEquipo(equipoSeleccionado.jugadores, jugadoresPorId, bonosPodio))}
                   </span>
                 </div>
                 {jugadoresDelEquipoSeleccionado.map((j) => (
@@ -361,8 +385,13 @@ export default function PorraClasificacionPage() {
                       <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.nombre}</span>
                       {j.grupo_porra && <span style={{ fontSize: 9.5, fontWeight: 700, color: COLOR_GRUPO[j.grupo_porra] }}>{GRUPO_PORRA_LABELS[j.grupo_porra]}</span>}
                       {estadoJugador(j) && <span style={{ fontSize: 9, color: S.MUTED_3 }}>{estadoJugador(j)}</span>}
+                      {bonosPodio && bonoPodioParaJugador(j.resultado_en_vivo_posicion) !== 0 && (
+                        <span style={{ fontSize: 9, fontWeight: 700, color: '#F0B94D' }}>Bono podio {bonoPodioParaJugador(j.resultado_en_vivo_posicion)}</span>
+                      )}
                     </div>
-                    <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 13, color: S.MUTED_2 }}>{formatGolfScore(j.resultado_en_vivo_total ?? 0)}</span>
+                    <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 13, color: S.MUTED_2 }}>
+                      {formatGolfScore((j.resultado_en_vivo_total ?? 0) + (bonosPodio ? bonoPodioParaJugador(j.resultado_en_vivo_posicion) : 0))}
+                    </span>
                   </a>
                 ))}
               </div>

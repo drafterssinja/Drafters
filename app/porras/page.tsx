@@ -54,6 +54,11 @@ export default function PorrasIndexPage() {
           .from('porras')
           .select('id,major,estado,precio,competicion,fecha_limite_inscripcion,formato')
           .neq('estado', 'finalizada')
+          // La porra de fútbol (formato 'futbol_jornada') todavía no está
+          // visible para usuarios normales — se oculta aquí a propósito
+          // mientras se termina de probar. Todo el desarrollo sigue
+          // intacto, solo no aparece en este listado. (29/09)
+          .neq('formato', 'futbol_jornada')
           .order('fecha_limite_inscripcion', { ascending: true }),
         // inscritos_por_porra() es una función de base de datos (RPC): las
         // filas de equipos/inscripciones de otros usuarios no son visibles

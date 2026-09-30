@@ -227,6 +227,13 @@ export default function SalaDetallePage() {
   const limiteInscripcionPasado = sala.fecha_limite_inscripcion ? new Date(sala.fecha_limite_inscripcion).getTime() <= Date.now() : false;
   const puedeEditarEquipo = !isFinalizada && !limiteInscripcionPasado;
 
+  // Habilitar "Ver clasificación" al cierre de inscripción, no solo cuando
+  // la mesa está llena (30/09) — pedido de Iñi: "no cierra la mesa el que
+  // se complete, sino la fecha de cierre de la mesa". Mismo criterio que ya
+  // usan las porras (porraEmpezada en app/porras/[id]/page.tsx): fecha
+  // límite de inscripción ya pasada, o la mesa ya finalizada.
+  const salaEmpezada = isFinalizada || limiteInscripcionPasado;
+
   // Botón de "Unirse" (nuevo, 26/09 novena vuelta): en el resto de tipos de
   // sala, en cuanto ya tienes un equipo el botón desaparece (solo se
   // permite uno). En Maratón, en cambio, se puede seguir creando equipos
@@ -258,7 +265,7 @@ export default function SalaDetallePage() {
             </div>
           </div>
 
-          {isFull && (
+          {salaEmpezada && hasEquipo && (
             <Link
               href={`/salas/${sala.id}/clasificacion`}
               style={{
@@ -277,7 +284,10 @@ export default function SalaDetallePage() {
                 <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#FF7A45', flexShrink: 0 }} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                   <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14.5, textTransform: 'uppercase', letterSpacing: '0.02em', color: S.TEXT }}>
-                    Sala completa · ha empezado
+                    {/* El aviso ya no depende de que la mesa esté llena
+                        (30/09) — depende de que se haya cerrado la
+                        inscripción, esté llena o no. */}
+                    {isFull ? 'Sala completa · ha empezado' : 'Inscripción cerrada'}
                   </span>
                   <span style={{ fontSize: 11.5, color: S.MUTED_2 }}>Ver la clasificación en directo</span>
                 </div>

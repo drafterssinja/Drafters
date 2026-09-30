@@ -219,7 +219,20 @@ alter table public.porras add column if not exists competicion text;
 -- por defecto), que es lo que ya eran.
 alter table public.porras add column if not exists formato text not null default 'clasica';
 alter table public.porras drop constraint if exists porras_formato_check;
-alter table public.porras add constraint porras_formato_check check (formato in ('clasica', 'presupuesto'));
+-- 'futbol_jornada' añadido el 29/09 — nuevo tipo de porra de fútbol de
+-- Primera División, una por jornada de liga, ver la sección "PORRA DE
+-- FÚTBOL POR JORNADAS" más abajo en este archivo.
+alter table public.porras add constraint porras_formato_check check (formato in ('clasica', 'presupuesto', 'futbol_jornada'));
+
+-- Bono de podio de la clasificación en directo (nuevo, 29/09): activable por
+-- porra, solo tiene sentido para porras de golf formato 'clasica' (se marca
+-- al crear/editar la porra en /admin/porras-golf). Cuando está activo, al
+-- liquidar la porra (y en la vista previa de la clasificación en directo) se
+-- resta al resultado del equipo que tenga al 1er/2º/3er clasificado REAL del
+-- torneo (por posición ESPN, no por equipo de la porra) menos 10/menos
+-- 5/menos 3 golpes respectivamente — pedido de Iñi: "el primer jugador del
+-- torneo va a restar menos 10, el segundo menos 5 y el tercero menos 3".
+alter table public.porras add column if not exists bono_podio_activo boolean not null default false;
 
 -- ----------------------------------------------------------------------------
 -- 4. JUGADORES (ficha maestra, editable solo por el superadministrador)
@@ -472,6 +485,15 @@ create table if not exists public.movimientos (
 
 comment on table public.movimientos is 'Historial de ingresos y retiradas de saldo simulado (€) de cada usuario.';
 
+-- 'premio' añadido el 29/09 (liquidación de premios) — se inserta SIEMPRE
+-- desde liquidar_evento() (security definer, ver más abajo), nunca desde el
+-- cliente directamente, igual que 'deposito'/'retiro' solo se insertan desde
+-- registrar_movimiento(). El `drop`+`add` hace falta porque la tabla puede
+-- ya existir en una base de datos con la restricción vieja (mismo criterio
+-- que en eventos_actividad, ver esa tabla más abajo).
+alter table public.movimientos drop constraint if exists movimientos_tipo_check;
+alter table public.movimientos add constraint movimientos_tipo_check check (tipo in ('deposito', 'retiro', 'premio'));
+
 -- ----------------------------------------------------------------------------
 -- NOTIFICACIONES
 -- ----------------------------------------------------------------------------
@@ -661,11 +683,14 @@ grant execute on function public.nombre_usuario_disponible(text, uuid) to anon, 
 -- ============================================================================
 -- CONSOLIDACIÓN DE SALAS INCOMPLETAS AL CERRAR LA INSCRIPCIÓN
 -- ============================================================================
--- Pedido explícito de Iñi (22/09): cuando el plazo de inscripción de una
--- sala (fecha_limite_inscripcion) se cumple y esa sala no se ha llenado,
--- solo pasa algo si existe OTRA sala EXACTAMENTE igual (mismo
--- deporte + competición + tipo — p.ej. "La Liga - Jornada 8" + "Doble o
--- Nada") que también esté incompleta en ese momento:
+-- Pedido explícito de Iñi (22/09, precisado el 30/09): cuando el plazo de
+-- inscripción de una sala (fecha_limite_inscripcion) se cumple y esa sala
+-- no se ha llenado, solo pasa algo si existe OTRA sala EXACTAMENTE igual —
+-- mismo deporte + competición/jornada + tipo de mesa + aforo + buy-in
+-- (misma "cantidad", pedido explícito de Iñi el 30/09: dos mesas del mismo
+-- tipo pero con distinto aforo o distinto buy-in NUNCA se consideran
+-- iguales, aunque compartan tipo) — que también esté incompleta en ese
+-- momento:
 --   - La sala con MÁS jugadores inscritos se completa con jugadores de la
 --     otra (o de las otras, si hay más de dos) — por orden de inscripción,
 --     el que se apuntó antes tiene prioridad para conservar su sitio.
@@ -677,20 +702,11 @@ grant execute on function public.nombre_usuario_disponible(text, uuid) to anon, 
 -- Si una sala incompleta se queda SIN ninguna otra sala idéntica también
 -- incompleta, no se toca — sigue abierta tal cual hasta la siguiente pasada.
 --
--- IMPORTANTE — falta todavía la pantalla real de "unirse a una sala", así
--- que esta función no tiene aún ningún caso de uso real que probar de
--- principio a fin; está lista y probada con datos sintéticos para cuando
--- se construya esa pantalla (ver README/documento de arquitectura).
---
--- Para que esto se compruebe solo, sin que nadie tenga que pulsar nada:
--- activa la extensión "pg_cron" desde el panel de Supabase (Database →
--- Extensions → busca "pg_cron" → Enable) y ejecuta UNA VEZ en el SQL Editor:
---
---   select cron.schedule(
---     'consolidar-salas-incompletas',
---     '*/5 * * * *',
---     $$select public.consolidar_salas_incompletas();$$
---   );
+-- Programada para ejecutarse sola cada 5 minutos (nuevo, 30/09) — ver el
+-- bloque final de este archivo, "CRON DE CONSOLIDACIÓN DE MESAS", que no
+-- necesita ningún dato manual (a diferencia del cron de resultados de golf,
+-- esta función es SQL puro, no llama a ninguna URL externa). Antes había
+-- que programarla a mano desde Supabase; ya no hace falta.
 create or replace function public.consolidar_salas_incompletas()
 returns void
 language plpgsql
@@ -706,7 +722,12 @@ declare
   movidos int;
 begin
   for grupo in
-    select distinct deporte, competicion, tipo
+    -- "Exactamente igual" (precisado por Iñi el 30/09) incluye ahora
+    -- también el aforo y el buy-in ("la misma cantidad"), no solo
+    -- deporte + competición + tipo — dos mesas del mismo tipo pero con
+    -- distinto número de plazas o distinto importe de entrada nunca se
+    -- fusionan entre sí.
+    select distinct deporte, competicion, tipo, aforo, buy_in
     from public.salas
     where fecha_limite_inscripcion is not null
       and fecha_limite_inscripcion <= now()
@@ -723,6 +744,7 @@ begin
       from public.salas s
       join public.equipos e on e.sala_id = s.id
       where s.deporte = grupo.deporte and s.competicion = grupo.competicion and s.tipo = grupo.tipo
+        and s.aforo = grupo.aforo and s.buy_in = grupo.buy_in
         and s.fecha_limite_inscripcion <= now() and s.procesada_cierre_en is null
       group by s.id, s.aforo
       having count(e.id) < s.aforo
@@ -735,6 +757,7 @@ begin
       update public.salas
         set procesada_cierre_en = now()
         where deporte = grupo.deporte and competicion = grupo.competicion and tipo = grupo.tipo
+          and aforo = grupo.aforo and buy_in = grupo.buy_in
           and fecha_limite_inscripcion <= now() and procesada_cierre_en is null;
       continue;
     end if;
@@ -747,6 +770,7 @@ begin
       from public.salas s
       join public.equipos e on e.sala_id = s.id
       where s.deporte = grupo.deporte and s.competicion = grupo.competicion and s.tipo = grupo.tipo
+        and s.aforo = grupo.aforo and s.buy_in = grupo.buy_in
         and s.id <> destino_id
         and s.fecha_limite_inscripcion <= now() and s.procesada_cierre_en is null
       group by s.id, s.aforo
@@ -764,6 +788,7 @@ begin
       join public.inscripciones i on i.equipo_id = e.id and i.estado = 'activa'
       join public.salas s on s.id = e.sala_id
       where s.deporte = grupo.deporte and s.competicion = grupo.competicion and s.tipo = grupo.tipo
+        and s.aforo = grupo.aforo and s.buy_in = grupo.buy_in
         and s.id <> destino_id
         and s.fecha_limite_inscripcion <= now() and s.procesada_cierre_en is null
       order by i.fecha asc
@@ -796,6 +821,7 @@ begin
     update public.salas s
       set estado = 'finalizada', procesada_cierre_en = now()
       where s.deporte = grupo.deporte and s.competicion = grupo.competicion and s.tipo = grupo.tipo
+        and s.aforo = grupo.aforo and s.buy_in = grupo.buy_in
         and s.id <> destino_id
         and s.fecha_limite_inscripcion <= now() and s.procesada_cierre_en is null;
 
@@ -1229,6 +1255,51 @@ $$;
 
 revoke all on function public.equipos_porra_clasificacion(uuid) from public;
 grant execute on function public.equipos_porra_clasificacion(uuid) to authenticated;
+
+-- Equipos participantes de una mesa Drafters CON su plantilla (nuevo,
+-- 30/09) — para la pantalla real de "Clasificación en directo" de las
+-- mesas (app/salas/[id]/clasificacion/page.tsx), mismo criterio que
+-- equipos_porra_clasificacion() de arriba: solo devuelve filas una vez la
+-- mesa ha "empezado" (fecha límite de inscripción ya pasada, o mesa
+-- finalizada) — antes de eso, lista vacía. A diferencia de las porras, en
+-- una mesa el equipo no tiene nombre propio (equipos.nombre_equipo es
+-- siempre null aquí — ver el comentario de la tabla equipos): el nombre
+-- mostrado es el nombre de usuario del dueño, numerado en números romanos
+-- si tiene más de un equipo en la misma mesa (solo posible en Maratón) —
+-- mismo criterio exacto que participantes_sala() más arriba.
+create or replace function public.equipos_sala_clasificacion(p_sala_id uuid)
+returns table (equipo_id uuid, nombre text, jugadores jsonb, created_at timestamptz)
+language sql
+security definer set search_path = public
+stable
+as $$
+  select
+    e.id,
+    case when e.rn = 1 then e.base_nombre else e.base_nombre || ' (' || public.numero_romano(e.rn::int) || ')' end,
+    to_jsonb(e.jugadores),
+    e.created_at
+  from (
+    select
+      eq.id,
+      eq.jugadores,
+      eq.created_at,
+      coalesce(p.nombre_usuario, 'jugador-' || replace(p.id::text, '-', '')) as base_nombre,
+      row_number() over (partition by eq.usuario_id order by eq.created_at asc) as rn
+    from public.equipos eq
+    join public.inscripciones i on i.equipo_id = eq.id
+    join public.perfiles p on p.id = eq.usuario_id
+    where eq.sala_id = p_sala_id and i.estado <> 'reembolsada'
+  ) e
+  where exists (
+    select 1 from public.salas s
+    where s.id = p_sala_id
+      and (s.estado = 'finalizada' or (s.fecha_limite_inscripcion is not null and s.fecha_limite_inscripcion <= now()))
+  )
+  order by e.created_at asc;
+$$;
+
+revoke all on function public.equipos_sala_clasificacion(uuid) from public;
+grant execute on function public.equipos_sala_clasificacion(uuid) to authenticated;
 
 -- ============================================================================
 -- INSCRIBIRSE EN UNA SALA / EN UNA PORRA (draft: elegir equipo y pagar)
@@ -2152,7 +2223,7 @@ grant execute on function public.recargar_por_video(uuid) to authenticated;
 create table if not exists public.eventos_actividad (
   id uuid primary key default gen_random_uuid(),
   usuario_id uuid not null references public.perfiles(id) on delete cascade,
-  tipo text not null check (tipo in ('login', 'inscripcion', 'recarga')),
+  tipo text not null check (tipo in ('login', 'inscripcion', 'recarga', 'premio')),
   -- Detalle libre según el tipo — en 'inscripcion', algo como {"modo":
   -- "sala", "nombre": "Duelo Golf #4"}; en 'recarga' (añadido 28/09, pedido
   -- de Iñi), {"tipo_recarga": "gratuita"} o {"tipo_recarga": "video"} — así
@@ -2169,8 +2240,13 @@ create table if not exists public.eventos_actividad (
 -- da Postgres a un check puesto en línea sobre una columna: `<tabla>_<
 -- columna>_check`). Si la tabla se crea nueva de cero, este bloque no hace
 -- nada (la restricción ya sale bien puesta desde el create table).
+-- 'premio' añadido el 29/09 (liquidación de premios) — se inserta
+-- directamente desde liquidar_evento() (no a través de
+-- registrar_evento_actividad(), porque el evento es del usuario GANADOR, no
+-- del admin que confirma el reparto; liquidar_evento() es security definer
+-- así que puede escribir en la tabla sin pasar por RLS).
 alter table public.eventos_actividad drop constraint if exists eventos_actividad_tipo_check;
-alter table public.eventos_actividad add constraint eventos_actividad_tipo_check check (tipo in ('login', 'inscripcion', 'recarga'));
+alter table public.eventos_actividad add constraint eventos_actividad_tipo_check check (tipo in ('login', 'inscripcion', 'recarga', 'premio'));
 
 create index if not exists eventos_actividad_usuario_idx on public.eventos_actividad (usuario_id);
 create index if not exists eventos_actividad_creado_idx on public.eventos_actividad (creado_en desc);
@@ -2374,6 +2450,425 @@ create policy "resultados_golf_hoyo_admin_todo" on public.resultados_golf_hoyo
 -- hiciera falta corregir un dato a mano desde el propio SQL Editor.
 
 -- ============================================================================
+-- LIQUIDACIÓN DE PREMIOS (nuevo, 29/09)
+-- ============================================================================
+-- Pedido de Iñi: "hay que implementar que... cuando una porra o una mesa
+-- drafter acaba, hay que repartir esos pagos... diseña lo que haga falta".
+--
+-- Cuándo se considera "acabada" una sala/porra: a partir de ahora, ese mismo
+-- momento es el de la liquidación. No hay un estado intermedio de "ya
+-- terminó pero todavía no se ha pagado" — es el propio admin quien decide,
+-- desde la pantalla nueva /admin/pagos-pendientes, que los resultados ya
+-- están completos y confirma el reparto (pedido explícito de Iñi: "opción 1
+-- [revisar y confirmar a mano], pero en cuanto nos aseguremos que todo está
+-- funcionando bien, lo cambiaremos a automático"). Al confirmar se llama a
+-- liquidar_evento() (más abajo), que en una sola transacción: reparte el
+-- dinero, dejan constancia en movimientos/eventos_actividad/notificaciones,
+-- guarda la posición final de cada equipo, y por fin marca
+-- estado = 'finalizada' en la sala o porra — ese es el momento exacto en que
+-- pasa a estar "acabada" de verdad.
+--
+-- Preparado para más adelante hacerse automático sin rediseñar nada: cuando
+-- Iñi lo pida, un cron (mismo patrón que ya usa la sincronización de golf en
+-- vivo — pg_cron/pg_net llamando a una ruta protegida con CRON_SECRET, o esa
+-- misma ruta llamando directamente a esta función con la clave de servicio)
+-- puede llamar a liquidar_evento() en vez de un clic del admin — la función
+-- ya acepta llamadas de auth.role() = 'service_role' además de un admin
+-- logueado, así que no hará falta tocar esta parte del esquema, solo montar
+-- la ruta/cron que decida cuándo llamarla.
+--
+-- Desempates (pedido explícito de Iñi): "en caso de que dos puestos estén
+-- empatados, se repartirán el premio entre todos... el premio de los
+-- puestos que les corresponden se reparte entre los empatados". Este cálculo
+-- (agrupar posiciones empatadas y repartir a partes iguales la suma de sus
+-- tramos) se hace en el cliente, en lib/repartoPremios.ts — liquidar_evento()
+-- solo APLICA el resultado ya calculado (recibe el reparto final en
+-- p_reparto), no lo calcula él mismo, porque el criterio de "quién va en qué
+-- puesto" depende del tipo de sala/porra (puntos de golf/fútbol/tenis,
+-- aciertos de la porra de fútbol, etc.) y ya vive en TypeScript.
+create table if not exists public.liquidaciones (
+  id uuid primary key default gen_random_uuid(),
+  tipo text not null check (tipo in ('sala', 'porra')),
+  sala_id uuid references public.salas (id) on delete cascade,
+  porra_id uuid references public.porras (id) on delete cascade,
+  -- Copia exacta del reparto aplicado (equipo_id/importe/posición de cada
+  -- equipo premiado) — queda guardado tal cual para poder consultarlo
+  -- después sin tener que reconstruirlo a partir de movimientos.
+  reparto jsonb not null,
+  total_repartido numeric(10, 2) not null default 0,
+  liquidado_por uuid references public.perfiles (id),
+  creado_en timestamptz not null default now(),
+  constraint liquidacion_referencia_valida check (
+    (tipo = 'sala' and sala_id is not null and porra_id is null)
+    or
+    (tipo = 'porra' and porra_id is not null and sala_id is null)
+  )
+);
+
+-- Un único índice único por sala/porra: es la guarda que impide pagar dos
+-- veces la misma sala/porra (liquidar_evento() comprueba esto también a
+-- mano antes de nada, pero el índice es la última línea de defensa a nivel
+-- de base de datos, por si dos peticiones llegaran a la vez).
+create unique index if not exists liquidaciones_sala_unico on public.liquidaciones (sala_id) where sala_id is not null;
+create unique index if not exists liquidaciones_porra_unico on public.liquidaciones (porra_id) where porra_id is not null;
+
+alter table public.liquidaciones enable row level security;
+drop policy if exists "liquidaciones_admin_todo" on public.liquidaciones;
+create policy "liquidaciones_admin_todo" on public.liquidaciones
+  for all using (public.es_admin()) with check (public.es_admin());
+
+-- Aplica de una vez, en una sola transacción, el reparto de premios de una
+-- sala o porra ya calculado en el cliente: acredita el saldo de cada
+-- ganador, deja constancia en movimientos ('premio')/eventos_actividad
+-- ('premio')/notificaciones ('resultado'), guarda la posición final de cada
+-- equipo (equipos.posicion_final) y marca la sala/porra como 'finalizada'.
+-- Bloqueada por el índice único de arriba contra un doble pago.
+--
+-- p_reparto: array de objetos, uno por CADA equipo al que se le asigna una
+-- posición final (gane premio o no) — p.ej.
+-- [{"equipo_id": "...", "posicion": 1, "importe": 45.00},
+--  {"equipo_id": "...", "posicion": 3, "importe": 0}, ...]
+-- Solo se acredita saldo/se genera movimiento+notificación en las filas con
+-- importe > 0 — un equipo con importe 0 solo sirve para dejar constancia de
+-- en qué puesto quedó.
+create or replace function public.liquidar_evento(
+  p_tipo text,
+  p_id uuid,
+  p_reparto jsonb
+)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_item jsonb;
+  v_equipo record;
+  v_importe numeric;
+  v_posicion int;
+  v_total numeric := 0;
+  v_nombre_evento text;
+begin
+  if not (public.es_admin() or auth.role() = 'service_role') then
+    raise exception 'No autorizado';
+  end if;
+
+  if p_tipo not in ('sala', 'porra') then
+    raise exception 'Tipo de liquidación no válido: %', p_tipo;
+  end if;
+
+  if exists (
+    select 1 from public.liquidaciones l
+    where (p_tipo = 'sala' and l.sala_id = p_id) or (p_tipo = 'porra' and l.porra_id = p_id)
+  ) then
+    raise exception 'Esto ya se había liquidado antes — no se puede repartir dos veces';
+  end if;
+
+  if p_tipo = 'sala' then
+    select nombre into v_nombre_evento from public.salas where id = p_id for update;
+  else
+    select major into v_nombre_evento from public.porras where id = p_id for update;
+  end if;
+  if v_nombre_evento is null then
+    raise exception 'No se encuentra lo que se quiere liquidar (tipo=%, id=%)', p_tipo, p_id;
+  end if;
+
+  if p_reparto is null or jsonb_array_length(p_reparto) = 0 then
+    raise exception 'No hay ningún reparto que aplicar';
+  end if;
+
+  for v_item in select * from jsonb_array_elements(p_reparto)
+  loop
+    select e.*, p.nombre_usuario as apodo into v_equipo
+      from public.equipos e
+      join public.perfiles p on p.id = e.usuario_id
+      where e.id = (v_item->>'equipo_id')::uuid
+      for update of e;
+
+    if not found then
+      raise exception 'Equipo % no encontrado', v_item->>'equipo_id';
+    end if;
+    if (p_tipo = 'sala' and v_equipo.sala_id is distinct from p_id) or (p_tipo = 'porra' and v_equipo.porra_id is distinct from p_id) then
+      raise exception 'El equipo % no pertenece a esta liquidación', v_equipo.id;
+    end if;
+
+    v_importe := coalesce((v_item->>'importe')::numeric, 0);
+    v_posicion := nullif(v_item->>'posicion', '')::int;
+
+    update public.equipos set posicion_final = v_posicion where id = v_equipo.id;
+
+    if v_importe > 0 then
+      update public.perfiles set saldo_simulado = saldo_simulado + v_importe where id = v_equipo.usuario_id;
+
+      insert into public.movimientos (usuario_id, tipo, importe) values (v_equipo.usuario_id, 'premio', v_importe);
+
+      insert into public.eventos_actividad (usuario_id, tipo, detalle) values (
+        v_equipo.usuario_id,
+        'premio',
+        jsonb_build_object(
+          'modo', p_tipo,
+          'nombre', v_nombre_evento,
+          'equipo', coalesce(v_equipo.nombre_equipo, v_equipo.apodo),
+          'posicion', v_posicion,
+          'importe', v_importe
+        )
+      );
+
+      insert into public.notificaciones (usuario_id, tipo, titulo, mensaje, link) values (
+        v_equipo.usuario_id,
+        'resultado',
+        '¡Has ganado un premio!',
+        'Tu equipo "' || coalesce(v_equipo.nombre_equipo, v_equipo.apodo, '') || '" ha quedado ' ||
+          coalesce(v_posicion::text || 'º', 'clasificado') || ' en "' || v_nombre_evento || '" y has ganado ' ||
+          to_char(v_importe, 'FM999999990.00') || ' €.',
+        case when p_tipo = 'sala' then '/salas/' || p_id else '/porras/' || p_id end
+      );
+
+      v_total := v_total + v_importe;
+    end if;
+  end loop;
+
+  if p_tipo = 'sala' then
+    update public.salas set estado = 'finalizada' where id = p_id;
+  else
+    update public.porras set estado = 'finalizada' where id = p_id;
+  end if;
+
+  insert into public.liquidaciones (tipo, sala_id, porra_id, reparto, total_repartido, liquidado_por)
+  values (
+    p_tipo,
+    case when p_tipo = 'sala' then p_id else null end,
+    case when p_tipo = 'porra' then p_id else null end,
+    p_reparto,
+    v_total,
+    auth.uid()
+  );
+end;
+$$;
+
+revoke all on function public.liquidar_evento(text, uuid, jsonb) from public;
+grant execute on function public.liquidar_evento(text, uuid, jsonb) to authenticated, service_role;
+
+-- ============================================================================
+-- PORRA DE FÚTBOL POR JORNADAS (nuevo, 29/09)
+-- ============================================================================
+-- Pedido de Iñi: una porra de fútbol de Primera División por cada jornada de
+-- liga. El admin carga los 10 partidos de la jornada desde una pantalla
+-- nueva de superadmin (/admin/porras-futbol, con la porra ya creada con
+-- formato = 'futbol_jornada', precio = 2.00€); cada usuario pronostica 1/X/2
+-- en los 10 partidos y se apunta cuantas veces quiera (cada apunte es un
+-- "equipo" más, igual que las porras clásicas — pedido de Iñi: "cada
+-- jugador, cada usuario se puede participar todas las veces que quiera").
+-- Los resultados reales se marcan a mano por el admin, partido a partido, en
+-- la misma pantalla, una vez jugados (decisión de Iñi: "lo marcas tú a
+-- mano", en vez de conectar una API de resultados de fútbol en directo).
+--
+-- Nombre automático del equipo (pedido de Iñi, con su propio ejemplo: "yo en
+-- mi usuario que es Sindeler... el primer equipo será Sindeler, la segunda
+-- Sindeler 2 en números romanos, la tercera Sindeler 3 en números
+-- romanos"): SIN paréntesis, a propósito distinto de la numeración de
+-- Maratón (que sí usa " (II)", ver numero_romano() más arriba) — aquí lo
+-- calcula inscribirse_en_porra_futbol() más abajo, reutilizando la misma
+-- numero_romano().
+--
+-- Escudos de los equipos: el admin puede pegar una URL de imagen al cargar
+-- cada partido (escudo_local_url/escudo_visitante_url, opcionales) — Drafters
+-- no incluye ni aloja escudos oficiales de los clubes (ver
+-- DRAFTERS_Costes_Business_Plan.md: el uso de escudos/fotos con licencia
+-- queda para una fase de pago posterior), así que si el admin no pone URL la
+-- pantalla pinta un círculo con las iniciales del equipo en vez del escudo.
+create table if not exists public.partidos_porra_futbol (
+  id uuid primary key default gen_random_uuid(),
+  porra_id uuid not null references public.porras (id) on delete cascade,
+  orden int not null check (orden between 1 and 10),
+  equipo_local text not null,
+  equipo_visitante text not null,
+  escudo_local_url text,
+  escudo_visitante_url text,
+  -- Resultado real marcado a mano por el admin una vez jugado el partido —
+  -- null mientras no se haya jugado/marcado todavía.
+  resultado_real text check (resultado_real in ('1', 'x', '2')),
+  created_at timestamptz not null default now(),
+  unique (porra_id, orden)
+);
+
+alter table public.partidos_porra_futbol enable row level security;
+drop policy if exists "partidos_porra_futbol_select_publico" on public.partidos_porra_futbol;
+create policy "partidos_porra_futbol_select_publico" on public.partidos_porra_futbol
+  for select using (true);
+drop policy if exists "partidos_porra_futbol_admin_todo" on public.partidos_porra_futbol;
+create policy "partidos_porra_futbol_admin_todo" on public.partidos_porra_futbol
+  for all using (public.es_admin()) with check (public.es_admin());
+
+-- Pronóstico de un equipo (apunte) para un partido concreto — un equipo de
+-- porra de fútbol pronostica los 10 partidos de una vez, al inscribirse (ver
+-- inscribirse_en_porra_futbol() más abajo); no hay pantalla de editar
+-- pronósticos ya enviados en esta primera vuelta.
+create table if not exists public.predicciones_porra_futbol (
+  id uuid primary key default gen_random_uuid(),
+  equipo_id uuid not null references public.equipos (id) on delete cascade,
+  partido_id uuid not null references public.partidos_porra_futbol (id) on delete cascade,
+  prediccion text not null check (prediccion in ('1', 'x', '2')),
+  creado_en timestamptz not null default now(),
+  unique (equipo_id, partido_id)
+);
+
+create index if not exists predicciones_porra_futbol_equipo_idx on public.predicciones_porra_futbol (equipo_id);
+create index if not exists predicciones_porra_futbol_partido_idx on public.predicciones_porra_futbol (partido_id);
+
+alter table public.predicciones_porra_futbol enable row level security;
+drop policy if exists "predicciones_porra_futbol_select_propio" on public.predicciones_porra_futbol;
+create policy "predicciones_porra_futbol_select_propio" on public.predicciones_porra_futbol
+  for select using (
+    public.es_admin()
+    or exists (select 1 from public.equipos e where e.id = predicciones_porra_futbol.equipo_id and e.usuario_id = auth.uid())
+  );
+drop policy if exists "predicciones_porra_futbol_admin_todo" on public.predicciones_porra_futbol;
+create policy "predicciones_porra_futbol_admin_todo" on public.predicciones_porra_futbol
+  for all using (public.es_admin()) with check (public.es_admin());
+-- Sin política de insert para el usuario normal a propósito: los pronósticos
+-- se escriben SIEMPRE a través de inscribirse_en_porra_futbol() (security
+-- definer, más abajo), nunca sueltos desde el cliente.
+
+-- Inscribe un nuevo equipo (= un apunte más) en una porra de fútbol: valida
+-- que haya un pronóstico para cada uno de los partidos cargados, calcula el
+-- nombre automático del equipo (Sindeler / Sindeler II / Sindeler III...),
+-- cobra el precio de la porra y guarda los 10 pronósticos. Mismo patrón que
+-- inscribirse_en_porra() (arriba) pero sin jugadores ni presupuesto.
+create or replace function public.inscribirse_en_porra_futbol(
+  p_porra_id uuid,
+  -- [{"partido_id": "...", "prediccion": "1"|"x"|"2"}, ...] — uno por cada
+  -- partido cargado en la porra.
+  p_predicciones jsonb
+)
+returns public.equipos
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_porra record;
+  v_saldo numeric;
+  v_equipo public.equipos;
+  v_base_nombre text;
+  v_num_equipos_previos int;
+  v_nombre_final text;
+  v_num_partidos int;
+  v_item jsonb;
+begin
+  if auth.uid() is null then
+    raise exception 'No autenticado';
+  end if;
+
+  select * into v_porra from public.porras where id = p_porra_id for update;
+  if not found then
+    raise exception 'Porra no encontrada';
+  end if;
+  if v_porra.formato <> 'futbol_jornada' then
+    raise exception 'Esta porra no es de fútbol';
+  end if;
+  if v_porra.estado = 'finalizada' then
+    raise exception 'Esta porra ya no admite inscripciones';
+  end if;
+  if v_porra.fecha_limite_inscripcion is not null and v_porra.fecha_limite_inscripcion <= now() then
+    raise exception 'El plazo de inscripción de esta porra ya ha cerrado';
+  end if;
+
+  select count(*) into v_num_partidos from public.partidos_porra_futbol where porra_id = p_porra_id;
+  if v_num_partidos = 0 then
+    raise exception 'Esta porra todavía no tiene partidos cargados';
+  end if;
+  if p_predicciones is null or jsonb_array_length(p_predicciones) <> v_num_partidos then
+    raise exception 'Tienes que marcar un pronóstico (1, X o 2) en los % partidos de la jornada', v_num_partidos;
+  end if;
+
+  -- Nombre de equipo automático: "NombreUsuario" para el primer apunte de
+  -- este usuario en esta porra, "NombreUsuario II"/"III"... para los
+  -- siguientes (sin paréntesis, a propósito, ver el comentario de la
+  -- sección de arriba).
+  select coalesce(nombre_usuario, 'jugador-' || replace(auth.uid()::text, '-', '')) into v_base_nombre
+    from public.perfiles where id = auth.uid();
+
+  select count(*) into v_num_equipos_previos from public.equipos
+    where usuario_id = auth.uid() and porra_id = p_porra_id;
+
+  v_nombre_final := case
+    when v_num_equipos_previos = 0 then v_base_nombre
+    else v_base_nombre || ' ' || public.numero_romano(v_num_equipos_previos + 1)
+  end;
+
+  select saldo_simulado into v_saldo from public.perfiles where id = auth.uid() for update;
+  if v_saldo < v_porra.precio then
+    raise exception 'Saldo insuficiente para unirte a esta porra';
+  end if;
+
+  insert into public.equipos (usuario_id, modo, porra_id, nombre_equipo, jugadores, gasto_total)
+  values (auth.uid(), 'porra', p_porra_id, v_nombre_final, '[]'::jsonb, 0)
+  returning * into v_equipo;
+
+  for v_item in select * from jsonb_array_elements(p_predicciones)
+  loop
+    if (v_item->>'prediccion') not in ('1', 'x', '2') then
+      raise exception 'Pronóstico no válido: %', v_item->>'prediccion';
+    end if;
+    if not exists (
+      select 1 from public.partidos_porra_futbol
+      where id = (v_item->>'partido_id')::uuid and porra_id = p_porra_id
+    ) then
+      raise exception 'Alguno de los partidos no pertenece a esta porra';
+    end if;
+
+    insert into public.predicciones_porra_futbol (equipo_id, partido_id, prediccion)
+    values (v_equipo.id, (v_item->>'partido_id')::uuid, v_item->>'prediccion');
+  end loop;
+
+  insert into public.inscripciones (equipo_id, importe) values (v_equipo.id, v_porra.precio);
+  update public.perfiles set saldo_simulado = saldo_simulado - v_porra.precio where id = auth.uid();
+
+  return v_equipo;
+end;
+$$;
+
+revoke all on function public.inscribirse_en_porra_futbol(uuid, jsonb) from public;
+grant execute on function public.inscribirse_en_porra_futbol(uuid, jsonb) to authenticated;
+
+-- Clasificación de una porra de fútbol (aciertos sobre los partidos ya
+-- resueltos) — para la pantalla de clasificación/premios y para que
+-- /admin/pagos-pendientes pueda proponer el reparto automáticamente. Nunca
+-- expone los pronósticos en sí de cada equipo (solo el recuento de
+-- aciertos), así nadie puede ver el pronóstico de un rival en un partido
+-- que todavía no se ha jugado.
+create or replace function public.futbol_porra_clasificacion(p_porra_id uuid)
+returns table (
+  equipo_id uuid,
+  nombre_equipo text,
+  aciertos int,
+  partidos_resueltos int,
+  total_partidos int,
+  created_at timestamptz
+)
+language sql
+security definer set search_path = public
+stable
+as $$
+  select
+    e.id,
+    e.nombre_equipo,
+    count(*) filter (where pp.resultado_real is not null and pf.prediccion = pp.resultado_real)::int as aciertos,
+    count(*) filter (where pp.resultado_real is not null)::int as partidos_resueltos,
+    (select count(*) from public.partidos_porra_futbol where porra_id = p_porra_id)::int as total_partidos,
+    e.created_at
+  from public.equipos e
+  join public.inscripciones i on i.equipo_id = e.id and i.estado <> 'reembolsada'
+  left join public.predicciones_porra_futbol pf on pf.equipo_id = e.id
+  left join public.partidos_porra_futbol pp on pp.id = pf.partido_id
+  where e.porra_id = p_porra_id
+  group by e.id, e.nombre_equipo, e.created_at
+  order by aciertos desc, e.created_at asc;
+$$;
+
+revoke all on function public.futbol_porra_clasificacion(uuid) from public;
+grant execute on function public.futbol_porra_clasificacion(uuid) to authenticated;
+
+-- ============================================================================
 -- CONVERTIR TU CUENTA EN SUPERADMINISTRADOR
 -- ============================================================================
 -- Activo (sin comentar): cada vez que se vuelva a pegar y ejecutar este
@@ -2438,4 +2933,24 @@ select cron.schedule(
     timeout_milliseconds := 55000
   ) as request_id;
   $cron$
+);
+
+-- ============================================================================
+-- CRON DE CONSOLIDACIÓN DE MESAS — ningún dato manual, se puede pegar tal cual
+-- ============================================================================
+-- Pedido de Iñi (30/09): que la fusión de mesas idénticas sin llenar
+-- (public.consolidar_salas_incompletas(), ver más arriba) sea automática de
+-- verdad, no algo que haya que lanzar a mano. A diferencia del cron de
+-- arriba, esta función es SQL puro dentro de la propia base de datos — no
+-- llama a ninguna URL de la app, así que no necesita CRON_SECRET ni
+-- dominio: se puede pegar y ejecutar exactamente igual que el resto de este
+-- archivo, sin ningún paso previo.
+--
+-- Se ejecuta cada 5 minutos, igual que el de resultados de golf. Para
+-- comprobarlo o quitarlo, mismos comandos que arriba con el nombre
+-- 'consolidar-salas-incompletas'.
+select cron.schedule(
+  'consolidar-salas-incompletas',
+  '*/5 * * * *',
+  $$select public.consolidar_salas_incompletas();$$
 );

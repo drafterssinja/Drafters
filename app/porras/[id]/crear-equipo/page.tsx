@@ -9,6 +9,7 @@ import { formatEuros, inicialesJugador } from '@/lib/salaShared';
 import { GRUPO_PORRA_LABELS, ORDEN_GRUPOS, COLOR_GRUPO, type GrupoPorra } from '@/lib/porraGrupos';
 import { EQUIPO_PRESUPUESTO, TAMANO_EQUIPO_GOLF_TENIS, colorPresupuesto } from '@/lib/draftConfig';
 import { PorraFormato, PORRA_FORMATO_LABELS, PORRA_FORMATO_COLOR } from '@/lib/porraFormato';
+import EscudoEquipoFutbol from '@/components/EscudoEquipoFutbol';
 
 // ============================================================================
 // CREAR EQUIPO EN UNA PORRA — dos formatos (isPorraEquipo + isPorraConfirmar
@@ -38,6 +39,21 @@ import { PorraFormato, PORRA_FORMATO_LABELS, PORRA_FORMATO_COLOR } from '@/lib/p
 
 type PorraRow = { id: string; major: string; precio: number; competicion: string | null; estado: string; formato: PorraFormato };
 type JugadorRow = { id: string; nombre: string; grupo_porra: GrupoPorra | null; precio: number };
+// Porra de fútbol por jornadas (29/09) — sin jugadores que elegir, 10
+// partidos públicos (iguales para todos) a pronosticar (1/X/2). El nombre
+// del equipo NO se pide aquí (se calcula solo, "Sindeler"/"Sindeler
+// II"/..., ver inscribirse_en_porra_futbol() en drafters-schema.sql), así
+// que esta porra tampoco tiene un paso de "editar equipo" ya inscrito en
+// esta primera vuelta (pedido de Iñi: inscripción simple, sin editar).
+type PartidoFutbol = {
+  id: string;
+  orden: number;
+  equipo_local: string;
+  equipo_visitante: string;
+  escudo_local_url: string | null;
+  escudo_visitante_url: string | null;
+};
+type PrediccionFutbol = '1' | 'x' | '2';
 
 const COMODIN_COLOR = '#2DD4BF';
 
@@ -63,6 +79,10 @@ export default function CrearEquipoPorraPage() {
   const [activeGroup, setActiveGroup] = useState<GrupoPorra | 'comodin' | null>(null);
   // Formato "presupuesto": hasta 5 jugadores libres, sin grupos.
   const [selectedPresupuesto, setSelectedPresupuesto] = useState<string[]>([]);
+  // Formato "futbol_jornada": los 10 partidos de la jornada + mi pronóstico
+  // de cada uno (partido_id -> '1'|'x'|'2').
+  const [partidosFutbol, setPartidosFutbol] = useState<PartidoFutbol[]>([]);
+  const [prediccionesFutbol, setPrediccionesFutbol] = useState<Map<string, PrediccionFutbol>>(new Map());
   // Paso previo "info" (28/09): se salta al editar un equipo ya existente.
   const [step, setStep] = useState<'info' | 'draft' | 'confirm'>(modoEdicion ? 'draft' : 'info');
   const [cargando, setCargando] = useState(true);
@@ -97,13 +117,27 @@ export default function CrearEquipoPorraPage() {
       }
       const porraRow = porraData as PorraRow;
 
+      // La porra de fútbol todavía no está visible para usuarios normales
+      // (oculta a propósito mientras se termina de probar). Se bloquea
+      // también el acceso directo por URL a esta pantalla. (29/09)
+      if (porraRow.formato === 'futbol_jornada') {
+        setError('No se ha encontrado esta porra.');
+        setCargando(false);
+        return;
+      }
+
       if (porraRow.estado === 'finalizada') {
         // replace, no push — ver el mismo comentario en salas/[id]/crear-equipo (bug de la flecha de volver, 23/09).
         router.replace(`/porras/${porraId}`);
         return;
       }
 
-      const [{ data: jugData }, { data: equipoEditandoData }] = await Promise.all([
+      // (Tras el bloqueo de arriba, formato aquí nunca es 'futbol_jornada'
+      // en la práctica; se compara como string para no tocar el resto de
+      // la lógica de fútbol ya desarrollada más abajo.)
+      const esFutbolRow = (porraRow.formato as string) === 'futbol_jornada';
+
+      const [{ data: jugData }, { data: equipoEditandoData }, { data: partidosFutbolData }] = await Promise.all([
         porraRow.competicion
           ? supabase.from('jugadores').select('id,nombre,grupo_porra,precio').eq('deporte', 'golf').eq('competicion', porraRow.competicion)
           : Promise.resolve({ data: [] as JugadorRow[] }),
@@ -116,6 +150,9 @@ export default function CrearEquipoPorraPage() {
               .eq('usuario_id', session.user.id)
               .maybeSingle()
           : Promise.resolve({ data: null as { id: string; nombre_equipo: string | null; jugadores: string[] } | null }),
+        esFutbolRow
+          ? supabase.from('partidos_porra_futbol').select('*').eq('porra_id', porraId).order('orden', { ascending: true })
+          : Promise.resolve({ data: [] as PartidoFutbol[] }),
       ]);
 
       if (!activo) return;
@@ -123,6 +160,7 @@ export default function CrearEquipoPorraPage() {
       const jugRows = ((jugData as JugadorRow[]) ?? []).filter((j) => porraRow.formato === 'clasica' ? j.grupo_porra !== null : true);
       setPorra(porraRow);
       setJugadores(jugRows);
+      setPartidosFutbol((partidosFutbolData as PartidoFutbol[]) ?? []);
 
       if (equipoEditandoId) {
         const equipoEditando = equipoEditandoData as { id: string; nombre_equipo: string | null; jugadores: string[] } | null;
@@ -355,6 +393,34 @@ export default function CrearEquipoPorraPage() {
   }
 
   const esPresupuesto = porra.formato === 'presupuesto';
+  const esFutbol = porra.formato === 'futbol_jornada';
+  const partidosConPronostico = partidosFutbol.filter((p) => prediccionesFutbol.has(p.id)).length;
+  const puedeConfirmarFutbol = partidosFutbol.length > 0 && partidosConPronostico === partidosFutbol.length;
+
+  function elegirPronostico(partidoId: string, pronostico: PrediccionFutbol) {
+    setPrediccionesFutbol((prev) => {
+      const nuevo = new Map(prev);
+      if (nuevo.get(partidoId) === pronostico) nuevo.delete(partidoId);
+      else nuevo.set(partidoId, pronostico);
+      return nuevo;
+    });
+  }
+
+  async function confirmarInscripcionFutbol() {
+    setEnviando(true);
+    setErrorEnvio(null);
+    const p_predicciones = partidosFutbol.map((p) => ({ partido_id: p.id, prediccion: prediccionesFutbol.get(p.id) }));
+    const { error: rpcError } = await supabase.rpc('inscribirse_en_porra_futbol', { p_porra_id: porraId, p_predicciones });
+    if (rpcError) {
+      setErrorEnvio(traducirError(rpcError.message));
+      setEnviando(false);
+      return;
+    }
+    if (porra) {
+      await supabase.rpc('registrar_evento_actividad', { p_tipo: 'inscripcion', p_detalle: { modo: 'porra', nombre: porra.major } });
+    }
+    router.replace(`/porras/${porraId}`);
+  }
 
   return (
     <main style={S.mainReset}>
@@ -373,16 +439,76 @@ export default function CrearEquipoPorraPage() {
                 <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#3DDC84' }}>{porra.major}</span>
                 <h1 style={{ fontSize: 24, fontWeight: 800, color: S.TEXT }}>{modoEdicion ? 'Edita tu equipo' : 'Crea tu equipo'}</h1>
                 <p style={{ fontSize: 13, color: S.MUTED_2 }}>
-                  {esPresupuesto ? `Elige ${TAMANO_EQUIPO_GOLF_TENIS} jugadores dentro de un presupuesto de ${formatEuros(EQUIPO_PRESUPUESTO)}.` : 'Elige un jugador de cada grupo de color, más un comodín de cualquier lista.'}
+                  {esFutbol
+                    ? 'Marca 1, X o 2 en los 10 partidos.'
+                    : esPresupuesto
+                      ? `Elige ${TAMANO_EQUIPO_GOLF_TENIS} jugadores dentro de un presupuesto de ${formatEuros(EQUIPO_PRESUPUESTO)}.`
+                      : 'Elige un jugador de cada grupo de color, más un comodín de cualquier lista.'}
                 </p>
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_2 }}>Nombre del equipo</label>
-                <input type="text" value={nombreEquipo} onChange={(e) => setNombreEquipo(e.target.value)} placeholder="Ej. Los Birdies de Iñi" style={S.input} />
-              </div>
+              {!esFutbol && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_2 }}>Nombre del equipo</label>
+                  <input type="text" value={nombreEquipo} onChange={(e) => setNombreEquipo(e.target.value)} placeholder="Ej. Los Birdies de Iñi" style={S.input} />
+                </div>
+              )}
 
-              {esPresupuesto ? (
+              {esFutbol ? (
+                partidosFutbol.length === 0 ? (
+                  <p style={{ fontSize: 13, color: S.MUTED_2 }}>Esta jornada todavía no tiene partidos cargados.</p>
+                ) : (
+                  <>
+                    <div style={{ position: 'sticky', top: 0, zIndex: 5, background: S.BG, paddingTop: 2, paddingBottom: 6, margin: '0 -20px', paddingLeft: 20, paddingRight: 20 }}>
+                      <div style={{ background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_2 }}>Pronósticos</span>
+                        <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 16, color: puedeConfirmarFutbol ? '#3DDC84' : S.MUTED_3 }}>
+                          {partidosConPronostico}/{partidosFutbol.length}
+                        </span>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {partidosFutbol.map((p) => {
+                        const elegido = prediccionesFutbol.get(p.id);
+                        return (
+                          <div key={p.id} style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '11px 12px', background: S.PANEL, border: `1px solid ${elegido ? 'rgba(61,220,132,0.4)' : '#1E2723'}`, borderRadius: 10 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <EscudoEquipoFutbol nombre={p.equipo_local} url={p.escudo_local_url} size={26} />
+                              <span style={{ flex: 1, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 13, color: S.TEXT, textAlign: 'right' }}>{p.equipo_local}</span>
+                              <span style={{ flexShrink: 0, fontSize: 10, color: S.MUTED_3 }}>vs</span>
+                              <span style={{ flex: 1, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 13, color: S.TEXT }}>{p.equipo_visitante}</span>
+                              <EscudoEquipoFutbol nombre={p.equipo_visitante} url={p.escudo_visitante_url} size={26} />
+                            </div>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                              {(['1', 'x', '2'] as const).map((opcion) => (
+                                <button
+                                  key={opcion}
+                                  type="button"
+                                  onClick={() => elegirPronostico(p.id, opcion)}
+                                  style={{
+                                    flex: 1,
+                                    fontFamily: "'Barlow Condensed', sans-serif",
+                                    fontWeight: 800,
+                                    fontSize: 15,
+                                    padding: '9px 0',
+                                    borderRadius: 8,
+                                    border: `1px solid ${elegido === opcion ? '#3DDC84' : S.BORDER}`,
+                                    background: elegido === opcion ? '#3DDC84' : 'transparent',
+                                    color: elegido === opcion ? '#04140B' : S.MUTED,
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  {opcion.toUpperCase()}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )
+              ) : esPresupuesto ? (
                 jugadores.length === 0 ? (
                   <p style={{ fontSize: 13, color: S.MUTED_2 }}>Todavía no se ha subido el listado de jugadores de este torneo.</p>
                 ) : (
@@ -659,7 +785,11 @@ export default function CrearEquipoPorraPage() {
             </div>
 
             <div style={{ position: 'sticky', bottom: 0, padding: '8px 20px 12px', background: 'linear-gradient(180deg, rgba(11,15,14,0) 0%, #0B0F0E 40%)' }}>
-              {esPresupuesto ? (
+              {esFutbol ? (
+                <button type="button" disabled={!puedeConfirmarFutbol} onClick={() => avanzarPaso('confirm')} style={submitButtonStyle(puedeConfirmarFutbol, '#3DDC84')}>
+                  {puedeConfirmarFutbol ? 'Revisar e inscribirme' : `Faltan ${partidosFutbol.length - partidosConPronostico} pronósticos`}
+                </button>
+              ) : esPresupuesto ? (
                 <button type="button" disabled={!puedeConfirmarPresupuesto} onClick={() => avanzarPaso('confirm')} style={submitButtonStyle(puedeConfirmarPresupuesto, '#3DDC84')}>
                   {!nombreValido
                     ? 'Ponle nombre a tu equipo'
@@ -693,8 +823,25 @@ export default function CrearEquipoPorraPage() {
             </div>
 
             <div style={{ background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>{nombreEquipo.trim()}</span>
-              {esPresupuesto
+              {!esFutbol && (
+                <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>{nombreEquipo.trim()}</span>
+              )}
+              {esFutbol && (
+                <span style={{ fontSize: 11.5, color: S.MUTED_3 }}>El nombre de tu equipo se genera solo (tu usuario, o "usuario II"/"III"... si ya tienes otro en esta jornada).</span>
+              )}
+              {esFutbol
+                ? partidosFutbol.map((p) => (
+                    <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <EscudoEquipoFutbol nombre={p.equipo_local} url={p.escudo_local_url} size={26} />
+                      <span style={{ flex: 1, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 12.5, color: S.TEXT, textAlign: 'right' }}>{p.equipo_local}</span>
+                      <span style={{ flexShrink: 0, minWidth: 26, textAlign: 'center', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 14, color: '#3DDC84' }}>
+                        {(prediccionesFutbol.get(p.id) ?? '—').toString().toUpperCase()}
+                      </span>
+                      <span style={{ flex: 1, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 12.5, color: S.TEXT }}>{p.equipo_visitante}</span>
+                      <EscudoEquipoFutbol nombre={p.equipo_visitante} url={p.escudo_visitante_url} size={26} />
+                    </div>
+                  ))
+                : esPresupuesto
                 ? selectedPresupuesto.map((id) => {
                     const j = jugadoresPorId.get(id);
                     if (!j) return null;
@@ -740,14 +887,19 @@ export default function CrearEquipoPorraPage() {
             </div>
 
             <p style={{ fontSize: 11, lineHeight: 1.5, color: S.MUTED_3, margin: 0 }}>
-              El listado de jugadores es el oficial facilitado por la competición/circuito correspondiente. Drafters
-              no se hace responsable de que algún jugador cause baja de última hora y, por tanto, no puntúe —
-              recomendamos comprobar que los jugadores elegidos siguen confirmados antes de que empiece.
+              {esFutbol
+                ? 'El resultado real de cada partido lo marca el admin a mano en cuanto termina. Una vez inscrito, tu pronóstico no se puede editar — revisa bien antes de confirmar.'
+                : 'El listado de jugadores es el oficial facilitado por la competición/circuito correspondiente. Drafters no se hace responsable de que algún jugador cause baja de última hora y, por tanto, no puntúe — recomendamos comprobar que los jugadores elegidos siguen confirmados antes de que empiece.'}
             </p>
 
             {errorEnvio && <p style={S.errorText}>{errorEnvio}</p>}
 
-            <button type="button" disabled={enviando} onClick={confirmarInscripcion} style={{ ...submitButtonStyle(true, '#3DDC84'), opacity: enviando ? 0.7 : 1, fontSize: 16, padding: 14, minHeight: 44, borderRadius: 10 }}>
+            <button
+              type="button"
+              disabled={enviando}
+              onClick={esFutbol ? confirmarInscripcionFutbol : confirmarInscripcion}
+              style={{ ...submitButtonStyle(true, '#3DDC84'), opacity: enviando ? 0.7 : 1, fontSize: 16, padding: 14, minHeight: 44, borderRadius: 10 }}
+            >
               {enviando ? (modoEdicion ? 'Guardando...' : 'Inscribiendo...') : modoEdicion ? 'Guardar cambios' : 'Confirmar inscripción'}
             </button>
           </div>
@@ -803,7 +955,13 @@ function PorraModoInfoScreen({
           {PORRA_FORMATO_LABELS[formato]}
         </span>
 
-        {formato === 'presupuesto' ? (
+        {formato === 'futbol_jornada' ? (
+          <p style={{ fontSize: 13, lineHeight: 1.55, color: S.MUTED_2, margin: 0 }}>
+            Pronostica el resultado (<strong style={{ color: S.TEXT }}>1</strong>, <strong style={{ color: S.TEXT }}>X</strong> o <strong style={{ color: S.TEXT }}>2</strong>) de los{' '}
+            <strong style={{ color: S.TEXT }}>10 partidos</strong> de la jornada. Tu equipo se llamará automáticamente como tu nombre de usuario (y "II", "III"... si te apuntas más de
+            una vez) — no hace falta ponerle nombre. Puedes apuntarte tantas veces como quieras.
+          </p>
+        ) : formato === 'presupuesto' ? (
           <p style={{ fontSize: 13, lineHeight: 1.55, color: S.MUTED_2, margin: 0 }}>
             En esta porra no hay grupos de color: eliges libremente <strong style={{ color: S.TEXT }}>{TAMANO_EQUIPO_GOLF_TENIS} jugadores</strong>, los que quieras, sin superar un
             presupuesto de <strong style={{ color: '#F0B94D' }}>{formatEuros(EQUIPO_PRESUPUESTO)}</strong>. Cuanto mejor es un jugador, más caro sale — el reto es armar el mejor equipo
@@ -826,7 +984,11 @@ function PorraModoInfoScreen({
           </p>
         )}
         <span style={{ fontSize: 11, color: S.FAINT }}>
-          {formato === 'clasica' ? 'El puesto de cada jugador es siempre el suyo dentro de este torneo, no un ranking mundial absoluto.' : 'El precio de cada jugador es el mismo que se usa en las Mesas Drafters de este torneo.'}
+          {formato === 'futbol_jornada'
+            ? 'El resultado real de cada partido lo marca el admin a mano en cuanto termina — tu clasificación se actualiza sola según aciertes más o menos pronósticos.'
+            : formato === 'clasica'
+              ? 'El puesto de cada jugador es siempre el suyo dentro de este torneo, no un ranking mundial absoluto.'
+              : 'El precio de cada jugador es el mismo que se usa en las Mesas Drafters de este torneo.'}
         </span>
       </div>
 

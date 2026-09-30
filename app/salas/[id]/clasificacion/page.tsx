@@ -1,28 +1,93 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase, Perfil } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
 import AnuncioVideoInline from '@/components/AnuncioVideoInline';
 import * as S from '@/lib/mockupStyles';
-import { formatEuros } from '@/lib/salaShared';
+import { formatEuros, DEPORTE_LABELS, type Deporte } from '@/lib/salaShared';
+import { formatGolfScore, COLOR_TIPO_RESULTADO, ETIQUETA_TIPO_RESULTADO, type TipoResultadoHoyo } from '@/lib/golfScoring';
 
 // ============================================================================
-// CLASIFICACIÓN EN DIRECTO — todavía por construir
+// CLASIFICACIÓN EN DIRECTO DE UNA MESA DRAFTERS (nuevo, 30/09)
 // ============================================================================
-// Requiere el motor de puntuación en directo (resultados_evento) y la
-// liquidación de premios, ninguno de los dos construidos todavía. El banner
-// "sala completa · ha empezado" del detalle de sala ya enlaza aquí para no
-// dejar un enlace roto.
-export default function ClasificacionPage() {
+// Hasta ahora esta pantalla era un "próximamente" fijo. Pedido de Iñi
+// (30/09): "hay que diseñar la clasificación de las mesas Drafters... que
+// ya la tenemos diseñada del Claude Code de lo que decimos aquí, pero le
+// tienes que dar utilidad". Se le da utilidad hasta donde hay datos reales:
+//
+// - Mesas de GOLF: reutiliza exactamente la misma pieza que ya alimenta la
+//   clasificación en directo de las porras de golf —
+//   jugadores.resultado_en_vivo_* (golpes respecto al par), sincronizados
+//   solos cada 5 minutos desde ESPN — así que el diseño y el cálculo son
+//   los mismos que en app/porras/[id]/clasificacion/page.tsx, sin el
+//   toggle de "bono de podio" (eso es una regla propia de la porra clásica,
+//   no de las mesas) ni los grupos de color (las mesas se draftean por
+//   presupuesto, no por grupos).
+// - Mesas de FÚTBOL y TENIS: todavía no hay ningún motor de resultados en
+//   directo montado para esos deportes (decisión explícita de Iñi, 30/09:
+//   "de momento vamos a poner 'sin datos en directo todavía' y pensaremos
+//   de qué manera introducir datos hasta que lo automaticemos con APIs") —
+//   se avisa con claridad en vez de fingir un dato que no existe. La
+//   clasificación FINAL de cualquier mesa, sea cual sea el deporte, se
+//   sigue decidiendo aparte, a mano, en /admin/pagos-pendientes.
+//
+// El vídeo publicitario se queda exactamente donde ya estaba (después del
+// contenido, nunca antes) en los dos casos.
+
+type SalaRow = { id: string; nombre: string; competicion: string; deporte: string; tipo: string; estado: string; fecha_limite_inscripcion: string | null };
+type JugadorRow = {
+  id: string;
+  nombre: string;
+  resultado_en_vivo_total: number | null;
+  resultado_en_vivo_thru: number | null;
+  resultado_en_vivo_ronda: number | null;
+  resultado_en_vivo_posicion: string | null;
+};
+type EquipoClasif = { equipoId: string; nombre: string; jugadores: string[]; createdAt: string };
+type HoyoRow = { ronda: number; hoyo: number; par: number; golpes: number; tipo_resultado: TipoResultadoHoyo };
+
+type Vista = 'mesa' | 'torneo';
+
+function totalEquipo(jugadoresIds: string[], jugadoresPorId: Map<string, JugadorRow>): number {
+  return jugadoresIds.reduce((acc, id) => {
+    const j = jugadoresPorId.get(id);
+    if (!j) return acc;
+    return acc + (j.resultado_en_vivo_total ?? 0);
+  }, 0);
+}
+
+function estadoJugador(j: JugadorRow): string | null {
+  if (j.resultado_en_vivo_posicion === null && j.resultado_en_vivo_thru === null) return null;
+  const posicion = j.resultado_en_vivo_posicion ? `Pos. ${j.resultado_en_vivo_posicion}` : null;
+  const ronda = j.resultado_en_vivo_ronda ? `Ronda ${j.resultado_en_vivo_ronda}` : null;
+  const thru = j.resultado_en_vivo_thru !== null ? (j.resultado_en_vivo_thru >= 18 ? 'Hoyo 18 (terminada)' : `Va por el hoyo ${j.resultado_en_vivo_thru}`) : null;
+  return [posicion, ronda, thru].filter(Boolean).join(' · ') || null;
+}
+
+export default function SalaClasificacionPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
+  const salaId = params.id;
+
   const [perfil, setPerfil] = useState<Perfil | null>(null);
+  const [sala, setSala] = useState<SalaRow | null>(null);
+  const [jugadores, setJugadores] = useState<JugadorRow[]>([]);
+  const [equipos, setEquipos] = useState<EquipoClasif[]>([]);
+  const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [vista, setVista] = useState<Vista>('mesa');
+  const [equipoSeleccionadoId, setEquipoSeleccionadoId] = useState<string | null>(null);
+  const [jugadorFocoId, setJugadorFocoId] = useState<string | null>(null);
+  const [hoyosFoco, setHoyosFoco] = useState<HoyoRow[] | 'cargando' | null>(null);
+  const [rondaSeleccionada, setRondaSeleccionada] = useState<number | null>(null);
 
   useEffect(() => {
     let activo = true;
+
     async function cargar() {
       const {
         data: { session },
@@ -31,38 +96,442 @@ export default function ClasificacionPage() {
         router.push('/login');
         return;
       }
-      const { data } = await supabase.from('perfiles').select('*').eq('id', session.user.id).single();
-      if (activo && data) setPerfil(data as Perfil);
+
+      const [{ data: perfilData }, { data: salaData }] = await Promise.all([
+        supabase.from('perfiles').select('*').eq('id', session.user.id).single(),
+        supabase.from('salas').select('id,nombre,competicion,deporte,tipo,estado,fecha_limite_inscripcion').eq('id', salaId).single(),
+      ]);
+
+      if (!activo) return;
+      if (perfilData) setPerfil(perfilData as Perfil);
+
+      if (!salaData) {
+        setError('No se ha encontrado esta mesa.');
+        setCargando(false);
+        return;
+      }
+      const salaRow = salaData as SalaRow;
+      setSala(salaRow);
+
+      if (salaRow.deporte !== 'golf') {
+        // Fútbol/tenis: sin motor de resultados en directo todavía — no hace
+        // falta cargar nada más, ver el aviso más abajo.
+        setCargando(false);
+        return;
+      }
+
+      const [{ data: jugData }, { data: equiposData }] = await Promise.all([
+        supabase
+          .from('jugadores')
+          .select('id,nombre,resultado_en_vivo_total,resultado_en_vivo_thru,resultado_en_vivo_ronda,resultado_en_vivo_posicion')
+          .eq('deporte', 'golf')
+          .eq('competicion', salaRow.competicion),
+        // equipos_sala_clasificacion() es una función de base de datos
+        // (RPC): solo devuelve filas una vez la mesa ha "empezado" (fecha
+        // límite de inscripción ya pasada, o mesa finalizada) — antes de
+        // eso, lista vacía, tratado más abajo como "todavía no ha empezado".
+        supabase.rpc('equipos_sala_clasificacion', { p_sala_id: salaId }),
+      ]);
+
+      if (!activo) return;
+
+      setJugadores((jugData as JugadorRow[]) ?? []);
+
+      const filasEquipos = (equiposData as { equipo_id: string; nombre: string; jugadores: string[]; created_at: string }[]) ?? [];
+      const equiposOrdenados = filasEquipos
+        .map((f) => ({ equipoId: f.equipo_id, nombre: f.nombre, jugadores: f.jugadores ?? [], createdAt: f.created_at }))
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      setEquipos(equiposOrdenados);
+      if (equiposOrdenados.length > 0) setEquipoSeleccionadoId(equiposOrdenados[0].equipoId);
+
+      setCargando(false);
     }
+
     cargar();
     return () => {
       activo = false;
     };
-  }, [router]);
+  }, [router, salaId]);
+
+  const jugadoresPorId = useMemo(() => new Map(jugadores.map((j) => [j.id, j])), [jugadores]);
+  // A diferencia del "campo completo" de la porra (que se ordena por precio
+  // del jugador, pensado como explorador de la plantilla), aquí tiene más
+  // sentido ordenar por resultado real — esta pantalla ya es la
+  // clasificación en directo, no un selector de jugadores.
+  const campoOrdenado = useMemo(() => jugadores.slice().sort((a, b) => (a.resultado_en_vivo_total ?? 0) - (b.resultado_en_vivo_total ?? 0)), [jugadores]);
+
+  // Hoyo a hoyo del jugador con el foco puesto — mismo criterio que
+  // app/porras/[id]/clasificacion/page.tsx.
+  useEffect(() => {
+    let activo = true;
+    if (!jugadorFocoId) {
+      setHoyosFoco(null);
+      setRondaSeleccionada(null);
+      return;
+    }
+    setHoyosFoco('cargando');
+    setRondaSeleccionada(null);
+    supabase
+      .from('resultados_golf_hoyo')
+      .select('ronda,hoyo,par,golpes,tipo_resultado')
+      .eq('jugador_id', jugadorFocoId)
+      .order('ronda', { ascending: true })
+      .order('hoyo', { ascending: true })
+      .then(({ data }) => {
+        if (!activo) return;
+        const filas = (data as HoyoRow[]) ?? [];
+        setHoyosFoco(filas);
+        if (filas.length > 0) setRondaSeleccionada(filas[filas.length - 1].ronda);
+      });
+    return () => {
+      activo = false;
+    };
+  }, [jugadorFocoId]);
+
+  if (cargando || !perfil) {
+    return (
+      <main style={S.mainReset}>
+        <div style={S.pageFrame}>
+          <DraftersHeader />
+          <div style={{ padding: '40px 20px' }}>
+            <p style={{ fontSize: 14, color: S.MUTED }}>Cargando...</p>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  const saldoLabel = formatEuros(perfil.saldo_simulado);
+  const initials = S.iniciales(perfil.nombre, perfil.apellido);
+
+  if (error || !sala) {
+    return (
+      <main style={S.mainReset}>
+        <div style={S.pageFrame}>
+          <DraftersHeader saldoLabel={saldoLabel} accountInitials={initials} />
+          <div style={{ padding: '40px 20px' }}>
+            <p style={{ fontSize: 14, color: S.ERROR }}>{error ?? 'No se ha encontrado esta mesa.'}</p>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  // Fútbol/tenis: todavía sin motor de resultados en directo (30/09,
+  // decisión explícita de Iñi — ver la cabecera de este archivo).
+  if (sala.deporte !== 'golf') {
+    return (
+      <main style={S.mainReset}>
+        <div style={S.pageFrame}>
+          <DraftersHeader saldoLabel={saldoLabel} accountInitials={initials} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '48px 24px', alignItems: 'center', textAlign: 'center' }}>
+            <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT, fontFamily: "'Barlow Condensed', sans-serif" }}>Clasificación en directo</h1>
+            <p style={{ fontSize: 14, color: S.MUTED_2, lineHeight: 1.6 }}>
+              Sin datos en directo todavía para mesas de {DEPORTE_LABELS[sala.deporte as Deporte] ?? sala.deporte}. La clasificación final se decide al
+              liquidarse la mesa.
+            </p>
+            <Link href={`/salas/${params.id}`} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '12px 24px', textDecoration: 'none', display: 'inline-flex' }}>
+              Volver a la mesa
+            </Link>
+
+            <div style={{ width: '100%', maxWidth: 420 }}>
+              <AnuncioVideoInline ubicacion="clasificacion" />
+            </div>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  // Golf, pero todavía no ha "empezado" (o no hay ningún equipo inscrito).
+  if (equipos.length === 0) {
+    return (
+      <main style={S.mainReset}>
+        <div style={S.pageFrame}>
+          <DraftersHeader saldoLabel={saldoLabel} accountInitials={initials} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '48px 24px', alignItems: 'center', textAlign: 'center' }}>
+            <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT, fontFamily: "'Barlow Condensed', sans-serif" }}>Clasificación en directo</h1>
+            <p style={{ fontSize: 14, color: S.MUTED_2, lineHeight: 1.6 }}>
+              Esta mesa todavía no ha empezado, o todavía no hay equipos inscritos. En cuanto se cierre la inscripción podrás ver aquí la clasificación de
+              todos los participantes.
+            </p>
+            <Link href={`/salas/${params.id}`} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '12px 24px', textDecoration: 'none', display: 'inline-flex' }}>
+              Volver a la mesa
+            </Link>
+
+            <div style={{ width: '100%', maxWidth: 420 }}>
+              <AnuncioVideoInline ubicacion="clasificacion" />
+            </div>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  const equipoSeleccionado = equipos.find((e) => e.equipoId === equipoSeleccionadoId) ?? equipos[0];
+  const jugadoresDelEquipoSeleccionado = equipoSeleccionado.jugadores.map((id) => jugadoresPorId.get(id)).filter((j): j is JugadorRow => !!j);
+  const jugadorFoco = jugadorFocoId
+    ? (jugadoresDelEquipoSeleccionado.find((j) => j.id === jugadorFocoId) ?? campoOrdenado.find((j) => j.id === jugadorFocoId) ?? null)
+    : null;
+
+  // Ranking por total (golpes respecto al par, menos es mejor) — la lista de
+  // equipos que da equipos_sala_clasificacion() viene ordenada por fecha de
+  // inscripción, así que aquí se reordena por puntuación para la columna de
+  // la izquierda.
+  const equiposPorPuntuacion = equipos.slice().sort((a, b) => totalEquipo(a.jugadores, jugadoresPorId) - totalEquipo(b.jugadores, jugadoresPorId));
 
   return (
     <main style={S.mainReset}>
       <div style={S.pageFrame}>
-        <DraftersHeader saldoLabel={perfil ? formatEuros(perfil.saldo_simulado) : '···'} accountInitials={perfil ? S.iniciales(perfil.nombre, perfil.apellido) : '·'} />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '48px 24px', alignItems: 'center', textAlign: 'center' }}>
-          <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT, fontFamily: "'Barlow Condensed', sans-serif" }}>Clasificación en directo — próximamente</h1>
-          <p style={{ fontSize: 14, color: S.MUTED_2, lineHeight: 1.6 }}>
-            La puntuación jugada a jugada y el reparto final de premios todavía no están conectados a datos en directo.
-          </p>
-          <Link href={`/salas/${params.id}`} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '12px 24px', textDecoration: 'none', display: 'inline-flex' }}>
-            Volver a la sala
-          </Link>
+        <DraftersHeader saldoLabel={saldoLabel} accountInitials={initials} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '24px 20px 40px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#3DDC84' }}>{sala.nombre}</span>
+            <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT }}>Clasificación en directo</h1>
+            <p style={{ fontSize: 13, color: S.MUTED_2 }}>{equipos.length} equipo{equipos.length === 1 ? '' : 's'} inscrito{equipos.length === 1 ? '' : 's'}</p>
+          </div>
 
-          {/* Vídeo publicitario debajo de todo (27/09, décima vuelta) — a
-              propósito, va DESPUÉS del contenido de la pantalla (el aviso de
-              "próximamente" y el botón de volver), nunca antes ni encima,
-              para no interferir con la vista de la clasificación en sí,
-              tal y como pidió Iñi. */}
-          <div style={{ width: '100%', maxWidth: 420 }}>
+          <div style={{ display: 'flex', gap: 6, alignSelf: 'flex-start' }}>
+            <button type="button" onClick={() => setVista('mesa')} style={vistaPillStyle(vista === 'mesa')}>
+              Mesa
+            </button>
+            <button type="button" onClick={() => setVista('torneo')} style={vistaPillStyle(vista === 'torneo')}>
+              Torneo
+            </button>
+          </div>
+
+          {vista === 'mesa' && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+              <div style={{ flexShrink: 0, width: 126, display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 380, overflowY: 'auto' }}>
+                <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Equipos ({equipos.length})</span>
+                {equiposPorPuntuacion.map((eq, i) => {
+                  const activo = eq.equipoId === equipoSeleccionado.equipoId;
+                  return (
+                    <a
+                      key={eq.equipoId}
+                      href="#"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setEquipoSeleccionadoId(eq.equipoId);
+                        setJugadorFocoId(null);
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        padding: 8,
+                        background: activo ? 'rgba(61,220,132,0.1)' : S.PANEL,
+                        border: `1px solid ${activo ? 'rgba(61,220,132,0.4)' : '#1E2723'}`,
+                        borderRadius: 9,
+                        textDecoration: 'none',
+                      }}
+                    >
+                      <span style={{ flexShrink: 0, width: 16, textAlign: 'center', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 11, color: S.MUTED_2 }}>{i + 1}</span>
+                      <span style={{ flex: 1, minWidth: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {eq.nombre}
+                      </span>
+                      <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 12, color: S.MUTED_2 }}>
+                        {formatGolfScore(totalEquipo(eq.jugadores, jugadoresPorId))}
+                      </span>
+                    </a>
+                  );
+                })}
+              </div>
+
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
+                  <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {equipoSeleccionado.nombre}
+                  </span>
+                  <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, color: S.MUTED_2 }}>
+                    {formatGolfScore(totalEquipo(equipoSeleccionado.jugadores, jugadoresPorId))}
+                  </span>
+                </div>
+                {jugadoresDelEquipoSeleccionado.map((j) => (
+                  <a
+                    key={j.id}
+                    href="#"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setJugadorFocoId((prev) => (prev === j.id ? null : j.id));
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '9px 10px',
+                      background: jugadorFocoId === j.id ? 'rgba(61,220,132,0.1)' : S.PANEL,
+                      border: `1px solid ${jugadorFocoId === j.id ? 'rgba(61,220,132,0.4)' : '#1E2723'}`,
+                      borderRadius: 9,
+                      textDecoration: 'none',
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                      <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.nombre}</span>
+                      {estadoJugador(j) && <span style={{ fontSize: 9, color: S.MUTED_3 }}>{estadoJugador(j)}</span>}
+                    </div>
+                    <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 13, color: S.MUTED_2 }}>
+                      {formatGolfScore(j.resultado_en_vivo_total ?? 0)}
+                    </span>
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {vista === 'torneo' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 420, overflowY: 'auto' }}>
+              <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Campo completo ({campoOrdenado.length} jugadores)</span>
+              {campoOrdenado.map((j, i) => (
+                <a
+                  key={j.id}
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setJugadorFocoId((prev) => (prev === j.id ? null : j.id));
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '9px 10px',
+                    background: jugadorFocoId === j.id ? 'rgba(61,220,132,0.1)' : S.PANEL,
+                    border: `1px solid ${jugadorFocoId === j.id ? 'rgba(61,220,132,0.4)' : '#1E2723'}`,
+                    borderRadius: 9,
+                    textDecoration: 'none',
+                  }}
+                >
+                  <span style={{ flexShrink: 0, width: 20, textAlign: 'center', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 11, color: S.MUTED_2 }}>{i + 1}</span>
+                  <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.nombre}</span>
+                    {estadoJugador(j) && <span style={{ fontSize: 9, color: S.MUTED_3 }}>{estadoJugador(j)}</span>}
+                  </div>
+                  <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 13, color: S.MUTED_2 }}>{formatGolfScore(j.resultado_en_vivo_total ?? 0)}</span>
+                </a>
+              ))}
+            </div>
+          )}
+
+          {jugadorFoco && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, color: S.TEXT }}>{jugadorFoco.nombre} · resultados</span>
+                <a
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setJugadorFocoId(null);
+                  }}
+                  style={{ color: S.MUTED_3, fontSize: 13, textDecoration: 'none' }}
+                >
+                  ✕
+                </a>
+              </div>
+              {estadoJugador(jugadorFoco) && <span style={{ fontSize: 11, color: S.MUTED_3 }}>{estadoJugador(jugadorFoco)}</span>}
+
+              {hoyosFoco === 'cargando' && <p style={{ fontSize: 12.5, color: S.MUTED_3, margin: 0 }}>Cargando el hoyo a hoyo...</p>}
+
+              {hoyosFoco !== 'cargando' && (!hoyosFoco || hoyosFoco.length === 0) && (
+                <p style={{ fontSize: 12.5, lineHeight: 1.5, color: S.MUTED_2, margin: 0 }}>
+                  Todavía no hay ningún hoyo registrado para {jugadorFoco.nombre} — en cuanto empiece a jugar (o su torneo se conecte con ESPN
+                  desde el panel de administración), aquí verás el desglose hoyo a hoyo, golpe a golpe.
+                </p>
+              )}
+
+              {Array.isArray(hoyosFoco) &&
+                hoyosFoco.length > 0 &&
+                (() => {
+                  const hoyos: HoyoRow[] = hoyosFoco;
+                  const rondas = Array.from(new Set(hoyos.map((h) => h.ronda))).sort((a, b) => a - b);
+                  const hoyosRonda = hoyos.filter((h) => h.ronda === rondaSeleccionada);
+                  return (
+                    <>
+                      {rondas.length > 1 && (
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          {rondas.map((r) => (
+                            <button key={r} type="button" onClick={() => setRondaSeleccionada(r)} style={vistaPillStyle(rondaSeleccionada === r)}>
+                              Ronda {r}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 6 }}>
+                        {hoyosRonda.map((h) => {
+                          const color = COLOR_TIPO_RESULTADO[h.tipo_resultado];
+                          return (
+                            <div
+                              key={h.hoyo}
+                              title={`Hoyo ${h.hoyo} · Par ${h.par} · ${ETIQUETA_TIPO_RESULTADO[h.tipo_resultado]}`}
+                              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}
+                            >
+                              <span style={{ fontSize: 8.5, color: S.MUTED_3 }}>
+                                {h.hoyo} · P{h.par}
+                              </span>
+                              <div
+                                style={{
+                                  width: 30,
+                                  height: 30,
+                                  borderRadius: '50%',
+                                  background: color.fondo,
+                                  color: color.texto,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontFamily: "'Barlow Condensed', sans-serif",
+                                  fontWeight: 800,
+                                  fontSize: 13,
+                                }}
+                              >
+                                {h.golpes}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', paddingTop: 4, borderTop: `1px solid ${S.CARD_BORDER}` }}>
+                        {(Object.keys(ETIQUETA_TIPO_RESULTADO) as TipoResultadoHoyo[]).map((t) => (
+                          <span key={t} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 9.5, color: S.MUTED_3 }}>
+                            <span style={{ width: 9, height: 9, borderRadius: '50%', background: COLOR_TIPO_RESULTADO[t].fondo, display: 'inline-block' }} />
+                            {ETIQUETA_TIPO_RESULTADO[t]}
+                          </span>
+                        ))}
+                      </div>
+                    </>
+                  );
+                })()}
+            </div>
+          )}
+
+          <span style={{ fontSize: 10, color: S.FAINT }}>
+            *Clasificación en directo: resultado respecto al par de cada jugador/equipo (no puntos), actualizado automáticamente cada 5 minutos. Se ve "E"
+            (par) mientras un jugador todavía no tiene ningún resultado registrado.
+          </span>
+
+          {/* Vídeo publicitario debajo de todo — mismo criterio que en
+              porras/[id]/clasificacion/page.tsx. */}
+          <div style={{ width: '100%' }}>
             <AnuncioVideoInline ubicacion="clasificacion" />
           </div>
         </div>
       </div>
     </main>
   );
+}
+
+function vistaPillStyle(active: boolean) {
+  return {
+    fontFamily: "'Barlow Condensed', sans-serif",
+    fontWeight: 700,
+    fontSize: 12,
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.03em',
+    padding: '7px 12px',
+    borderRadius: 999,
+    border: `1px solid ${active ? '#3DDC84' : S.BORDER}`,
+    background: active ? 'rgba(61,220,132,0.12)' : 'transparent',
+    color: active ? '#3DDC84' : S.MUTED,
+    cursor: 'pointer',
+  };
 }
