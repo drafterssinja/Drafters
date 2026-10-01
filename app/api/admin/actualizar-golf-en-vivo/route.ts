@@ -147,8 +147,27 @@ export async function POST(req: NextRequest) {
 
       const competidores = await obtenerLeaderboardEspn(torneo.tour, torneo.espn_event_id);
 
+      // CAMBIO 01/10 (tercera vuelta — aviso de Iñi: "null value in column
+      // 'nombre' of relation 'jugadores' violates not-null constraint"):
+      // el upsert de más abajo solo mandaba el id y los campos de
+      // resultado en vivo, dando por hecho que como el id ya existía sería
+      // un UPDATE sin más. Pero PostgREST traduce upsert(...) en
+      // "INSERT ... ON CONFLICT (id) DO UPDATE SET ...", y Postgres exige
+      // que el INSERT que construye por dentro cumpla ya las columnas
+      // obligatorias (nombre/deporte/competicion, sin valor por defecto)
+      // ANTES de llegar a comprobar el conflicto de id — aunque el
+      // resultado final vaya a ser un simple UPDATE. Es exactamente el
+      // mismo fallo, en el mismo sitio (un upsert con columnas parciales),
+      // que ya se corrigió para fútbol el 25/09 (ver sección 11.11 de
+      // DRAFTERS_Arquitectura_Tecnica.md) — aquí no se había aplicado
+      // porque esta ruta es más reciente. Arreglado incluyendo también esos
+      // tres campos (ya los teníamos en memoria, no hace falta otra
+      // consulta) en cada fila del upsert.
       const actualizacionesJugadores: {
         id: string;
+        nombre: string;
+        deporte: 'golf';
+        competicion: string;
         resultado_en_vivo_total: number | null;
         resultado_en_vivo_thru: number | null;
         resultado_en_vivo_ronda: number | null;
@@ -170,6 +189,9 @@ export async function POST(req: NextRequest) {
 
         actualizacionesJugadores.push({
           id: jugador.id,
+          nombre: jugador.nombre,
+          deporte: 'golf',
+          competicion: torneo.competicion,
           resultado_en_vivo_total: c.totalVsPar,
           resultado_en_vivo_thru: c.thru,
           resultado_en_vivo_ronda: c.ronda,
