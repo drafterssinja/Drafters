@@ -77,6 +77,23 @@ type CampoBiblioteca = {
 
 const NUM_HOYOS = Array.from({ length: 18 }, (_, i) => i + 1);
 
+// Alias de nombre de jugador (nuevo, 01/10 — ver drafters-schema.sql, bloque
+// "ALIAS DE NOMBRES DE JUGADOR"): cuando una sincronización deja un nombre
+// de ESPN "sin emparejar", aquí se elige a qué jugador de esa competición
+// corresponde y se guarda para siempre (nombre normalizado -> nombre
+// normalizado, no por id, porque cada torneo tiene su propia fila de
+// `jugadores`) — así la próxima vez que ESPN (o, más adelante, Data Golf)
+// escriba ese nombre, se traduce solo, en cualquier torneo futuro.
+type AliasJugador = {
+  id: string;
+  deporte: string;
+  nombre_origen: string;
+  nombre_destino: string;
+  fuente: 'espn' | 'datagolf' | 'manual';
+  creado_en: string;
+};
+type JugadorSimple = { id: string; nombre: string };
+
 function paresDeFila(c: CampoBiblioteca): (number | null)[] {
   return NUM_HOYOS.map((n) => (c as unknown as Record<string, number | null | undefined>)[`par_h${n}`] ?? null);
 }
@@ -117,6 +134,17 @@ export default function AdminResultadosGolfPage() {
   const [errorBiblioteca, setErrorBiblioteca] = useState<string | null>(null);
   const [formBiblioteca, setFormBiblioteca] = useState<{ id: string | null; nombre: string; pares: string[] } | null>(null);
   const [guardandoBiblioteca, setGuardandoBiblioteca] = useState(false);
+
+  // Alias de nombres de jugador (nuevo, 01/10).
+  const [alias, setAlias] = useState<AliasJugador[] | 'cargando'>('cargando');
+  const [errorAlias, setErrorAlias] = useState<string | null>(null);
+  // Jugadores de cada competición, para el desplegable "a quién corresponde"
+  // — se cargan a demanda, solo de las competiciones que tengan algún
+  // nombre sin emparejar tras una sincronización.
+  const [jugadoresPorCompeticion, setJugadoresPorCompeticion] = useState<Record<string, JugadorSimple[] | 'cargando'>>({});
+  // Clave: `${competicion}:::${nombreOrigen}` -> id del jugador elegido en el desplegable.
+  const [seleccionAlias, setSeleccionAlias] = useState<Record<string, string>>({});
+  const [guardandoAlias, setGuardandoAlias] = useState<string | null>(null);
 
   async function cargarTorneos() {
     const { data, error: torneosError } = await supabase.from('torneos_golf_live').select('*').order('competicion');
@@ -201,6 +229,77 @@ export default function AdminResultadosGolfPage() {
     setBiblioteca((prev) => (Array.isArray(prev) ? prev.filter((x) => x.id !== c.id) : prev));
   }
 
+  async function cargarAlias() {
+    const { data, error: aliasError } = await supabase
+      .from('alias_nombres_jugador')
+      .select('*')
+      .eq('deporte', 'golf')
+      .order('creado_en', { ascending: false });
+    if (aliasError) {
+      setErrorAlias('No se han podido cargar los alias guardados.');
+      setAlias([]);
+      return;
+    }
+    setAlias((data as AliasJugador[]) ?? []);
+  }
+
+  async function cargarJugadoresCompeticion(competicion: string) {
+    setJugadoresPorCompeticion((prev) => ({ ...prev, [competicion]: 'cargando' }));
+    const { data, error: jugError } = await supabase
+      .from('jugadores')
+      .select('id, nombre')
+      .eq('deporte', 'golf')
+      .eq('competicion', competicion)
+      .order('nombre');
+    if (jugError) {
+      setJugadoresPorCompeticion((prev) => ({ ...prev, [competicion]: [] }));
+      return;
+    }
+    setJugadoresPorCompeticion((prev) => ({ ...prev, [competicion]: (data as JugadorSimple[]) ?? [] }));
+  }
+
+  async function guardarAlias(competicion: string, nombreOrigen: string) {
+    const clave = `${competicion}:::${nombreOrigen}`;
+    const jugadorId = seleccionAlias[clave];
+    const jugadoresDeEstaCompeticion = jugadoresPorCompeticion[competicion];
+    const jugadorElegido = Array.isArray(jugadoresDeEstaCompeticion) ? jugadoresDeEstaCompeticion.find((j) => j.id === jugadorId) : undefined;
+    if (!jugadorElegido) {
+      setErrorAlias('Elige a qué jugador corresponde antes de guardar.');
+      return;
+    }
+
+    setErrorAlias(null);
+    setGuardandoAlias(clave);
+    const { error: upsertError } = await supabase.from('alias_nombres_jugador').upsert(
+      {
+        deporte: 'golf',
+        nombre_origen: nombreOrigen,
+        nombre_normalizado_origen: normalizarNombre(nombreOrigen),
+        nombre_destino: jugadorElegido.nombre,
+        nombre_normalizado_destino: normalizarNombre(jugadorElegido.nombre),
+        fuente: 'espn',
+      },
+      { onConflict: 'deporte,nombre_normalizado_origen' }
+    );
+    setGuardandoAlias(null);
+
+    if (upsertError) {
+      setErrorAlias(`No se ha podido guardar el alias: ${upsertError.message}`);
+      return;
+    }
+    await cargarAlias();
+  }
+
+  async function eliminarAlias(a: AliasJugador) {
+    if (!window.confirm(`¿Eliminar el alias "${a.nombre_origen}" → "${a.nombre_destino}"?`)) return;
+    const { error: deleteError } = await supabase.from('alias_nombres_jugador').delete().eq('id', a.id);
+    if (deleteError) {
+      setErrorAlias('No se ha podido eliminar.');
+      return;
+    }
+    setAlias((prev) => (Array.isArray(prev) ? prev.filter((x) => x.id !== a.id) : prev));
+  }
+
   useEffect(() => {
     let activo = true;
 
@@ -239,6 +338,7 @@ export default function AdminResultadosGolfPage() {
         setAutorizado(true);
         await cargarTorneos();
         await cargarBiblioteca();
+        await cargarAlias();
       } catch (e) {
         if (!activo) return;
         setErrorAcceso(e instanceof Error ? `No se ha podido comprobar tu acceso: ${e.message}` : 'No se ha podido comprobar tu acceso.');
@@ -334,8 +434,13 @@ export default function AdminResultadosGolfPage() {
       if (!res.ok) {
         setErrorSync(body.error ?? 'No se ha podido sincronizar.');
       } else {
-        setResultadoSync(body.resultados ?? []);
+        const resultados = (body.resultados ?? []) as ResultadoSync[];
+        setResultadoSync(resultados);
         await cargarTorneos();
+        // Precarga los jugadores de cada competición con algún nombre sin
+        // emparejar, para que el desplegable de "a quién corresponde" esté
+        // listo sin que Iñi tenga que esperar por cada uno.
+        resultados.filter((r) => r.nombresSinEmparejar.length > 0).forEach((r) => cargarJugadoresCompeticion(r.competicion));
       }
     } catch (e) {
       setErrorSync(e instanceof Error ? e.message : 'No se ha podido sincronizar.');
@@ -494,9 +599,50 @@ export default function AdminResultadosGolfPage() {
                       {r.competicion}: {r.ok ? `${r.jugadoresEmparejados}/${r.jugadoresEnCampo} jugadores emparejados, ${r.hoyosActualizados} hoyos actualizados` : `error — ${r.error}`}
                     </span>
                     {r.nombresSinEmparejar.length > 0 && (
-                      <span style={{ fontSize: 11, color: S.MUTED_3 }}>
-                        Sin emparejar en ESPN: {r.nombresSinEmparejar.join(', ')}
-                      </span>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 2 }}>
+                        <span style={{ fontSize: 10.5, fontWeight: 700, color: S.MUTED_3, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                          Sin emparejar en ESPN — elige a quién corresponde cada uno:
+                        </span>
+                        {r.nombresSinEmparejar.map((nombreOrigen) => {
+                          const clave = `${r.competicion}:::${nombreOrigen}`;
+                          const jugadoresComp = jugadoresPorCompeticion[r.competicion];
+                          return (
+                            <div key={nombreOrigen} style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: 11, color: S.TEXT, flexShrink: 0, minWidth: 140 }}>{nombreOrigen}</span>
+                              {jugadoresComp === 'cargando' && <span style={{ fontSize: 10.5, color: S.MUTED_3 }}>Cargando jugadores...</span>}
+                              {Array.isArray(jugadoresComp) && (
+                                <>
+                                  <select
+                                    value={seleccionAlias[clave] ?? ''}
+                                    onChange={(e) => setSeleccionAlias((prev) => ({ ...prev, [clave]: e.target.value }))}
+                                    style={{ ...S.input, flex: 1, minWidth: 160, padding: '5px 8px', fontSize: 11.5 }}
+                                  >
+                                    <option value="">— selecciona el jugador —</option>
+                                    {jugadoresComp.map((j) => (
+                                      <option key={j.id} value={j.id}>
+                                        {j.nombre}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <button
+                                    type="button"
+                                    disabled={guardandoAlias === clave || !seleccionAlias[clave]}
+                                    onClick={() => guardarAlias(r.competicion, nombreOrigen)}
+                                    style={{ ...S.primaryButton, width: 'auto', padding: '5px 10px', fontSize: 11, opacity: guardandoAlias === clave || !seleccionAlias[clave] ? 0.6 : 1 }}
+                                  >
+                                    {guardandoAlias === clave ? 'Guardando...' : 'Guardar alias'}
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          );
+                        })}
+                        <span style={{ fontSize: 10, color: S.MUTED_3, lineHeight: 1.4 }}>
+                          Al guardar queda memorizado para siempre — la próxima vez que ESPN escriba este mismo nombre (en
+                          este torneo o en cualquier otro), se reconocerá solo. Pulsa &quot;Actualizar ahora&quot; otra vez
+                          para aplicarlo ya.
+                        </span>
+                      </div>
                     )}
                   </div>
                 ))}
@@ -742,6 +888,52 @@ export default function AdminResultadosGolfPage() {
                 + Añadir campo nuevo
               </button>
             )}
+          </div>
+
+          {/* Alias de nombres de jugador (nuevo, 01/10) — ver la nota larga
+              en drafters-schema.sql. Se rellena sobre todo desde el botón
+              "Guardar alias" de más arriba; esta lista es para revisar o
+              corregir lo ya guardado. */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={S.sectionLabel}>Alias de nombres de jugador</span>
+              <p style={{ fontSize: 12, color: S.MUTED_2, margin: 0, lineHeight: 1.5 }}>
+                Cuando un jugador sale "sin emparejar" tras sincronizar (más arriba), elegir a quién corresponde lo guarda
+                aquí para siempre — sirve en cualquier torneo futuro en el que ESPN vuelva a escribir ese mismo nombre.
+              </p>
+            </div>
+
+            {errorAlias && <p style={S.errorText}>{errorAlias}</p>}
+
+            {alias === 'cargando' && <p style={{ fontSize: 12, color: S.MUTED_3, margin: 0 }}>Cargando...</p>}
+
+            {Array.isArray(alias) && alias.length === 0 && <p style={{ fontSize: 12, color: S.MUTED_3, margin: 0 }}>Todavía no hay ningún alias guardado.</p>}
+
+            {Array.isArray(alias) &&
+              alias.map((a) => (
+                <div
+                  key={a.id}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 10, padding: '9px 12px' }}
+                >
+                  <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    <span style={{ fontSize: 12.5, color: S.TEXT }}>
+                      <span style={{ color: S.MUTED_2 }}>{a.nombre_origen}</span> → <span style={{ fontWeight: 700 }}>{a.nombre_destino}</span>
+                    </span>
+                    <span style={{ fontSize: 10, color: S.MUTED_3 }}>
+                      {a.fuente === 'espn' ? 'ESPN' : a.fuente === 'datagolf' ? 'Data Golf' : 'Manual'} · guardado el{' '}
+                      {new Date(a.creado_en).toLocaleDateString('es-ES')}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => eliminarAlias(a)}
+                    aria-label="Eliminar"
+                    style={{ flexShrink: 0, background: 'transparent', border: `1px solid ${S.BORDER}`, borderRadius: 8, color: S.ERROR, width: 32, height: 32, cursor: 'pointer' }}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
           </div>
         </div>
       </div>

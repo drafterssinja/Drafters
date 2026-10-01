@@ -121,6 +121,23 @@ export async function POST(req: NextRequest) {
 
   const resultados: ResultadoTorneo[] = [];
 
+  // Alias de nombre de jugador (nuevo, 01/10 — pedido de Iñi: "hay que
+  // buscar la forma de que de los que no encuentre [se puedan emparejar]").
+  // Se cargan una sola vez para todos los torneos de este ciclo (no cambian
+  // de un torneo a otro): ver el bloque "ALIAS DE NOMBRES DE JUGADOR" en
+  // drafters-schema.sql para el porqué de guardar nombre->nombre en vez de
+  // nombre->jugador_id. nombre_normalizado_origen -> nombre_normalizado_destino.
+  const { data: aliasData } = await admin
+    .from('alias_nombres_jugador')
+    .select('nombre_normalizado_origen, nombre_normalizado_destino')
+    .eq('deporte', 'golf');
+  const aliasPorNombreOrigen = new Map(
+    ((aliasData as { nombre_normalizado_origen: string; nombre_normalizado_destino: string }[]) ?? []).map((a) => [
+      a.nombre_normalizado_origen,
+      a.nombre_normalizado_destino,
+    ])
+  );
+
   for (const torneo of torneos) {
     const resultado: ResultadoTorneo = {
       competicion: torneo.competicion,
@@ -180,7 +197,13 @@ export async function POST(req: NextRequest) {
       const ahora = new Date().toISOString();
 
       for (const c of competidores) {
-        const jugador = jugadorPorNombre.get(normalizarNombre(c.nombre));
+        const nombreNormOrigen = normalizarNombre(c.nombre);
+        // 1. Coincidencia exacta tras normalizar. 2. Si no, alias guardado
+        // a mano por Iñi desde /admin/resultados-golf (ver más arriba).
+        const jugador = jugadorPorNombre.get(nombreNormOrigen) ?? (() => {
+          const destino = aliasPorNombreOrigen.get(nombreNormOrigen);
+          return destino ? jugadorPorNombre.get(destino) : undefined;
+        })();
         if (!jugador) {
           resultado.nombresSinEmparejar.push(c.nombre);
           continue;

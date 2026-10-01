@@ -199,7 +199,28 @@ export default function PorraClasificacionPage() {
   }, [router, porraId]);
 
   const jugadoresPorId = useMemo(() => new Map(jugadores.map((j) => [j.id, j])), [jugadores]);
-  const campoOrdenado = useMemo(() => jugadores.slice().sort((a, b) => b.precio - a.precio), [jugadores]);
+  // Orden de la vista "Torneo" (corregido 01/10, aviso de Iñi: "quiero que
+  // salga ordenado por clasificación" — antes salía agrupado por lista de
+  // color/precio, p.ej. todos los "Azul" juntos y dentro de ese bloque sin
+  // relación con su puesto real en el torneo).
+  // Mientras el jugador no tiene ningún resultado en vivo todavía (torneo
+  // sin empezar, o recién conectado y aún sin sincronizar) se mantiene el
+  // orden de precio de siempre — en cuanto tiene resultado, manda la
+  // clasificación real (golpes respecto al par), y a igualdad de golpes se
+  // desempata por precio para que el orden no salte sin motivo entre
+  // sincronizaciones.
+  const campoOrdenado = useMemo(() => {
+    return jugadores.slice().sort((a, b) => {
+      const aTiene = a.resultado_en_vivo_total !== null || a.resultado_en_vivo_thru !== null;
+      const bTiene = b.resultado_en_vivo_total !== null || b.resultado_en_vivo_thru !== null;
+      if (aTiene && bTiene) {
+        const diff = (a.resultado_en_vivo_total ?? 0) - (b.resultado_en_vivo_total ?? 0);
+        return diff !== 0 ? diff : b.precio - a.precio;
+      }
+      if (aTiene !== bTiene) return aTiene ? -1 : 1; // con resultado siempre por delante de quien todavía no tiene
+      return b.precio - a.precio; // ninguno tiene resultado todavía (torneo sin empezar)
+    });
+  }, [jugadores]);
 
   // Hoyo a hoyo del jugador con el foco puesto (pedido de Iñi, 28/09: "cuando
   // pinchas en un resultado, abajo se ven los resultados hoyo a hoyo... de
@@ -365,11 +386,31 @@ export default function PorraClasificacionPage() {
               </div>
 
               <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
-                  <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {/* Cabecera del equipo, separada visualmente de la lista de
+                    jugadores de abajo (corregido 01/10, aviso de Iñi: "se me
+                    abre a la derecha... digamos que están de la misma forma
+                    visualizados... me gustaría que... esté un poquito más
+                    separada la cajita del nombre del equipo de los
+                    jugadores con una línea en medio") — fondo e borde con un
+                    tinte verde y una línea de acento más gruesa debajo, más
+                    separación con el primer jugador. */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '10px 12px',
+                    background: 'rgba(61,220,132,0.08)',
+                    border: '1px solid rgba(61,220,132,0.35)',
+                    borderBottom: '2px solid #3DDC84',
+                    borderRadius: 10,
+                    marginBottom: 4,
+                  }}
+                >
+                  <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 14.5, color: '#3DDC84', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {equipoSeleccionado.nombreEquipo}
                   </span>
-                  <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, color: S.MUTED_2 }}>
+                  <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, color: S.TEXT }}>
                     {formatGolfScore(totalEquipo(equipoSeleccionado.jugadores, jugadoresPorId, bonosPodio))}
                   </span>
                 </div>

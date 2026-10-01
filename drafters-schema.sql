@@ -2686,6 +2686,56 @@ revoke all on function public.pares_conocidos_campo(text, text) from public;
 grant execute on function public.pares_conocidos_campo(text, text) to authenticated;
 
 -- ============================================================================
+-- ALIAS DE NOMBRES DE JUGADOR (nuevo, 01/10)
+-- ============================================================================
+-- Mismo problema que ya resolvió lib/aliasEquipos.ts para los equipos de
+-- fútbol, pero para jugadores: Iñi carga el campo de cada torneo con el
+-- nombre tal cual lo da la casa de apuestas, y una fuente de resultados en
+-- vivo (hoy ESPN, mañana quizá Data Golf) puede escribir a ese mismo
+-- jugador de forma distinta ("Rafa Cabrera Bello" vs "Rafael Cabrera
+-- Bello") — eso hace que normalizarNombre() ya no los vea iguales y el
+-- jugador se quede "sin emparejar", sin resultado en vivo.
+--
+-- A diferencia de los equipos (una lista fija, cabe bien en código), los
+-- jugadores son cientos y cambian de torneo en torneo, así que esto NO se
+-- resuelve en código: es una tabla que rellena el propio Iñi desde
+-- /admin/resultados-golf cuando ve un nombre "sin emparejar" tras una
+-- sincronización, eligiendo a qué jugador corresponde.
+--
+-- Importante — el alias NO se guarda contra un jugador_id en concreto: la
+-- tabla `jugadores` tiene una fila distinta (con un id distinto) por cada
+-- torneo/competición, así que un alias por id solo serviría para ese
+-- torneo. Se guarda de nombre normalizado a nombre normalizado (igual que
+-- ALIAS_EQUIPOS), para que sirva en todos los torneos futuros en los que
+-- aparezca ese mismo jugador, aunque sea con una fila (id) distinta cada
+-- vez: la próxima vez que la fuente externa escriba "Rafa Cabrera Bello",
+-- se traduce sola a "Rafael Cabrera Bello" y se busca con ese nombre entre
+-- los jugadores del torneo que toque.
+create table if not exists public.alias_nombres_jugador (
+  id uuid primary key default gen_random_uuid(),
+  deporte text not null check (deporte in ('futbol', 'golf', 'tenis')),
+  -- Tal cual lo escribe la fuente externa (ESPN, Data Golf...).
+  nombre_origen text not null,
+  nombre_normalizado_origen text not null,
+  -- Tal cual está cargado en `jugadores.nombre` (el nombre "bueno", el que
+  -- usa Iñi al importar el campo del torneo desde la casa de apuestas).
+  nombre_destino text not null,
+  nombre_normalizado_destino text not null,
+  fuente text not null default 'espn' check (fuente in ('espn', 'datagolf', 'manual')),
+  creado_en timestamptz not null default now(),
+  -- Un mismo nombre de origen, para un deporte, siempre apunta al mismo
+  -- destino — si hiciera falta cambiarlo, se edita esta fila en vez de
+  -- crear una segunda.
+  unique (deporte, nombre_normalizado_origen)
+);
+
+alter table public.alias_nombres_jugador enable row level security;
+
+drop policy if exists alias_nombres_jugador_admin_todo on public.alias_nombres_jugador;
+create policy alias_nombres_jugador_admin_todo on public.alias_nombres_jugador
+  for all using (public.es_admin()) with check (public.es_admin());
+
+-- ============================================================================
 -- LIQUIDACIÓN DE PREMIOS (nuevo, 29/09)
 -- ============================================================================
 -- Pedido de Iñi: "hay que implementar que... cuando una porra o una mesa
