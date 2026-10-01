@@ -19,6 +19,49 @@
   --muted: #8b958f;
   --accent: #3ddc84;
   --error: #e94f4f;
+  /* Ancho máximo de la "tarjeta" de toda la app (lib/mockupStyles.ts,
+     pageFrame — usada en las ~30 pantallas reales). En el móvil nunca se
+     nota (ningún teléfono llega a 900px de ancho), así que este valor solo
+     importa en pantallas grandes — ver el @media de abajo. */
+  --page-max-width: 520px;
+}
+
+/* Ordenador/portátil con ratón de verdad (nunca un móvil, ni siquiera uno
+   grande en horizontal): corrección pedida por Iñi (01/10) — "en el
+   ordenador... es como si en vez de ocupar el total de la pantalla se
+   reduce solo al medio". Se amplía la tarjeta central, sin tocar nada del
+   diseño ni del layout interno de cada pantalla (siguen centradas, solo
+   con más aire). El móvil no entra nunca en este @media — ni por ancho, ni
+   por "pointer: fine" (un móvil es "pointer: coarse") — así que queda
+   pixel por pixel igual que está. */
+@media (min-width: 901px) and (pointer: fine) {
+  :root {
+    --page-max-width: 960px;
+  }
+
+  /* Barra de scroll propia para los paneles internos con scroll (listas de
+     equipos/jugadores, etc.) — pedido de Iñi: la barra nativa del
+     navegador de escritorio "queda fea", mientras que en el móvil (barra
+     fina que aparece solo al hacer scroll) "se ve muy bien y muy bonito" y
+     no se toca. Mismo criterio de colores que el resto de la app. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 999px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--muted);
+  }
 }
 
 * {

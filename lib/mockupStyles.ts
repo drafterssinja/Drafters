@@ -17,13 +17,18 @@ export const ERROR = '#FF5C5C';
 
 // Envoltorio de página completo: reproduce el <div style="width:100%..."> de
 // la maqueta, con el mismo ancho máximo tipo "app" que ya usa la portada.
+// El ancho máximo (520px) sale de la variable CSS --page-max-width
+// (app/globals.css) en vez de ir fijo aquí — corrección de Iñi (01/10): en
+// el móvil nunca cambia (ningún teléfono llega a los 901px del @media que
+// la amplía), pero en pantalla de ordenador se ensancha sola a 960px, sin
+// tocar ni un pixel del móvil.
 export const pageFrame: CSSProperties = {
   width: '100%',
   minHeight: '100%',
   display: 'flex',
   flexDirection: 'column',
   background: BG,
-  maxWidth: 520,
+  maxWidth: 'var(--page-max-width)',
   marginLeft: 'auto',
   marginRight: 'auto',
 };
