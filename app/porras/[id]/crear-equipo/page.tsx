@@ -296,11 +296,29 @@ export default function CrearEquipoPorraPage() {
   // si cada uno estaba ya completo en el render anterior, para detectar el
   // momento exacto en que se acaba de rellenar. Al completar el último grupo
   // de color (el modo comodín usa la lista entera) y al elegir el comodín,
-  // "vuelva otra vez al inicio" — sube hasta arriba del todo (`listTopRef`).
+  // "vuelva otra vez al inicio".
+  //
+  // Corrección (01/10, aviso de Iñi): el destino de "volver al inicio" era
+  // `listTopRef` — el banner "Grupo activo" de arriba, que es
+  // `position: sticky`. Al estar ya "pegado" arriba del todo mientras se
+  // mira cualquier grupo que no sea el primero, `scrollIntoView` sobre un
+  // elemento sticky no siempre recorre todo el camino hasta el verdadero
+  // principio de la lista (Iñi: "se desplaza solamente hasta el primer
+  // español, no hasta el primer jugador de todos del grupo amarillo") — se
+  // cambia el destino al bloque real del primer grupo (`grupoRefs` del
+  // primer elemento de `gruposDisponibles`, el mismo ref ya usado para
+  // saltar ENTRE grupos, sin el problema del sticky), que es exactamente
+  // donde está la lista del grupo Amarillo.
   const grupoRefs = useRef<Partial<Record<GrupoPorra, HTMLDivElement | null>>>({});
   const listTopRef = useRef<HTMLDivElement | null>(null);
   const gruposCompletadosRef = useRef<Partial<Record<GrupoPorra, boolean>>>({});
   const comodinCompletadoRef = useRef(false);
+
+  function irAlPrimerGrupo() {
+    const primerGrupo = gruposDisponibles[0];
+    const el = primerGrupo ? grupoRefs.current[primerGrupo] : listTopRef.current;
+    (el ?? listTopRef.current)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 
   useEffect(() => {
     if (porra?.formato !== 'clasica') return;
@@ -309,8 +327,11 @@ export default function CrearEquipoPorraPage() {
       const completoAntes = gruposCompletadosRef.current[grupo] ?? false;
       if (completoAhora && !completoAntes) {
         const siguienteGrupo = gruposDisponibles[i + 1];
-        const el = siguienteGrupo ? grupoRefs.current[siguienteGrupo] : listTopRef.current;
-        el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        if (siguienteGrupo) {
+          grupoRefs.current[siguienteGrupo]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } else {
+          irAlPrimerGrupo();
+        }
       }
       gruposCompletadosRef.current[grupo] = completoAhora;
     });
@@ -320,7 +341,7 @@ export default function CrearEquipoPorraPage() {
     if (porra?.formato !== 'clasica') return;
     const completoAhora = !!comodinId;
     if (completoAhora && !comodinCompletadoRef.current) {
-      listTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      irAlPrimerGrupo();
     }
     comodinCompletadoRef.current = completoAhora;
   }, [porra?.formato, comodinId]);

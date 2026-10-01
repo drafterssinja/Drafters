@@ -68,7 +68,7 @@ type JugadorRow = {
   resultado_en_vivo_posicion: string | null;
 };
 type EquipoClasif = { equipoId: string; nombreEquipo: string | null; jugadores: string[]; createdAt: string };
-type HoyoRow = { ronda: number; hoyo: number; par: number; golpes: number; tipo_resultado: TipoResultadoHoyo };
+type HoyoRow = { ronda: number; hoyo: number; par: number; golpes: number; campo_id: string | null; tipo_resultado: TipoResultadoHoyo };
 
 type Vista = 'porra' | 'torneo';
 
@@ -112,6 +112,11 @@ export default function PorraClasificacionPage() {
   const [jugadorFocoId, setJugadorFocoId] = useState<string | null>(null);
   const [hoyosFoco, setHoyosFoco] = useState<HoyoRow[] | 'cargando' | null>(null);
   const [rondaSeleccionada, setRondaSeleccionada] = useState<number | null>(null);
+  // Nombre de cada campo, solo para torneos con más de uno (01/10, pedido de
+  // Iñi) — competicion -> campo_id -> nombre. Vacío en el 99% de los
+  // torneos (un solo campo, nunca hay filas en campos_golf_live para esa
+  // competición), así que no afecta en nada si el torneo no lo necesita.
+  const [nombresCampo, setNombresCampo] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let activo = true;
@@ -151,7 +156,7 @@ export default function PorraClasificacionPage() {
       setPorra(porraRow);
       setBonosPodio(porraRow.bono_podio_activo);
 
-      const [{ data: jugData }, { data: equiposData }] = await Promise.all([
+      const [{ data: jugData }, { data: equiposData }, { data: camposData }] = await Promise.all([
         porraRow.competicion
           ? supabase
               .from('jugadores')
@@ -165,11 +170,17 @@ export default function PorraClasificacionPage() {
         // vacía, y esta pantalla lo trata como "todavía no ha empezado"
         // más abajo.
         supabase.rpc('equipos_porra_clasificacion', { p_porra_id: porraId }),
+        // Nombre de cada campo (01/10) — vacío salvo en los pocos torneos
+        // con más de un campo que el admin ya haya nombrado.
+        porraRow.competicion
+          ? supabase.from('campos_golf_live').select('campo_id,nombre').eq('competicion', porraRow.competicion)
+          : Promise.resolve({ data: [] as { campo_id: string; nombre: string }[] }),
       ]);
 
       if (!activo) return;
 
       setJugadores(((jugData as JugadorRow[]) ?? []).filter((j) => j.grupo_porra !== null));
+      setNombresCampo(Object.fromEntries(((camposData as { campo_id: string; nombre: string }[]) ?? []).map((c) => [c.campo_id, c.nombre])));
 
       const filasEquipos = (equiposData as { equipo_id: string; nombre_equipo: string | null; jugadores: string[]; created_at: string }[]) ?? [];
       const equiposOrdenados = filasEquipos
@@ -207,7 +218,7 @@ export default function PorraClasificacionPage() {
     setRondaSeleccionada(null);
     supabase
       .from('resultados_golf_hoyo')
-      .select('ronda,hoyo,par,golpes,tipo_resultado')
+      .select('ronda,hoyo,par,golpes,campo_id,tipo_resultado')
       .eq('jugador_id', jugadorFocoId)
       .order('ronda', { ascending: true })
       .order('hoyo', { ascending: true })
@@ -464,16 +475,33 @@ export default function PorraClasificacionPage() {
                   const hoyos: HoyoRow[] = hoyosFoco;
                   const rondas = Array.from(new Set(hoyos.map((h) => h.ronda))).sort((a, b) => a - b);
                   const hoyosRonda = hoyos.filter((h) => h.ronda === rondaSeleccionada);
+                  // Nombre del campo de la ronda (01/10) — solo aparece en
+                  // los pocos torneos con más de un campo (ver
+                  // campos_golf_live); en el resto, campo_id siempre es
+                  // null y esto no pinta nada.
+                  const campoIdRondaSel = hoyosRonda[0]?.campo_id ?? null;
+                  const nombreCampoRondaSel = campoIdRondaSel ? nombresCampo[campoIdRondaSel] : null;
                   return (
                     <>
                       {rondas.length > 1 && (
                         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                          {rondas.map((r) => (
-                            <button key={r} type="button" onClick={() => setRondaSeleccionada(r)} style={vistaPillStyle(rondaSeleccionada === r)}>
-                              Ronda {r}
-                            </button>
-                          ))}
+                          {rondas.map((r) => {
+                            const campoIdR = hoyos.find((h) => h.ronda === r)?.campo_id ?? null;
+                            const nombreCampoR = campoIdR ? nombresCampo[campoIdR] : null;
+                            return (
+                              <button key={r} type="button" onClick={() => setRondaSeleccionada(r)} style={vistaPillStyle(rondaSeleccionada === r)}>
+                                Ronda {r}
+                                {nombreCampoR ? ` · ${nombreCampoR}` : ''}
+                              </button>
+                            );
+                          })}
                         </div>
+                      )}
+
+                      {campoIdRondaSel && rondas.length <= 1 && (
+                        <span style={{ fontSize: 10.5, color: S.MUTED_3 }}>
+                          {nombreCampoRondaSel ?? `Campo ${campoIdRondaSel} (todavía sin nombre — se puede poner desde el panel de administración)`}
+                        </span>
                       )}
 
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 6 }}>

@@ -24,10 +24,33 @@ import * as S from '@/lib/mockupStyles';
 // no ha subido ninguno todavía, o el admin ha desmarcado esta ubicación en
 // todos los vídeos), el componente no pinta nada — la pantalla se queda
 // exactamente igual que sin este componente.
+//
+// ----------------------------------------------------------------------
+// FIX 01/10 (aviso de Iñi: "el vídeo de publicidad de la página de
+// clasificación no funciona, está colgado. Solamente se ve una imagen
+// congelada"): el componente confiaba solo en los atributos de HTML
+// `autoPlay`/`muted` del <video>. Esto puede fallar silenciosamente de dos
+// formas típicas de Next.js: (1) la página se renderiza primero en el
+// servidor y el navegador "hidrata" el <video> después — en ese proceso el
+// arranque automático se puede interrumpir y el vídeo se queda parado en su
+// primer fotograma (de ahí la "imagen congelada"); (2) el navegador puede
+// bloquear el autoplay sin avisar en ningún sitio visible (la promesa de
+// `.play()` se rechaza en silencio si no se gestiona). Como `onPlay` nunca
+// llegaba a dispararse en ese caso, tampoco se registraba la visualización
+// — encaja con que SOLO pasara en algunas pantallas y no en otras.
+//
+// Ahora se controla la reproducción de forma explícita (vía ref, no solo
+// con los atributos JSX) y, si el arranque automático falla o se queda
+// colgado más de unos segundos, se muestra un botón de "▶ Reproducir"
+// encima del vídeo para que un toque del usuario lo arranque manualmente
+// (un gesto del usuario siempre está permitido por los navegadores, aunque
+// el autoplay esté bloqueado).
 export default function AnuncioVideoInline({ ubicacion }: { ubicacion: 'clasificacion' | 'mesas' }) {
   const [video, setVideo] = useState<{ id: string; url: string } | null | 'cargando'>('cargando');
   const [silenciado, setSilenciado] = useState(true);
+  const [necesitaToque, setNecesitaToque] = useState(false);
   const yaRegistradoRef = useRef(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
     let activo = true;
@@ -41,6 +64,42 @@ export default function AnuncioVideoInline({ ubicacion }: { ubicacion: 'clasific
       activo = false;
     };
   }, [ubicacion]);
+
+  // Arranque explícito de la reproducción (ver nota de más arriba) — se
+  // repite cada vez que cambia el vídeo elegido. Si el navegador bloquea el
+  // autoplay (promesa rechazada) o si, pasados unos segundos, el vídeo
+  // sigue sin avanzar de fotograma (archivo colgándose al cargar), se ofrece
+  // el botón manual en vez de dejar la "imagen congelada" sin explicación.
+  useEffect(() => {
+    if (!video || video === 'cargando') return;
+    const el = videoRef.current;
+    if (!el) return;
+
+    setNecesitaToque(false);
+    el.muted = true;
+
+    const intentarReproducir = () => {
+      el.play().catch(() => {
+        setNecesitaToque(true);
+      });
+    };
+    intentarReproducir();
+
+    const avisoSiSigueColgado = window.setTimeout(() => {
+      if (el.paused || el.readyState < 2) setNecesitaToque(true);
+    }, 4000);
+
+    return () => window.clearTimeout(avisoSiSigueColgado);
+  }, [video]);
+
+  function reproducirManualmente() {
+    const el = videoRef.current;
+    if (!el) return;
+    el.muted = silenciado;
+    el.play()
+      .then(() => setNecesitaToque(false))
+      .catch(() => setNecesitaToque(true));
+  }
 
   function alEmpezarReproduccion() {
     if (!video || video === 'cargando' || yaRegistradoRef.current) return;
@@ -74,14 +133,61 @@ export default function AnuncioVideoInline({ ubicacion }: { ubicacion: 'clasific
       <div style={{ position: 'relative' }}>
         <video
           key={video.id}
+          ref={videoRef}
           src={video.url}
           autoPlay
           muted={silenciado}
           loop
           playsInline
-          onPlay={alEmpezarReproduccion}
+          onPlay={() => {
+            setNecesitaToque(false);
+            alEmpezarReproduccion();
+          }}
+          onError={() => {
+            // eslint-disable-next-line no-console
+            console.error('No se ha podido cargar el vídeo publicitario:', video.url);
+            setNecesitaToque(true);
+          }}
           style={{ width: '100%', maxHeight: 220, objectFit: 'cover', borderRadius: 12, border: `1px solid ${S.CARD_BORDER}`, background: '#000', display: 'block' }}
         />
+        {necesitaToque && (
+          <button
+            type="button"
+            onClick={reproducirManualmente}
+            aria-label="Reproducir el vídeo"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'rgba(6,10,8,0.45)',
+              border: 'none',
+              borderRadius: 12,
+              cursor: 'pointer',
+              padding: 0,
+            }}
+          >
+            <span
+              style={{
+                width: 52,
+                height: 52,
+                borderRadius: '50%',
+                background: 'rgba(6,10,8,0.75)',
+                border: '1px solid rgba(255,255,255,0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="#F5F7F5">
+                <path d="M8 5v14l11-7Z" />
+              </svg>
+            </span>
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setSilenciado((s) => !s)}

@@ -4,6 +4,39 @@ import { normalizarNombre } from '@/lib/nombreMatch';
 import { obtenerLeaderboardEspn, obtenerHoyosJugadorEspn, conConcurrenciaLimitada, type EspnTour } from '@/lib/espnGolf';
 import { tipoResultadoHoyo } from '@/lib/golfScoring';
 
+// Biblioteca de pares de campo (01/10, pedido de Iñi: "si yo lo he puesto a
+// mano, pues coges el de a mano, y si no, cuando actualicemos la extracción
+// de ESPN, que nos traiga también los pares de cada hoyo") — ver el bloque
+// "BIBLIOTECA DE PARES DE CAMPO DE GOLF" en drafters-schema.sql para el
+// diseño completo. Aquí solo se rellena sola, nunca se lee para calcular
+// nada todavía (eso le toca a la futura integración de Data Golf, que
+// reconstruirá el hoyo a hoyo a partir del par guardado aquí).
+async function rellenarBibliotecaDesdeEspn(admin: ReturnType<typeof crearClienteAdmin>, competicion: string, campoIds: Set<string | null>) {
+  for (const campoId of campoIds) {
+    if (!campoId) continue; // torneo de un solo campo sin id (ESPN no siempre lo da) — nada que vincular a un nombre
+
+    const { data: campoLive } = await admin
+      .from('campos_golf_live')
+      .select('nombre')
+      .eq('competicion', competicion)
+      .eq('campo_id', campoId)
+      .maybeSingle();
+
+    const nombre = (campoLive as { nombre: string } | null)?.nombre;
+    if (!nombre) continue; // todavía sin nombre puesto por el admin — no hay con qué vincular la biblioteca
+
+    const { data: paresData } = await admin.rpc('pares_conocidos_campo', { p_competicion: competicion, p_campo_id: campoId });
+    const pares = (paresData as (number | null)[] | null) ?? [];
+    if (pares.length !== 18 || pares.some((p) => p === null)) continue; // todavía faltan hoyos por completar entre todo el campo
+
+    await admin.rpc('actualizar_par_biblioteca_desde_espn', {
+      p_nombre: nombre,
+      p_nombre_normalizado: normalizarNombre(nombre),
+      p_pares: pares,
+    });
+  }
+}
+
 // ============================================================================
 // SINCRONIZACIÓN DE RESULTADOS DE GOLF EN VIVO (28/09, pedido de Iñi)
 // ============================================================================
@@ -169,6 +202,7 @@ export async function POST(req: NextRequest) {
               hoyo: h.hoyo,
               par: h.par,
               golpes: h.golpes,
+              campo_id: h.campoId,
               tipo_resultado: tipoResultadoHoyo(h.golpes, h.par),
               actualizado_en: ahora,
             }));
@@ -187,6 +221,12 @@ export async function POST(req: NextRequest) {
             .upsert(todasLasFilas, { onConflict: 'jugador_id,ronda,hoyo' });
           if (hoyosError) throw new Error(`No se ha podido guardar el hoyo a hoyo: ${hoyosError.message}`);
           resultado.hoyosActualizados = todasLasFilas.length;
+
+          // Con el hoyo a hoyo ya guardado, de paso se intenta rellenar sola
+          // la biblioteca de pares de campo para los campos de este ciclo
+          // que ya tengan nombre puesto — nunca pisa un campo cargado a mano.
+          const campoIdsEsteCiclo = new Set(todasLasFilas.map((f) => f.campo_id));
+          await rellenarBibliotecaDesdeEspn(admin, torneo.competicion, campoIdsEsteCiclo);
         }
       }
 

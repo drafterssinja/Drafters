@@ -60,14 +60,49 @@ function parsearThru(valor: unknown): number | null {
 /**
  * Clasificación completa de un torneo en curso — UNA sola llamada a ESPN
  * para todo el campo (barato: se puede pedir cada 5 minutos sin problema).
+ *
+ * CAMBIO 01/10 (aviso de Iñi, primera prueba real con un torneo del DP
+ * World Tour — Alfred Dunhill Links 2026 — ESPN respondió 404 con
+ * "leaderboard?tournamentId=..."): como esta API no es oficial ni está
+ * documentada por ESPN, no hay ninguna garantía de que todos los tours usen
+ * exactamente la misma forma de URL para el mismo dato — de hecho, dentro
+ * de este mismo archivo, obtenerHoyosJugadorEspn() ya usaba el id del
+ * torneo COMO PARTE DE LA RUTA ("leaderboard/{eventId}/playersummary"), no
+ * como parámetro de query, así que es razonable que el leaderboard general
+ * también lo acepte así (o incluso lo requiera así) en vez de
+ * "?tournamentId=...". Para no depender de adivinar cuál es la única forma
+ * correcta, se prueban varias formas conocidas de construir esta URL, en
+ * orden, y se usa la primera que responda bien — si ESPN cambia de forma
+ * de un tour a otro (o de una semana a otra), esto sigue funcionando sin
+ * tener que tocar código cada vez.
  */
-export async function obtenerLeaderboardEspn(tour: EspnTour, eventId: string): Promise<CompetidorEnVivo[]> {
-  const url = `https://site.api.espn.com/apis/site/v2/sports/golf/${tour}/leaderboard?tournamentId=${encodeURIComponent(eventId)}`;
-  const res = await fetch(url, { cache: 'no-store' });
-  if (!res.ok) {
-    throw new Error(`ESPN respondió ${res.status} al pedir el leaderboard (tour=${tour}, eventId=${eventId})`);
+async function intentarObtenerJsonLeaderboard(tour: EspnTour, eventId: string): Promise<{ data: any; urlUsada: string }> {
+  const candidatas = [
+    `https://site.api.espn.com/apis/site/v2/sports/golf/${tour}/leaderboard?tournamentId=${encodeURIComponent(eventId)}`,
+    `https://site.api.espn.com/apis/site/v2/sports/golf/${tour}/leaderboard/${encodeURIComponent(eventId)}`,
+    `https://site.api.espn.com/apis/site/v2/sports/golf/${tour}/summary?event=${encodeURIComponent(eventId)}`,
+    `https://site.web.api.espn.com/apis/site/v2/sports/golf/${tour}/leaderboard/${encodeURIComponent(eventId)}`,
+  ];
+
+  const errores: string[] = [];
+  for (const url of candidatas) {
+    try {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) {
+        errores.push(`${res.status} en ${url}`);
+        continue;
+      }
+      const data: any = await res.json();
+      return { data, urlUsada: url };
+    } catch (e) {
+      errores.push(`${(e as Error).message} en ${url}`);
+    }
   }
-  const data: any = await res.json();
+  throw new Error(`ESPN no respondió con ningún formato de URL conocido (tour=${tour}, eventId=${eventId}): ${errores.join(' · ')}`);
+}
+
+export async function obtenerLeaderboardEspn(tour: EspnTour, eventId: string): Promise<CompetidorEnVivo[]> {
+  const { data } = await intentarObtenerJsonLeaderboard(tour, eventId);
 
   const competidoresRaw: any[] =
     data?.events?.[0]?.competitions?.[0]?.competitors ?? data?.leaderboard?.[0]?.competitors ?? data?.competitors ?? [];
@@ -100,7 +135,7 @@ export async function obtenerLeaderboardEspn(tour: EspnTour, eventId: string): P
   return resultado;
 }
 
-export type HoyoEnVivo = { ronda: number; hoyo: number; par: number; golpes: number };
+export type HoyoEnVivo = { ronda: number; hoyo: number; par: number; golpes: number; campoId: string | null };
 
 /**
  * Desglose hoyo a hoyo de UN jugador — una llamada por jugador (el motivo de
@@ -121,13 +156,25 @@ export async function obtenerHoyosJugadorEspn(tour: EspnTour, eventId: string, s
   for (const r of rounds) {
     const ronda = Number(r?.period);
     if (!Number.isFinite(ronda)) continue;
+    // Torneos con más de un campo (01/10, pedido de Iñi — p.ej. el Alfred
+    // Dunhill Links Championship, 3 campos en rotación): ESPN da el campo de
+    // CADA ronda en este mismo sitio (playersummary → rounds[].courseId), así
+    // que se guarda junto con el resto del hoyo a hoyo. El par de cada hoyo
+    // (l.par, más abajo) ya venía correctamente desglosado por ronda incluso
+    // antes de esto — lo único que faltaba era poder IDENTIFICAR de qué
+    // campo era cada ronda para mostrarlo (ver campos_golf_live en el
+    // esquema). Si ESPN no da courseId para este torneo (lo habitual, un
+    // solo campo), queda en null y la pantalla simplemente no muestra nombre
+    // de campo — sin cambiar nada más.
+    const campoIdRaw = r?.courseId;
+    const campoId = campoIdRaw !== undefined && campoIdRaw !== null ? String(campoIdRaw) : null;
     const linescores: any[] = r?.linescores ?? [];
     for (const l of linescores) {
       const hoyo = Number(l?.period);
       const par = Number(l?.par);
       const golpes = Number(l?.value);
       if (!Number.isFinite(hoyo) || !Number.isFinite(par) || !Number.isFinite(golpes) || golpes <= 0) continue;
-      hoyos.push({ ronda, hoyo, par, golpes });
+      hoyos.push({ ronda, hoyo, par, golpes, campoId });
     }
   }
   return hoyos;

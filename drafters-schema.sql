@@ -1970,8 +1970,11 @@ alter table public.anuncios_video_reproducciones drop constraint if exists anunc
 alter table public.anuncios_video_reproducciones add constraint anuncios_video_reproducciones_ubicacion_check
   check (ubicacion in ('recarga', 'clasificacion', 'mesas'));
 
--- Acelera la comprobación "¿ya hay una visualización de hoy para este
--- usuario+vídeo?" que hace registrar_visualizacion_anuncio() más abajo.
+-- Acelera las consultas por usuario+vídeo (estadísticas del admin). Hasta
+-- el 01/10 también aceleraba la comprobación de "una visualización al día"
+-- que hacía registrar_visualizacion_anuncio() — ese límite se ha quitado
+-- (ver esa función más abajo), pero el índice se mantiene porque sigue
+-- siendo útil para los recuentos del panel de admin.
 create index if not exists anuncios_video_reproducciones_usuario_video_idx
   on public.anuncios_video_reproducciones (video_id, usuario_id, creado_at);
 
@@ -2040,20 +2043,31 @@ grant execute on function public.elegir_anuncio_video(text) to authenticated;
 -- saldo ('clasificacion' o 'mesas') — únicamente para las estadísticas del
 -- admin. p_completado indica si llegó al final o lo cortó antes de acabar.
 --
--- Como mucho una visualización por usuario y por vídeo AL DÍA (pedido de
--- Iñi, 28/09: "aunque se reproduzca en bucle, que cada usuario que vea un
--- vídeo se guarde como una vez al día") — estos huecos reproducen el vídeo
--- en bucle sin parar y el usuario puede volver a la misma pantalla varias
--- veces en un rato, así que sin este límite una sola visita podría contarse
--- decenas de veces. Si ya existe una fila de hoy para este usuario+vídeo
--- (en cualquier ubicación — el límite es por usuario y vídeo, no por
--- ubicación), esta llamada simplemente no hace nada. "Hoy" se calcula en
--- UTC, igual que el resto de fechas de la app.
+-- CAMBIO 01/10 (corrige el criterio del 28/09): antes se limitaba a una
+-- única visualización por usuario y por vídeo AL DÍA. Iñi ha pedido ahora
+-- justo lo contrario para las visitas: "cuando se está repitiendo en bucle
+-- el vídeo, quiero que cuente una única visualización, pero si un mismo
+-- usuario entra, por ejemplo, a las 8 de la mañana... y veo el vídeo, eso
+-- me cuenta una vez... pero si yo luego entro a las 10 de la mañana, me
+-- tiene que contar una segunda vez... y luego una tercera si entro a las 5
+-- de la tarde". Es decir: el límite ya NO es "una vez al día", sino "una
+-- vez por visita a la pantalla" — cada vez que el usuario entra de nuevo
+-- (recarga la página, vuelve a /mesas o a la clasificación) debe contar
+-- como una visualización nueva, por muchas veces que el vídeo se repita en
+-- bucle DENTRO de esa misma visita.
 --
--- Esto NO afecta a recargar_por_video() (más abajo): esa función inserta
--- directamente su propia fila, sin pasar por aquí, porque la recarga a
--- cambio de vídeo está pensada para poder repetirse sin límite de veces al
--- día — el límite diario es solo para estos huecos "pasivos".
+-- El bucle ya no puede inflar el contador: eso lo sigue garantizando el
+-- propio componente (components/AnuncioVideoInline.tsx), que solo llama a
+-- esta función una vez por "montaje" en pantalla (useRef que se resetea
+-- únicamente al entrar de nuevo a la página), nunca en cada vuelta del
+-- bucle. Por eso esta función ya no necesita comprobar nada: cada llamada
+-- que le llega es, por diseño, una visita real distinta, así que
+-- simplemente se inserta.
+--
+-- Esto NO afecta a recargar_por_video() (más abajo): esa función ya
+-- insertaba directamente su propia fila sin pasar por aquí, porque la
+-- recarga a cambio de vídeo siempre ha podido repetirse sin límite de veces
+-- al día.
 create or replace function public.registrar_visualizacion_anuncio(p_video_id uuid, p_ubicacion text, p_completado boolean default false)
 returns void
 language plpgsql
@@ -2062,15 +2076,6 @@ as $$
 begin
   if p_ubicacion not in ('recarga', 'clasificacion', 'mesas') then
     raise exception 'Ubicación de anuncio no válida: %', p_ubicacion;
-  end if;
-
-  if exists (
-    select 1 from public.anuncios_video_reproducciones
-    where video_id = p_video_id
-      and usuario_id = auth.uid()
-      and (creado_at at time zone 'utc')::date = (now() at time zone 'utc')::date
-  ) then
-    return;
   end if;
 
   insert into public.anuncios_video_reproducciones (video_id, usuario_id, ubicacion, completado)
@@ -2448,6 +2453,237 @@ create policy "resultados_golf_hoyo_admin_todo" on public.resultados_golf_hoyo
 -- La ruta de sincronización escribe con la clave de servicio (sin pasar
 -- por RLS) — la política de admin de aquí arriba es solo por si algún día
 -- hiciera falta corregir un dato a mano desde el propio SQL Editor.
+
+-- ============================================================================
+-- CAMPO DE CADA RONDA, PARA TORNEOS CON VARIOS CAMPOS (nuevo, 01/10)
+-- ============================================================================
+-- Pedido de Iñi: esta semana el torneo de la porra de golf se juega en tres
+-- campos distintos (rotación habitual en algunos torneos del DP World Tour,
+-- como el Alfred Dunhill Links Championship) — cada jugador puede jugar una
+-- ronda en un campo y otra ronda distinta en otro, con su propio par por
+-- hoyo. ESPN sí distingue esto en el desglose por jugador (campo `courseId`
+-- dentro de cada ronda, playersummary) — el par de cada hoyo YA se guardaba
+-- bien por ronda en `resultados_golf_hoyo` (no hacía falta tocar eso), lo que
+-- faltaba era poder IDENTIFICAR de qué campo era cada ronda, para que la
+-- pantalla de clasificación pueda decir "Ronda 2 · Carnoustie" en vez de solo
+-- "Ronda 2". Diseñado en general (no hardcodeado a este torneo) por si se
+-- repite en otro con varios campos.
+alter table public.resultados_golf_hoyo add column if not exists campo_id text;
+
+-- Nombre legible de cada campo, por torneo — ESPN solo da un id (texto u
+-- número) del campo dentro del hoyo a hoyo de cada jugador, nunca el nombre;
+-- el admin lo escribe a mano una vez ve qué id corresponde a qué campo real
+-- (p.ej. comprobándolo en la propia web de ESPN), desde /admin/resultados-golf.
+create table if not exists public.campos_golf_live (
+  id uuid primary key default gen_random_uuid(),
+  -- Igual que `torneos_golf_live.competicion`: tiene que coincidir exacto
+  -- con `jugadores.competicion` de ese torneo.
+  competicion text not null,
+  campo_id text not null,
+  nombre text not null,
+  created_at timestamptz not null default now(),
+  unique (competicion, campo_id)
+);
+
+alter table public.campos_golf_live enable row level security;
+drop policy if exists "campos_golf_live_select_publico" on public.campos_golf_live;
+create policy "campos_golf_live_select_publico" on public.campos_golf_live
+  -- Lectura pública: la pantalla de clasificación de cualquier porra/mesa de
+  -- este torneo necesita poder traducir campo_id -> nombre.
+  for select using (true);
+drop policy if exists "campos_golf_live_admin_todo" on public.campos_golf_live;
+create policy "campos_golf_live_admin_todo" on public.campos_golf_live
+  for all using (public.es_admin()) with check (public.es_admin());
+
+-- Qué campo_id aparecen ya en el hoyo a hoyo de este torneo, con su nombre
+-- si ya se le puso uno (para pintar el formulario de /admin/resultados-golf:
+-- un campo de texto por cada id detectado, vacío si todavía no tiene nombre).
+create or replace function public.campos_golf_detectados(p_competicion text)
+returns table (campo_id text, nombre text)
+language sql
+security definer set search_path = public
+stable
+as $$
+  select distinct h.campo_id, cgl.nombre
+  from public.resultados_golf_hoyo h
+  join public.jugadores j on j.id = h.jugador_id
+  left join public.campos_golf_live cgl on cgl.competicion = p_competicion and cgl.campo_id = h.campo_id
+  where j.competicion = p_competicion and j.deporte = 'golf' and h.campo_id is not null
+  order by h.campo_id;
+$$;
+revoke all on function public.campos_golf_detectados(text) from public;
+grant execute on function public.campos_golf_detectados(text) to authenticated;
+
+-- ============================================================================
+-- BIBLIOTECA DE PARES DE CAMPO DE GOLF (nuevo, 01/10)
+-- ============================================================================
+-- Pedido de Iñi: "habilita un campo en el superadmin para que... tenga que
+-- cargar yo cuál es el par de cada uno de los hoyos" — un plan de respaldo
+-- manual para el par de cada hoyo de un campo de golf, pensado para que
+-- funcione igual con cualquier fuente de datos en vivo (hoy ESPN, más
+-- adelante Data Golf u otra): "si yo lo he puesto a mano, pues coges el de
+-- a mano, y si no, cuando actualicemos la extracción de ESPN, que nos traiga
+-- también los pares de cada hoyo".
+--
+-- A diferencia de `campos_golf_live` (que solo guarda el NOMBRE de cada
+-- campo, por torneo, solo para los pocos torneos con varios campos en
+-- rotación), esta es una BIBLIOTECA aparte de cualquier torneo concreto,
+-- pensada para reutilizarse año tras año: el par de un hoyo de un campo real
+-- (p.ej. St Andrews Old Course) no cambia aunque el torneo que se juegue
+-- allí sí lo haga, así que una vez cargado un campo aquí, nunca hay que
+-- volver a cargarlo — ni a mano, ni por cualquier otro torneo futuro que se
+-- juegue en el mismo sitio.
+--
+-- Dos formas de rellenarse, con el mismo criterio que pidió Iñi:
+--   1. A MANO, desde /admin/resultados-golf — Iñi escribe el nombre del
+--      campo y el par de sus 18 hoyos. Esto SIEMPRE tiene prioridad: una vez
+--      un campo tiene `origen = 'manual'`, ningún proceso automático lo
+--      vuelve a tocar.
+--   2. AUTOMÁTICO, desde la sincronización de ESPN (ver
+--      app/api/admin/actualizar-golf-en-vivo/route.ts): ESPN ya da el par de
+--      cada hoyo dentro de su propio hoyo a hoyo (`resultados_golf_hoyo.par`,
+--      sin necesidad de ninguna fuente externa) — en cuanto, para un campo
+--      ya nombrado en `campos_golf_live`, se tienen los 18 pares completos
+--      (puede tardar, porque hace falta que ALGÚN jugador haya completado
+--      cada uno de los 18 hoyos, no necesariamente el mismo jugador), la
+--      sincronización los guarda aquí solos, sin que Iñi tenga que escribir
+--      nada — pero SOLO si todavía no existe ese campo aquí, o si existe con
+--      `origen = 'espn'` (nunca pisa un `origen = 'manual'`).
+--
+-- El día que se conecte Data Golf (o cualquier otro proveedor) para el DP
+-- World Tour, esa integración puede usar esta misma biblioteca tal cual
+-- (buscando por nombre de campo) sin ningún cambio de esquema — por eso se
+-- diseña aparte de ESPN desde el principio.
+create table if not exists public.campos_golf_biblioteca (
+  id uuid primary key default gen_random_uuid(),
+  -- Nombre tal cual se escribió/recibió (se muestra así en el admin).
+  nombre text not null,
+  -- Mismo criterio de normalización que ya usa lib/nombreMatch.ts para
+  -- jugadores (sin acentos, minúsculas, espacios colapsados) — calculado en
+  -- el código, nunca en SQL, para no duplicar esa lógica en dos sitios; así
+  -- "St Andrews" y "st   andrews" terminan siendo el mismo campo.
+  nombre_normalizado text not null unique,
+  par_h1 smallint check (par_h1 is null or par_h1 between 3 and 5),
+  par_h2 smallint check (par_h2 is null or par_h2 between 3 and 5),
+  par_h3 smallint check (par_h3 is null or par_h3 between 3 and 5),
+  par_h4 smallint check (par_h4 is null or par_h4 between 3 and 5),
+  par_h5 smallint check (par_h5 is null or par_h5 between 3 and 5),
+  par_h6 smallint check (par_h6 is null or par_h6 between 3 and 5),
+  par_h7 smallint check (par_h7 is null or par_h7 between 3 and 5),
+  par_h8 smallint check (par_h8 is null or par_h8 between 3 and 5),
+  par_h9 smallint check (par_h9 is null or par_h9 between 3 and 5),
+  par_h10 smallint check (par_h10 is null or par_h10 between 3 and 5),
+  par_h11 smallint check (par_h11 is null or par_h11 between 3 and 5),
+  par_h12 smallint check (par_h12 is null or par_h12 between 3 and 5),
+  par_h13 smallint check (par_h13 is null or par_h13 between 3 and 5),
+  par_h14 smallint check (par_h14 is null or par_h14 between 3 and 5),
+  par_h15 smallint check (par_h15 is null or par_h15 between 3 and 5),
+  par_h16 smallint check (par_h16 is null or par_h16 between 3 and 5),
+  par_h17 smallint check (par_h17 is null or par_h17 between 3 and 5),
+  par_h18 smallint check (par_h18 is null or par_h18 between 3 and 5),
+  -- 'manual' = lo escribió Iñi en el admin (nunca se pisa solo).
+  -- 'espn' = lo ha rellenado solo la sincronización, a partir del hoyo a
+  -- hoyo real que ya trae ESPN.
+  origen text not null default 'manual' check (origen in ('manual', 'espn')),
+  actualizado_en timestamptz not null default now()
+);
+
+alter table public.campos_golf_biblioteca enable row level security;
+drop policy if exists "campos_golf_biblioteca_select_publico" on public.campos_golf_biblioteca;
+create policy "campos_golf_biblioteca_select_publico" on public.campos_golf_biblioteca
+  -- Lectura pública: no hay nada sensible, y puede ser útil mostrarlo en
+  -- pantallas futuras (p.ej. la clasificación en directo).
+  for select using (true);
+drop policy if exists "campos_golf_biblioteca_admin_todo" on public.campos_golf_biblioteca;
+create policy "campos_golf_biblioteca_admin_todo" on public.campos_golf_biblioteca
+  for all using (public.es_admin()) with check (public.es_admin());
+
+-- Rellena/actualiza un campo de la biblioteca a partir de lo que ya trae
+-- ESPN, SIN pisar nunca un campo que Iñi ya haya cargado a mano. Pensada
+-- para llamarse solo desde la ruta de sincronización (clave de servicio) —
+-- por eso no se concede su ejecución a 'authenticated' más abajo.
+create or replace function public.actualizar_par_biblioteca_desde_espn(
+  p_nombre text,
+  p_nombre_normalizado text,
+  p_pares smallint[] -- exactamente 18 posiciones, hoyo 1 a 18; null si no se sabe todavía
+) returns void
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_origen_actual text;
+begin
+  if p_nombre_normalizado is null or btrim(p_nombre_normalizado) = '' then
+    return;
+  end if;
+  if p_pares is null or array_length(p_pares, 1) is distinct from 18 then
+    return; -- solo se guarda cuando ya se conocen los 18 hoyos
+  end if;
+
+  select origen into v_origen_actual
+  from public.campos_golf_biblioteca
+  where nombre_normalizado = p_nombre_normalizado;
+
+  if v_origen_actual = 'manual' then
+    return; -- Iñi ya lo cargó a mano — nunca se toca automáticamente
+  end if;
+
+  insert into public.campos_golf_biblioteca (
+    nombre, nombre_normalizado,
+    par_h1, par_h2, par_h3, par_h4, par_h5, par_h6, par_h7, par_h8, par_h9,
+    par_h10, par_h11, par_h12, par_h13, par_h14, par_h15, par_h16, par_h17, par_h18,
+    origen, actualizado_en
+  )
+  values (
+    p_nombre, p_nombre_normalizado,
+    p_pares[1], p_pares[2], p_pares[3], p_pares[4], p_pares[5], p_pares[6], p_pares[7], p_pares[8], p_pares[9],
+    p_pares[10], p_pares[11], p_pares[12], p_pares[13], p_pares[14], p_pares[15], p_pares[16], p_pares[17], p_pares[18],
+    'espn', now()
+  )
+  on conflict (nombre_normalizado) do update set
+    nombre = excluded.nombre,
+    par_h1 = excluded.par_h1, par_h2 = excluded.par_h2, par_h3 = excluded.par_h3, par_h4 = excluded.par_h4,
+    par_h5 = excluded.par_h5, par_h6 = excluded.par_h6, par_h7 = excluded.par_h7, par_h8 = excluded.par_h8,
+    par_h9 = excluded.par_h9, par_h10 = excluded.par_h10, par_h11 = excluded.par_h11, par_h12 = excluded.par_h12,
+    par_h13 = excluded.par_h13, par_h14 = excluded.par_h14, par_h15 = excluded.par_h15, par_h16 = excluded.par_h16,
+    par_h17 = excluded.par_h17, par_h18 = excluded.par_h18,
+    origen = 'espn',
+    actualizado_en = now();
+end;
+$$;
+revoke all on function public.actualizar_par_biblioteca_desde_espn(text, text, smallint[]) from public;
+-- A propósito, sin "grant execute ... to authenticated": solo la llama la
+-- ruta de sincronización, que usa la clave de servicio (se salta RLS y los
+-- grants de rol igualmente) — así ningún usuario normal puede llamarla
+-- directamente desde el navegador.
+
+-- Para cada campo_id ya nombrado de un torneo (campos_golf_live), reconstruye
+-- los 18 pares a partir de lo que YA está guardado en resultados_golf_hoyo
+-- (el par de cada hoyo que ya trae ESPN) — null en las posiciones todavía
+-- sin ningún jugador que haya llegado a ese hoyo. La ruta de sincronización
+-- llama a esto después de guardar el hoyo a hoyo de cada ciclo, y si el
+-- array resultante ya tiene los 18 completos, lo pasa a
+-- actualizar_par_biblioteca_desde_espn() para guardarlo en la biblioteca.
+create or replace function public.pares_conocidos_campo(p_competicion text, p_campo_id text)
+returns smallint[]
+language sql
+security definer set search_path = public
+stable
+as $$
+  select array(
+    select (
+      select h.par
+      from public.resultados_golf_hoyo h
+      join public.jugadores j on j.id = h.jugador_id
+      where j.competicion = p_competicion and j.deporte = 'golf'
+        and h.campo_id = p_campo_id and h.hoyo = n
+      limit 1
+    )
+    from generate_series(1, 18) as n
+  );
+$$;
+revoke all on function public.pares_conocidos_campo(text, text) from public;
+grant execute on function public.pares_conocidos_campo(text, text) to authenticated;
 
 -- ============================================================================
 -- LIQUIDACIÓN DE PREMIOS (nuevo, 29/09)
