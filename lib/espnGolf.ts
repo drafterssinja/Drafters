@@ -76,8 +76,33 @@ function parsearThru(valor: unknown): number | null {
  * de un tour a otro (o de una semana a otra), esto sigue funcionando sin
  * tener que tocar código cada vez.
  */
+// CAMBIO 01/10 (segunda vuelta — aviso de Iñi, con una captura del JSON real
+// de ESPN): las 4 formas de arriba (todas con "leaderboard" o "summary" en
+// la ruta) daban 404 siempre para este torneo del DP World Tour, aunque el
+// id del evento era correcto (Iñi lo confirmó mirando el calendario
+// completo de la temporada: "401822704" SÍ es el Alfred Dunhill Links
+// Championship, 1-4 de octubre de 2026). La pista la dio el propio Iñi
+// pegando el JSON de `.../eur/scoreboard` (el "marcador" general del tour,
+// sin ningún id de torneo en la URL): ese mismo JSON trae, de regalo, el
+// torneo que esté en juego HOY con su clasificación completa (jugador,
+// puntuación, rondas...) dentro de un array `events`. O sea, el endpoint que
+// de verdad tiene datos en vivo para el DP World Tour no es "leaderboard",
+// es "scoreboard" — que para golf no pide una fecha de un partido suelto
+// como en otros deportes, da directamente el torneo que esté activo ese
+// día. Se añade como nueva forma a probar (con y sin la fecha de hoy
+// explícita, por robustez — por si acaso alguna vez hiciera falta pasarla).
+function fechaHoyEspnFormato(): string {
+  const hoy = new Date();
+  const yyyy = hoy.getUTCFullYear();
+  const mm = String(hoy.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(hoy.getUTCDate()).padStart(2, '0');
+  return `${yyyy}${mm}${dd}`;
+}
+
 async function intentarObtenerJsonLeaderboard(tour: EspnTour, eventId: string): Promise<{ data: any; urlUsada: string }> {
   const candidatas = [
+    `https://site.api.espn.com/apis/site/v2/sports/golf/${tour}/scoreboard`,
+    `https://site.api.espn.com/apis/site/v2/sports/golf/${tour}/scoreboard?dates=${fechaHoyEspnFormato()}`,
     `https://site.api.espn.com/apis/site/v2/sports/golf/${tour}/leaderboard?tournamentId=${encodeURIComponent(eventId)}`,
     `https://site.api.espn.com/apis/site/v2/sports/golf/${tour}/leaderboard/${encodeURIComponent(eventId)}`,
     `https://site.api.espn.com/apis/site/v2/sports/golf/${tour}/summary?event=${encodeURIComponent(eventId)}`,
@@ -93,6 +118,17 @@ async function intentarObtenerJsonLeaderboard(tour: EspnTour, eventId: string): 
         continue;
       }
       const data: any = await res.json();
+      // "scoreboard" puede devolver más de un evento del mismo tour a la vez
+      // (el día que se solapen dos semanas) — si es así, hace falta
+      // comprobar que el que trae de verdad es NUESTRO torneo (mismo id),
+      // no asumir que siempre es el primero de la lista.
+      if (Array.isArray(data?.events) && data.events.length > 1) {
+        const coincide = data.events.some((e: any) => String(e?.id) === String(eventId));
+        if (!coincide) {
+          errores.push(`scoreboard devolvió ${data.events.length} eventos, ninguno con id=${eventId}, en ${url}`);
+          continue;
+        }
+      }
       return { data, urlUsada: url };
     } catch (e) {
       errores.push(`${(e as Error).message} en ${url}`);
@@ -104,8 +140,15 @@ async function intentarObtenerJsonLeaderboard(tour: EspnTour, eventId: string): 
 export async function obtenerLeaderboardEspn(tour: EspnTour, eventId: string): Promise<CompetidorEnVivo[]> {
   const { data } = await intentarObtenerJsonLeaderboard(tour, eventId);
 
+  // Si "scoreboard" ha traído varios eventos a la vez, nos quedamos con el
+  // que sea de verdad nuestro torneo (por id) en vez de asumir que es el
+  // primero — el resto de formas de pedirlo (leaderboard/summary) solo
+  // devuelven un único torneo, así que ahí el id ya coincide siempre.
+  const eventos: any[] = Array.isArray(data?.events) ? data.events : [];
+  const eventoElegido = eventos.length > 1 ? eventos.find((e) => String(e?.id) === String(eventId)) ?? eventos[0] : eventos[0];
+
   const competidoresRaw: any[] =
-    data?.events?.[0]?.competitions?.[0]?.competitors ?? data?.leaderboard?.[0]?.competitors ?? data?.competitors ?? [];
+    eventoElegido?.competitions?.[0]?.competitors ?? data?.leaderboard?.[0]?.competitors ?? data?.competitors ?? [];
 
   const resultado: CompetidorEnVivo[] = [];
   for (const c of competidoresRaw) {
