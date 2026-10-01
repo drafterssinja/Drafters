@@ -10,6 +10,7 @@ import * as S from '@/lib/mockupStyles';
 import { formatEuros } from '@/lib/salaShared';
 import { GRUPO_PORRA_LABELS, ORDEN_GRUPOS, COLOR_GRUPO, type GrupoPorra } from '@/lib/porraGrupos';
 import { formatGolfScore, bonoPodioParaJugador, COLOR_TIPO_RESULTADO, ETIQUETA_TIPO_RESULTADO, type TipoResultadoHoyo } from '@/lib/golfScoring';
+import { normalizarNombre } from '@/lib/nombreMatch';
 
 // ============================================================================
 // PORRA CLÁSICA — CLASIFICACIÓN EN DIRECTO (nuevo, 27/09, undécima vuelta)
@@ -117,6 +118,12 @@ export default function PorraClasificacionPage() {
   // torneos (un solo campo, nunca hay filas en campos_golf_live para esa
   // competición), así que no afecta en nada si el torneo no lo necesita.
   const [nombresCampo, setNombresCampo] = useState<Record<string, string>>({});
+  // Buscadores (nuevo, 01/10, pedido de Iñi): filtran la lista ya ordenada
+  // sin tocar la posición que se muestra — el número de cada fila sigue
+  // siendo su puesto real en la clasificación completa, no su puesto dentro
+  // del resultado filtrado.
+  const [busquedaEquipo, setBusquedaEquipo] = useState('');
+  const [busquedaJugador, setBusquedaJugador] = useState('');
 
   useEffect(() => {
     let activo = true;
@@ -199,28 +206,40 @@ export default function PorraClasificacionPage() {
   }, [router, porraId]);
 
   const jugadoresPorId = useMemo(() => new Map(jugadores.map((j) => [j.id, j])), [jugadores]);
+
   // Orden de la vista "Torneo" (corregido 01/10, aviso de Iñi: "quiero que
   // salga ordenado por clasificación" — antes salía agrupado por lista de
   // color/precio, p.ej. todos los "Azul" juntos y dentro de ese bloque sin
   // relación con su puesto real en el torneo).
-  // Mientras el jugador no tiene ningún resultado en vivo todavía (torneo
-  // sin empezar, o recién conectado y aún sin sincronizar) se mantiene el
-  // orden de precio de siempre — en cuanto tiene resultado, manda la
-  // clasificación real (golpes respecto al par), y a igualdad de golpes se
-  // desempata por precio para que el orden no salte sin motivo entre
-  // sincronizaciones.
+  // Segunda corrección de Iñi, mismo día: "la E es como si fuese el par, es
+  // decir, el cero... cuando acabe el menos uno, el siguiente no es el más
+  // uno... las E's cuentan como un 0" — por eso aquí NO hay un tratamiento
+  // especial para "sin resultado todavía": al no tener resultado,
+  // `resultado_en_vivo_total` es null y `?? 0` lo trata exactamente igual
+  // que una E de verdad, así que cae solo en su sitio correcto del orden
+  // (entre los -1 y los +1), nunca al final. A igualdad de golpes se
+  // desempata por precio, para que el orden no salte sin motivo entre
+  // sincronizaciones de 5 en 5 minutos (y es lo único que manda antes de
+  // que empiece el torneo, cuando nadie tiene resultado todavía).
   const campoOrdenado = useMemo(() => {
     return jugadores.slice().sort((a, b) => {
-      const aTiene = a.resultado_en_vivo_total !== null || a.resultado_en_vivo_thru !== null;
-      const bTiene = b.resultado_en_vivo_total !== null || b.resultado_en_vivo_thru !== null;
-      if (aTiene && bTiene) {
-        const diff = (a.resultado_en_vivo_total ?? 0) - (b.resultado_en_vivo_total ?? 0);
-        return diff !== 0 ? diff : b.precio - a.precio;
-      }
-      if (aTiene !== bTiene) return aTiene ? -1 : 1; // con resultado siempre por delante de quien todavía no tiene
-      return b.precio - a.precio; // ninguno tiene resultado todavía (torneo sin empezar)
+      const diff = (a.resultado_en_vivo_total ?? 0) - (b.resultado_en_vivo_total ?? 0);
+      return diff !== 0 ? diff : b.precio - a.precio;
     });
   }, [jugadores]);
+
+  // Orden de la vista "Porra" (nuevo, 01/10, aviso de Iñi: "no se queda
+  // ordenada la porra... que el primero sea el que va a menos golpes") —
+  // antes la lista de equipos salía por orden de inscripción. totalEquipo()
+  // ya trata a un jugador sin resultado como 0 (ver su comentario arriba),
+  // así que una E de equipo cae igual de bien colocada que en campoOrdenado,
+  // sin necesidad de ningún caso especial aquí tampoco.
+  const equiposOrdenados = useMemo(() => {
+    return equipos.slice().sort((a, b) => {
+      const diff = totalEquipo(a.jugadores, jugadoresPorId, bonosPodio) - totalEquipo(b.jugadores, jugadoresPorId, bonosPodio);
+      return diff !== 0 ? diff : a.createdAt.localeCompare(b.createdAt);
+    });
+  }, [equipos, jugadoresPorId, bonosPodio]);
 
   // Hoyo a hoyo del jugador con el foco puesto (pedido de Iñi, 28/09: "cuando
   // pinchas en un resultado, abajo se ven los resultados hoyo a hoyo... de
@@ -349,40 +368,51 @@ export default function PorraClasificacionPage() {
 
           {vista === 'porra' && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-              <div style={{ flexShrink: 0, width: 126, display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 380, overflowY: 'auto' }}>
+              <div style={{ flexShrink: 0, width: 126, display: 'flex', flexDirection: 'column', gap: 5 }}>
                 <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Equipos ({equipos.length})</span>
-                {equipos.map((eq, i) => {
-                  const activo = eq.equipoId === equipoSeleccionado.equipoId;
-                  return (
-                    <a
-                      key={eq.equipoId}
-                      href="#"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        setEquipoSeleccionadoId(eq.equipoId);
-                        setJugadorFocoId(null);
-                      }}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        padding: 8,
-                        background: activo ? 'rgba(61,220,132,0.1)' : S.PANEL,
-                        border: `1px solid ${activo ? 'rgba(61,220,132,0.4)' : '#1E2723'}`,
-                        borderRadius: 9,
-                        textDecoration: 'none',
-                      }}
-                    >
-                      <span style={{ flexShrink: 0, width: 16, textAlign: 'center', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 11, color: S.MUTED_2 }}>{i + 1}</span>
-                      <span style={{ flex: 1, minWidth: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {eq.nombreEquipo}
-                      </span>
-                      <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 12, color: S.MUTED_2 }}>
-                        {formatGolfScore(totalEquipo(eq.jugadores, jugadoresPorId, bonosPodio))}
-                      </span>
-                    </a>
-                  );
-                })}
+                <input
+                  value={busquedaEquipo}
+                  onChange={(e) => setBusquedaEquipo(e.target.value)}
+                  placeholder="Buscar equipo..."
+                  style={{ ...S.input, padding: '6px 8px', fontSize: 11 }}
+                />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 340, overflowY: 'auto' }}>
+                  {equiposOrdenados
+                    .map((eq, i) => ({ eq, rango: i + 1 }))
+                    .filter(({ eq }) => !busquedaEquipo.trim() || normalizarNombre(eq.nombreEquipo ?? '').includes(normalizarNombre(busquedaEquipo)))
+                    .map(({ eq, rango }) => {
+                      const activo = eq.equipoId === equipoSeleccionado.equipoId;
+                      return (
+                        <a
+                          key={eq.equipoId}
+                          href="#"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            setEquipoSeleccionadoId(eq.equipoId);
+                            setJugadorFocoId(null);
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            padding: 8,
+                            background: activo ? 'rgba(61,220,132,0.1)' : S.PANEL,
+                            border: `1px solid ${activo ? 'rgba(61,220,132,0.4)' : '#1E2723'}`,
+                            borderRadius: 9,
+                            textDecoration: 'none',
+                          }}
+                        >
+                          <span style={{ flexShrink: 0, width: 16, textAlign: 'center', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 11, color: S.MUTED_2 }}>{rango}</span>
+                          <span style={{ flex: 1, minWidth: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {eq.nombreEquipo}
+                          </span>
+                          <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 12, color: S.MUTED_2 }}>
+                            {formatGolfScore(totalEquipo(eq.jugadores, jugadoresPorId, bonosPodio))}
+                          </span>
+                        </a>
+                      );
+                    })}
+                </div>
               </div>
 
               <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -451,36 +481,47 @@ export default function PorraClasificacionPage() {
           )}
 
           {vista === 'torneo' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 420, overflowY: 'auto' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
               <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Campo completo ({campoOrdenado.length} jugadores)</span>
-              {campoOrdenado.map((j, i) => (
-                <a
-                  key={j.id}
-                  href="#"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    setJugadorFocoId((prev) => (prev === j.id ? null : j.id));
-                  }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    padding: '9px 10px',
-                    background: jugadorFocoId === j.id ? 'rgba(61,220,132,0.1)' : S.PANEL,
-                    border: `1px solid ${jugadorFocoId === j.id ? 'rgba(61,220,132,0.4)' : '#1E2723'}`,
-                    borderRadius: 9,
-                    textDecoration: 'none',
-                  }}
-                >
-                  <span style={{ flexShrink: 0, width: 20, textAlign: 'center', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 11, color: S.MUTED_2 }}>{i + 1}</span>
-                  <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
-                    <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.nombre}</span>
-                    {j.grupo_porra && <span style={{ fontSize: 9.5, fontWeight: 700, color: COLOR_GRUPO[j.grupo_porra] }}>{GRUPO_PORRA_LABELS[j.grupo_porra]}</span>}
-                    {estadoJugador(j) && <span style={{ fontSize: 9, color: S.MUTED_3 }}>{estadoJugador(j)}</span>}
-                  </div>
-                  <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 13, color: S.MUTED_2 }}>{formatGolfScore(j.resultado_en_vivo_total ?? 0)}</span>
-                </a>
-              ))}
+              <input
+                value={busquedaJugador}
+                onChange={(e) => setBusquedaJugador(e.target.value)}
+                placeholder="Buscar jugador..."
+                style={{ ...S.input, padding: '7px 10px', fontSize: 12 }}
+              />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 380, overflowY: 'auto' }}>
+                {campoOrdenado
+                  .map((j, i) => ({ j, rango: i + 1 }))
+                  .filter(({ j }) => !busquedaJugador.trim() || normalizarNombre(j.nombre).includes(normalizarNombre(busquedaJugador)))
+                  .map(({ j, rango }) => (
+                    <a
+                      key={j.id}
+                      href="#"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setJugadorFocoId((prev) => (prev === j.id ? null : j.id));
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        padding: '9px 10px',
+                        background: jugadorFocoId === j.id ? 'rgba(61,220,132,0.1)' : S.PANEL,
+                        border: `1px solid ${jugadorFocoId === j.id ? 'rgba(61,220,132,0.4)' : '#1E2723'}`,
+                        borderRadius: 9,
+                        textDecoration: 'none',
+                      }}
+                    >
+                      <span style={{ flexShrink: 0, width: 20, textAlign: 'center', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 11, color: S.MUTED_2 }}>{rango}</span>
+                      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                        <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.nombre}</span>
+                        {j.grupo_porra && <span style={{ fontSize: 9.5, fontWeight: 700, color: COLOR_GRUPO[j.grupo_porra] }}>{GRUPO_PORRA_LABELS[j.grupo_porra]}</span>}
+                        {estadoJugador(j) && <span style={{ fontSize: 9, color: S.MUTED_3 }}>{estadoJugador(j)}</span>}
+                      </div>
+                      <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 13, color: S.MUTED_2 }}>{formatGolfScore(j.resultado_en_vivo_total ?? 0)}</span>
+                    </a>
+                  ))}
+              </div>
             </div>
           )}
 
