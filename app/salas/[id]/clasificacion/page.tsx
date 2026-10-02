@@ -7,8 +7,9 @@ import { supabase, Perfil } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
 import AnuncioVideoInline from '@/components/AnuncioVideoInline';
 import * as S from '@/lib/mockupStyles';
-import { formatEuros, DEPORTE_LABELS, type Deporte } from '@/lib/salaShared';
+import { formatEuros, posicionLabel, parteParaPremios, DEPORTE_LABELS, type Deporte } from '@/lib/salaShared';
 import { formatGolfScore, COLOR_TIPO_RESULTADO, ETIQUETA_TIPO_RESULTADO, type TipoResultadoHoyo } from '@/lib/golfScoring';
+import { calcularReparto, type TipoSala } from '@/lib/repartoPremios';
 
 // ============================================================================
 // CLASIFICACIÓN EN DIRECTO DE UNA MESA DRAFTERS (nuevo, 30/09)
@@ -37,7 +38,7 @@ import { formatGolfScore, COLOR_TIPO_RESULTADO, ETIQUETA_TIPO_RESULTADO, type Ti
 // El vídeo publicitario se queda exactamente donde ya estaba (después del
 // contenido, nunca antes) en los dos casos.
 
-type SalaRow = { id: string; nombre: string; competicion: string; deporte: string; tipo: string; estado: string; fecha_limite_inscripcion: string | null };
+type SalaRow = { id: string; nombre: string; competicion: string; deporte: string; tipo: string; estado: string; fecha_limite_inscripcion: string | null; buy_in: number; aforo: number | null };
 type JugadorRow = {
   id: string;
   nombre: string;
@@ -49,7 +50,7 @@ type JugadorRow = {
 type EquipoClasif = { equipoId: string; nombre: string; jugadores: string[]; createdAt: string };
 type HoyoRow = { ronda: number; hoyo: number; par: number; golpes: number; campo_id: string | null; tipo_resultado: TipoResultadoHoyo };
 
-type Vista = 'mesa' | 'torneo';
+type Vista = 'mesa' | 'torneo' | 'premios';
 
 function totalEquipo(jugadoresIds: string[], jugadoresPorId: Map<string, JugadorRow>): number {
   return jugadoresIds.reduce((acc, id) => {
@@ -103,7 +104,7 @@ export default function SalaClasificacionPage() {
 
       const [{ data: perfilData }, { data: salaData }] = await Promise.all([
         supabase.from('perfiles').select('*').eq('id', session.user.id).single(),
-        supabase.from('salas').select('id,nombre,competicion,deporte,tipo,estado,fecha_limite_inscripcion').eq('id', salaId).single(),
+        supabase.from('salas').select('id,nombre,competicion,deporte,tipo,estado,fecha_limite_inscripcion,buy_in,aforo').eq('id', salaId).single(),
       ]);
 
       if (!activo) return;
@@ -305,6 +306,9 @@ export default function SalaClasificacionPage() {
             <button type="button" onClick={() => setVista('torneo')} style={vistaPillStyle(vista === 'torneo')}>
               Torneo
             </button>
+            <button type="button" onClick={() => setVista('premios')} style={vistaPillStyle(vista === 'premios')}>
+              Premios
+            </button>
           </div>
 
           {vista === 'mesa' && (
@@ -389,35 +393,97 @@ export default function SalaClasificacionPage() {
           {vista === 'torneo' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 420, overflowY: 'auto' }}>
               <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Campo completo ({campoOrdenado.length} jugadores)</span>
-              {campoOrdenado.map((j, i) => (
-                <a
-                  key={j.id}
-                  href="#"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    setJugadorFocoId((prev) => (prev === j.id ? null : j.id));
-                  }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    padding: '9px 10px',
-                    background: jugadorFocoId === j.id ? 'rgba(61,220,132,0.1)' : S.PANEL,
-                    border: `1px solid ${jugadorFocoId === j.id ? 'rgba(61,220,132,0.4)' : '#1E2723'}`,
-                    borderRadius: 9,
-                    textDecoration: 'none',
-                  }}
-                >
-                  <span style={{ flexShrink: 0, width: 20, textAlign: 'center', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 11, color: S.MUTED_2 }}>{i + 1}</span>
-                  <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
-                    <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.nombre}</span>
-                    {estadoJugador(j) && <span style={{ fontSize: 9, color: S.MUTED_3 }}>{estadoJugador(j)}</span>}
+              {campoOrdenado.map((j, i) => {
+                // Equipos de ESTA mesa que tienen a este jugador (nuevo,
+                // 02/10, mismo pedido de Iñi que en la porra — ver
+                // app/porras/[id]/clasificacion/page.tsx para el comentario
+                // completo). Pulsar un equipo salta a la pestaña Mesa con
+                // ese equipo ya seleccionado.
+                const equiposConEsteJugador = jugadorFocoId === j.id ? equiposPorPuntuacion.filter((eq) => eq.jugadores.includes(j.id)) : [];
+                return (
+                  <div key={j.id} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <a
+                      href="#"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setJugadorFocoId((prev) => (prev === j.id ? null : j.id));
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        padding: '9px 10px',
+                        background: jugadorFocoId === j.id ? 'rgba(61,220,132,0.1)' : S.PANEL,
+                        border: `1px solid ${jugadorFocoId === j.id ? 'rgba(61,220,132,0.4)' : '#1E2723'}`,
+                        borderRadius: 9,
+                        textDecoration: 'none',
+                      }}
+                    >
+                      <span style={{ flexShrink: 0, width: 20, textAlign: 'center', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 11, color: S.MUTED_2 }}>{i + 1}</span>
+                      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                        <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.nombre}</span>
+                        {estadoJugador(j) && <span style={{ fontSize: 9, color: S.MUTED_3 }}>{estadoJugador(j)}</span>}
+                      </div>
+                      <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 13, color: S.MUTED_2 }}>{formatGolfScore(j.resultado_en_vivo_total ?? 0)}</span>
+                    </a>
+                    {jugadorFocoId === j.id && (
+                      <div style={{ margin: '0 0 2px 20px', padding: '7px 9px', background: 'rgba(61,220,132,0.05)', border: '1px dashed rgba(61,220,132,0.3)', borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 5 }}>
+                        <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>
+                          {equiposConEsteJugador.length === 0 ? 'Ningún equipo de esta mesa lo tiene' : `Equipos de esta mesa que lo tienen (${equiposConEsteJugador.length})`}
+                        </span>
+                        {equiposConEsteJugador.length > 0 && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                            {equiposConEsteJugador.map((eq) => (
+                              <a
+                                key={eq.equipoId}
+                                href="#"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  setVista('mesa');
+                                  setEquipoSeleccionadoId(eq.equipoId);
+                                }}
+                                style={{ fontSize: 10.5, fontWeight: 700, color: '#3DDC84', background: 'rgba(61,220,132,0.12)', border: '1px solid rgba(61,220,132,0.3)', borderRadius: 999, padding: '4px 9px', textDecoration: 'none', whiteSpace: 'nowrap' }}
+                              >
+                                {eq.nombre}
+                              </a>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 13, color: S.MUTED_2 }}>{formatGolfScore(j.resultado_en_vivo_total ?? 0)}</span>
-                </a>
-              ))}
+                );
+              })}
             </div>
           )}
+
+          {/* Pestaña Premios (nueva, 02/10) — mismo cálculo que la pestaña
+              Premios de /salas/[id] (parteParaPremios + calcularReparto),
+              con el acento verde de las pantallas de clasificación en vez
+              del dorado de esa pantalla (pedido de Iñi: "tonos negros y
+              verdes, no con los amarillos"). A estas alturas (mesa ya
+              cerrada/en juego) equipos.length es el aforo real, así que el
+              reparto que se ve aquí es ya el definitivo, no una proyección. */}
+          {vista === 'premios' &&
+            (() => {
+              const bote = parteParaPremios(sala.buy_in) * (sala.aforo ?? equipos.length);
+              const tramosPremios = calcularReparto(sala.tipo as TipoSala, sala.aforo, equipos.length);
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '20px 14px', background: 'rgba(61,220,132,0.08)', border: '1px solid rgba(61,220,132,0.35)', borderRadius: 12 }}>
+                    <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#3DDC84' }}>Bote total</span>
+                    <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 30, color: '#3DDC84' }}>{formatEuros(bote)}</span>
+                  </div>
+                  {tramosPremios.length === 0 && <p style={{ fontSize: 13, color: S.MUTED_2 }}>Todavía no hay suficientes equipos inscritos para calcular el reparto.</p>}
+                  {tramosPremios.map((t, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '13px 14px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
+                      <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14, color: S.TEXT }}>{posicionLabel(t.desde, t.hasta)}</span>
+                      <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 14, color: '#3DDC84' }}>{formatEuros((bote * t.porcentajeCadaUno) / 100)}</span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
 
           {jugadorFoco && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: 14 }}>
