@@ -8,8 +8,9 @@ import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
 import { formatEuros, parteParaPremios } from '@/lib/salaShared';
 import { calcularTramosPorInscritos, calcularReparto, repartirPremiosConEmpates, ClasificacionEntrada, ReparteEuros, TipoSala } from '@/lib/repartoPremios';
-import { formatGolfScore, bonoPodioParaJugador } from '@/lib/golfScoring';
+import { formatGolfScore, calcularBonosPodio } from '@/lib/golfScoring';
 import { PorraFormato, PORRA_FORMATO_LABELS } from '@/lib/porraFormato';
+import type { GrupoPorra } from '@/lib/porraGrupos';
 
 // ============================================================================
 // FICHA DE LIQUIDACIÓN de una sala o porra concreta (nuevo, 29/09)
@@ -35,7 +36,7 @@ type Tipo = 'sala' | 'porra';
 type PorraRow = { id: string; major: string; formato: PorraFormato; precio: number; competicion: string | null; bono_podio_activo: boolean };
 type SalaRow = { id: string; nombre: string; tipo: TipoSala; aforo: number | null; buy_in: number };
 type EquipoRow = { id: string; nombre_equipo: string | null; usuario_id: string; jugadores: string[] };
-type JugadorLive = { id: string; resultado_en_vivo_total: number | null; resultado_en_vivo_posicion: string | null };
+type JugadorLive = { id: string; resultado_en_vivo_total: number | null; resultado_en_vivo_posicion: string | null; grupo_porra: GrupoPorra | null };
 type FutbolClasificacionFila = { equipo_id: string; nombre_equipo: string; aciertos: number; partidos_resueltos: number; total_partidos: number };
 
 export default function AdminLiquidarPage() {
@@ -114,7 +115,7 @@ export default function AdminLiquidarPage() {
         } else if (porraRow.competicion) {
           const { data: jugData } = await supabase
             .from('jugadores')
-            .select('id, resultado_en_vivo_total, resultado_en_vivo_posicion')
+            .select('id, resultado_en_vivo_total, resultado_en_vivo_posicion, grupo_porra')
             .eq('deporte', 'golf')
             .eq('competicion', porraRow.competicion);
           if (!activo) return;
@@ -172,6 +173,15 @@ export default function AdminLiquidarPage() {
   // de arriba. Golf: menor es mejor (orden='asc'). Fútbol/manual: mayor es
   // mejor (orden='desc' para aciertos; para la posición manual se usa
   // 'asc' porque 1º es el número más bajo).
+  // Bono de podio de cada jugador del campo (reglas de empate — ver
+  // lib/golfScoring.ts), calculado sobre el campo completo (todos los
+  // jugadores de la competición, no solo los de un equipo) porque el
+  // desempate necesita comparar a TODOS los jugadores empatados.
+  const mapaBonosPodio = useMemo(() => {
+    if (!esGolf || !porra?.bono_podio_activo) return new Map<string, number>();
+    return calcularBonosPodio(Array.from(jugadoresLive.values()));
+  }, [esGolf, porra, jugadoresLive]);
+
   const golfValorPorEquipo = useMemo(() => {
     if (!esGolf) return new Map<string, number>();
     const mapa = new Map<string, number>();
@@ -179,13 +189,13 @@ export default function AdminLiquidarPage() {
       const total = (e.jugadores ?? []).reduce((suma, id) => {
         const j = jugadoresLive.get(id);
         if (!j) return suma;
-        const bono = porra?.bono_podio_activo ? bonoPodioParaJugador(j.resultado_en_vivo_posicion) : 0;
+        const bono = mapaBonosPodio.get(id) ?? 0;
         return suma + (j.resultado_en_vivo_total ?? 0) + bono;
       }, 0);
       mapa.set(e.id, total);
     });
     return mapa;
-  }, [esGolf, equipos, jugadoresLive, porra]);
+  }, [esGolf, equipos, jugadoresLive, mapaBonosPodio]);
 
   const clasificacion: ClasificacionEntrada[] = useMemo(() => {
     if (esGolf) {

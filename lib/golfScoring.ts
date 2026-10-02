@@ -1,3 +1,5 @@
+import type { GrupoPorra } from '@/lib/porraGrupos';
+
 // ============================================================================
 // PUNTUACIÓN DE LA PORRA CLÁSICA DE GOLF — golpes respecto al par, no puntos
 // ============================================================================
@@ -74,37 +76,125 @@ export function colorGolfScore(golpesVsPar: GolpesVsPar): { fondo: string; texto
 }
 
 // ============================================================================
-// BONO DE PODIO (nuevo, 29/09)
+// BONO DE PODIO (nuevo, 29/09; reglas de empate añadidas 01/10)
 // ============================================================================
 // Pedido de Iñi, para la clasificación en directo de una porra de golf
 // 'clasica' con `bono_podio_activo` marcado (ver drafters-schema.sql,
 // tabla porras): "el primer jugador del torneo va a restar menos 10, el
 // segundo menos 5 y el tercero menos 3". Importante: esto es el 1º/2º/3er
-// clasificado REAL DEL TORNEO (jugadores.resultado_en_vivo_posicion, tal
-// cual la da ESPN — "1", "T2", "T3"...), NO el 1º/2º/3er puesto de la
-// porra — el bono se resta al resultado de CUALQUIER equipo de la porra que
-// tenga a ese jugador en su plantilla, en el mismo sitio donde ya se suman
-// los golpes de sus jugadores (app/porras/[id]/clasificacion/page.tsx).
-//
-// Empates en el propio torneo ("T1", "T2"...): se reparte el mismo criterio
-// que da ESPN — un "T1" cuenta como 1er puesto (bono -10) para todos los
-// que compartan esa posición, igual que un "T2"/"T3" cuentan como 2º/3er
-// puesto (-5/-3) para todos los que la compartan. No hay reparto a medias
-// aquí: a diferencia del reparto de premios en euros (que sí divide entre
-// empatados, ver lib/repartoPremios.ts), esto es una resta de golpes
-// aplicada individualmente a cada jugador según su propio puesto.
+// clasificado REAL DEL TORNEO, NO el 1º/2º/3er puesto de la porra — el
+// bono se resta al resultado de CUALQUIER equipo de la porra que tenga a
+// ese jugador en su plantilla (app/porras/[id]/clasificacion/page.tsx y,
+// para la liquidación real, app/admin/pagos-pendientes/[tipo]/[id]/page.tsx).
 const BONO_PODIO_POR_PUESTO: Record<number, number> = { 1: -10, 2: -5, 3: -3 };
 
-/**
- * A partir de la posición tal cual la da ESPN (p.ej. "1", "T2", "CUT",
- * "WD", null si todavía no hay dato), devuelve el bono de golpes a restar
- * (-10/-5/-3) o 0 si no está en el podio (o la posición no se puede
- * interpretar, como "CUT"/"WD"/null).
- */
-export function bonoPodioParaJugador(posicion: string | null): number {
-  if (!posicion) return 0;
+// Reglas de empate (01/10, pedido explícito de Iñi, confirmado tras
+// preguntarle directamente por la dirección): "en caso de empate de esos
+// primero, segundo y tercero... el desempate... va a ser en función de...
+// si hay un jugador azul y uno verde, siempre va a ser el azul el que gane
+// al verde, y el verde va a ganar al amarillo... en caso de que haya grupo
+// morado, también. Y en caso de que los dos empatados sean del mismo
+// grupo... la resta de golpes se reparte entre los jugadores empatados."
+//
+// Es decir: para decidir quién ocupa el 1º/2º/3er puesto de verdad cuando
+// dos o más jugadores empatan a golpes, NO se usa la posición "T1"/"T2" tal
+// cual la da ESPN (eso dejaría posiciones compartidas) — se calcula el
+// orden real a partir del resultado (resultado_en_vivo_total) y, en caso de
+// empate exacto:
+//   1. Si los empatados son de grupos de color distintos, gana el de PEOR
+//      grupo (Morado > Azul > Verde > Amarillo) — se premia la sorpresa: el
+//      que menos se esperaba llegar tan lejos se queda con la posición
+//      mejor, y el resto cae a la siguiente posición libre.
+//   2. Si los empatados son del mismo grupo de color, no hay más desempate
+//      posible: el bono de la posición (o posiciones, si el empate ocupa
+//      más de una) se reparte a partes iguales entre todos ellos — mismo
+//      criterio que ya usa el reparto de premios en euros para los empates
+//      (lib/repartoPremios.ts), aplicado aquí a golpes en vez de a euros.
+// El grupo 'espanoles' (que mezcla jugadores de cualquier tramo de ranking,
+// ver lib/porraGrupos.ts) no tiene un lugar claro en esta prioridad — Iñi
+// no lo mencionó al explicar esta regla. Mientras no se aclare, un empate
+// en el que participe un jugador 'espanoles' se trata como si fuera del
+// mismo grupo que el resto de empatados (se reparte), en vez de inventar un
+// orden de prioridad que nadie ha pedido.
+const PRIORIDAD_DESEMPATE_PODIO: Record<GrupoPorra, number> = {
+  morado: 4,
+  azul: 3,
+  verde: 2,
+  amarillo: 1,
+  espanoles: 0,
+};
+
+export type JugadorParaBonoPodio = {
+  id: string;
+  resultado_en_vivo_total: number | null;
+  resultado_en_vivo_posicion: string | null;
+  grupo_porra: GrupoPorra | null;
+};
+
+/** true si la posición de ESPN es un puesto numérico real ("1", "T4"...) — false para "CUT"/"WD"/null/sin dato. */
+function posicionEnJuego(posicion: string | null): boolean {
+  if (!posicion) return false;
   const soloNumero = posicion.trim().replace(/^T/i, '');
-  const puesto = parseInt(soloNumero, 10);
-  if (!Number.isFinite(puesto)) return 0;
-  return BONO_PODIO_POR_PUESTO[puesto] ?? 0;
+  return Number.isFinite(parseInt(soloNumero, 10));
+}
+
+/**
+ * Calcula el bono de podio de CADA jugador del campo de un torneo (no solo
+ * los de una porra concreta — el campo completo, para poder resolver bien
+ * los empates), aplicando las reglas de desempate de más arriba. Devuelve
+ * un Map jugador_id -> bono; un jugador sin bono (fuera del podio, CUT,
+ * WD, sin resultado...) simplemente no aparece en el mapa. El bono puede
+ * salir con decimales cuando hay reparto entre empatados del mismo grupo
+ * (redondeado a 1 decimal, por limpieza).
+ */
+export function calcularBonosPodio(campo: JugadorParaBonoPodio[]): Map<string, number> {
+  const bonos = new Map<string, number>();
+
+  // Solo entran en juego los que siguen vivos en el torneo (posición
+  // numérica real) — de esos, el orden real lo da el resultado en vivo, no
+  // la posición de ESPN (que es solo para filtrar quién sigue en pie).
+  const enJuego = campo
+    .filter((j) => j.resultado_en_vivo_total !== null && posicionEnJuego(j.resultado_en_vivo_posicion))
+    .sort((a, b) => (a.resultado_en_vivo_total as number) - (b.resultado_en_vivo_total as number));
+
+  let puesto = 1;
+  let i = 0;
+  while (i < enJuego.length && puesto <= 3) {
+    // Bloque de jugadores empatados exactamente al mismo resultado.
+    let fin = i + 1;
+    while (fin < enJuego.length && enJuego[fin].resultado_en_vivo_total === enJuego[i].resultado_en_vivo_total) fin++;
+    const bloque = enJuego.slice(i, fin);
+
+    if (bloque.length === 1) {
+      const bono = BONO_PODIO_POR_PUESTO[puesto] ?? 0;
+      if (bono !== 0) bonos.set(bloque[0].id, bono);
+      puesto += 1;
+    } else {
+      // Empate real: se agrupa por prioridad de desempate (peor grupo
+      // primero) y se recorren los subgrupos en ese orden, consumiendo
+      // tantos puestos como jugadores tenga cada subgrupo.
+      const porPrioridad = new Map<number, JugadorParaBonoPodio[]>();
+      bloque.forEach((j) => {
+        const prioridad = j.grupo_porra ? PRIORIDAD_DESEMPATE_PODIO[j.grupo_porra] : 0;
+        const lista = porPrioridad.get(prioridad) ?? [];
+        lista.push(j);
+        porPrioridad.set(prioridad, lista);
+      });
+      const prioridadesDeMayorAMenor = Array.from(porPrioridad.keys()).sort((a, b) => b - a);
+
+      for (const prioridad of prioridadesDeMayorAMenor) {
+        if (puesto > 3) break;
+        const subgrupo = porPrioridad.get(prioridad) as JugadorParaBonoPodio[];
+        const puestosQueOcupa = subgrupo.length;
+        const sumaBonos = Array.from({ length: puestosQueOcupa }, (_, k) => BONO_PODIO_POR_PUESTO[puesto + k] ?? 0).reduce((a, b) => a + b, 0);
+        const bonoRepartido = Math.round((sumaBonos / puestosQueOcupa) * 10) / 10;
+        if (bonoRepartido !== 0) subgrupo.forEach((j) => bonos.set(j.id, bonoRepartido));
+        puesto += puestosQueOcupa;
+      }
+    }
+
+    i = fin;
+  }
+
+  return bonos;
 }

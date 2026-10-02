@@ -44,6 +44,8 @@ type VideoRow = {
   fecha_inicio: string;
   fecha_fin: string | null;
   creado_at: string;
+  // A dónde lleva si alguien pulsa el vídeo (nuevo, 01/10) — null = no es clicable.
+  enlace_destino: string | null;
 };
 
 // Separado en pasivas (clasificación en directo + Mesas Drafters, se
@@ -62,6 +64,16 @@ function rutaStorageDesdeUrl(url: string): string | null {
   const marcador = '/object/public/anuncios/';
   const i = url.indexOf(marcador);
   return i === -1 ? null : url.slice(i + marcador.length);
+}
+
+// Enlace al que lleva el vídeo si lo pulsan (nuevo, 01/10) — si Iñi escribe
+// "miweb.com" sin "https://" delante, el navegador lo trataría como una ruta
+// relativa dentro de Drafters en vez de salir a esa web, así que se le
+// añade "https://" solo si hace falta. Vacío = sin enlace (el vídeo no es clicable).
+function normalizarEnlace(valor: string): string | null {
+  const v = valor.trim();
+  if (!v) return null;
+  return /^https?:\/\//i.test(v) ? v : `https://${v}`;
 }
 
 
@@ -84,6 +96,7 @@ export default function AdminPublicidadPage() {
   const [mostrarEnMesas, setMostrarEnMesas] = useState(true);
   const [fechaInicio, setFechaInicio] = useState('');
   const [fechaFin, setFechaFin] = useState('');
+  const [enlaceDestino, setEnlaceDestino] = useState('');
   const [subiendo, setSubiendo] = useState(false);
   const [errorSubida, setErrorSubida] = useState<string | null>(null);
 
@@ -211,6 +224,7 @@ export default function AdminPublicidadPage() {
       mostrar_en_mesas: mostrarEnMesas,
       fecha_inicio: fechaInicio ? new Date(fechaInicio).toISOString() : undefined,
       fecha_fin: fechaFin ? new Date(fechaFin).toISOString() : null,
+      enlace_destino: normalizarEnlace(enlaceDestino),
     });
 
     setSubiendo(false);
@@ -229,10 +243,11 @@ export default function AdminPublicidadPage() {
     setMostrarEnMesas(true);
     setFechaInicio('');
     setFechaFin('');
+    setEnlaceDestino('');
     await cargarVideosYEstadisticas();
   }
 
-  async function actualizarVideo(id: string, cambios: Partial<Pick<VideoRow, 'activo' | 'mostrar_en_recarga' | 'mostrar_en_clasificacion' | 'mostrar_en_mesas' | 'prioridad'>>) {
+  async function actualizarVideo(id: string, cambios: Partial<Pick<VideoRow, 'activo' | 'mostrar_en_recarga' | 'mostrar_en_clasificacion' | 'mostrar_en_mesas' | 'prioridad' | 'enlace_destino'>>) {
     // Optimista: se actualiza en pantalla al momento y, si el guardado
     // falla, se recarga la lista de verdad para no dejar la pantalla
     // mostrando algo que no se llegó a guardar.
@@ -341,6 +356,11 @@ export default function AdminPublicidadPage() {
             <div style={S.field}>
               <span style={S.label}>Prioridad (0 o más — cuanto más alto, más veces sale)</span>
               <input type="number" min={0} step={1} value={prioridad} onChange={(e) => setPrioridad(e.target.value)} style={{ ...S.input, width: 100 }} />
+            </div>
+
+            <div style={S.field}>
+              <span style={S.label}>Enlace al pulsar el vídeo (opcional — déjalo en blanco si no quieres que sea clicable)</span>
+              <input value={enlaceDestino} onChange={(e) => setEnlaceDestino(e.target.value)} placeholder="p.ej. miweb.com/promocion" style={S.input} />
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -463,19 +483,33 @@ export default function AdminPublicidadPage() {
                     </label>
                   </div>
 
-                  <div style={S.field}>
-                    <span style={S.label}>Prioridad</span>
-                    <input
-                      type="number"
-                      min={0}
-                      step={1}
-                      defaultValue={v.prioridad}
-                      onBlur={(e) => {
-                        const n = parseInt(e.target.value, 10);
-                        if (Number.isFinite(n) && n >= 0 && n !== v.prioridad) actualizarVideo(v.id, { prioridad: n });
-                      }}
-                      style={{ ...S.input, width: 100 }}
-                    />
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <div style={S.field}>
+                      <span style={S.label}>Prioridad</span>
+                      <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        defaultValue={v.prioridad}
+                        onBlur={(e) => {
+                          const n = parseInt(e.target.value, 10);
+                          if (Number.isFinite(n) && n >= 0 && n !== v.prioridad) actualizarVideo(v.id, { prioridad: n });
+                        }}
+                        style={{ ...S.input, width: 100 }}
+                      />
+                    </div>
+                    <div style={{ ...S.field, flex: 1 }}>
+                      <span style={S.label}>Enlace al pulsar el vídeo (opcional)</span>
+                      <input
+                        defaultValue={v.enlace_destino ?? ''}
+                        placeholder="p.ej. miweb.com/promocion"
+                        onBlur={(e) => {
+                          const normalizado = normalizarEnlace(e.target.value);
+                          if (normalizado !== v.enlace_destino) actualizarVideo(v.id, { enlace_destino: normalizado });
+                        }}
+                        style={S.input}
+                      />
+                    </div>
                   </div>
                 </div>
               );

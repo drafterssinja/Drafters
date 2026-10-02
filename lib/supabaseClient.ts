@@ -41,6 +41,11 @@ export type Perfil = {
   // décima vuelta) — null si nunca se ha usado. Ver /recargar y
   // recargar_gratis_mensual() en drafters-schema.sql.
   ultima_recarga_gratis?: string | null;
+  // Si puede confirmar equipos en Mesas Drafters (nuevo, 01/10) — ver
+  // drafters-schema.sql, columna perfiles.acceso_mesas_drafters. Las
+  // porras nunca dependen de esto. Puede venir undefined en algún sitio
+  // que no la seleccione explícitamente — tratar como false en ese caso.
+  acceso_mesas_drafters?: boolean;
 };
 
 export type Movimiento = {

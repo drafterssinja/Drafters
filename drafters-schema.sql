@@ -91,6 +91,22 @@ alter table public.perfiles add column if not exists ultima_recarga_gratis times
 
 comment on column public.perfiles.nombre_usuario is 'Nombre público del usuario: es el que se muestra cuando participa en una sala/MTT. En las porras clásicas el usuario pone en su lugar un nombre de equipo (ver equipos.nombre_equipo).';
 
+-- Acceso a Mesas Drafters (nuevo, 01/10, pedido de Iñi): mientras no
+-- empiece a hacer publicidad de la app, los usuarios nuevos solo pueden
+-- participar de verdad en las porras — las Mesas Drafters (salas/MTT/
+-- Maratón, el formato de draft por puntos) se quedan en "solo vista
+-- previa" para todo el que no tenga este flag a true: pueden entrar,
+-- ver cómo funciona, elegir equipo entero... pero al llegar al botón
+-- final de confirmar, se bloquea (ver inscribirse_en_sala() y
+-- editar_equipo_sala() más abajo, y app/salas/[id]/crear-equipo/page.tsx).
+-- Por defecto en false para todos los usuarios, también los que ya
+-- existían — el admin (rol='admin') SIEMPRE tiene acceso sin necesidad de
+-- marcarse este flag a sí mismo (ver tiene_acceso_mesas_drafters() más
+-- abajo). Se habilita uno a uno, a mano, desde /admin/usuarios.
+alter table public.perfiles add column if not exists acceso_mesas_drafters boolean not null default false;
+
+comment on column public.perfiles.acceso_mesas_drafters is 'Si el usuario puede confirmar equipos en Mesas Drafters (salas/MTT/Maratón) — true solo si el admin lo ha habilitado a mano desde /admin/usuarios, o si rol=admin. Las porras clásicas nunca dependen de esta columna: siempre están abiertas a todos.';
+
 -- email (nuevo, ronda de correcciones del 23/09): copia de solo lectura del
 -- email de auth.users, guardada aquí SOLO para que el admin pueda verla en
 -- el listado de "Usuarios registrados" (sección 6/11.9) sin tener que
@@ -645,6 +661,28 @@ as $$
     where p.id = auth.uid() and p.rol = 'admin'
   );
 $$;
+
+-- ============================================================================
+-- HELPER: ¿puede el usuario que hace la petición confirmar equipos en
+-- Mesas Drafters ahora mismo? (nuevo, 01/10 — ver columna
+-- perfiles.acceso_mesas_drafters más arriba). El admin siempre tiene
+-- acceso, sin necesidad del flag. Usado por inscribirse_en_sala() y
+-- editar_equipo_sala() para bloquear la confirmación del lado del
+-- servidor (no solo en la pantalla) — las porras nunca llaman a esto.
+create or replace function public.tiene_acceso_mesas_drafters()
+returns boolean
+language sql
+stable
+security definer set search_path = public
+as $$
+  select exists (
+    select 1 from public.perfiles p
+    where p.id = auth.uid() and (p.rol = 'admin' or p.acceso_mesas_drafters)
+  );
+$$;
+
+revoke all on function public.tiene_acceso_mesas_drafters() from public;
+grant execute on function public.tiene_acceso_mesas_drafters() to authenticated;
 
 -- ============================================================================
 -- DISPONIBILIDAD DEL NOMBRE DE USUARIO (comprobación antes de registrarse)
@@ -1341,6 +1379,14 @@ begin
     raise exception 'No autenticado';
   end if;
 
+  -- Mesas Drafters en "solo vista previa" para quien no tenga el acceso
+  -- habilitado (nuevo, 01/10 — ver perfiles.acceso_mesas_drafters). La
+  -- pantalla ya bloquea el botón de confirmar para este caso; esto es el
+  -- mismo bloqueo del lado del servidor, por si se llama directamente.
+  if not public.tiene_acceso_mesas_drafters() then
+    raise exception 'Todavía no tienes acceso a Mesas Drafters — de momento es solo un adelanto. Muy pronto estará disponible. Puedes seguir participando en las porras.';
+  end if;
+
   select * into v_sala from public.salas where id = p_sala_id for update;
   if not found then
     raise exception 'Sala no encontrada';
@@ -1672,6 +1718,12 @@ begin
     raise exception 'No autenticado';
   end if;
 
+  -- Mismo bloqueo de Mesas Drafters en "solo vista previa" que
+  -- inscribirse_en_sala() — ver el comentario de ahí arriba.
+  if not public.tiene_acceso_mesas_drafters() then
+    raise exception 'Todavía no tienes acceso a Mesas Drafters — de momento es solo un adelanto. Muy pronto estará disponible. Puedes seguir participando en las porras.';
+  end if;
+
   select * into v_equipo from public.equipos where id = p_equipo_id and usuario_id = auth.uid() and modo in ('sala', 'mtt') for update;
   if not found then
     raise exception 'Equipo no encontrado';
@@ -1913,8 +1965,15 @@ create table if not exists public.anuncios_video (
   mostrar_en_mesas boolean not null default true, -- pantalla /mesas, entre "tus mesas en juego" y el selector de deporte (movido aquí el 28/09 — antes era el feed de /inicio, ver más abajo)
   fecha_inicio timestamptz not null default now(),
   fecha_fin timestamptz, -- null = sin fecha de fin
-  creado_at timestamptz not null default now()
+  creado_at timestamptz not null default now(),
+  -- A dónde lleva si alguien pulsa el vídeo (nuevo, 01/10, pedido de Iñi:
+  -- "que cuando tú cliques encima del vídeo de publicidad nos enlace a la
+  -- página web que pongamos en las propiedades del vídeo"). Null = el vídeo
+  -- no es clicable (comportamiento de siempre, sin cambios).
+  enlace_destino text
 );
+
+alter table public.anuncios_video add column if not exists enlace_destino text;
 
 comment on table public.anuncios_video is 'Vídeos publicitarios subidos desde /admin. La prioridad decide, mediante un sorteo ponderado (ver elegir_anuncio_video()), cuántas veces sale cada uno — sin que ninguno activo pueda quedarse casi sin verse.';
 
@@ -2017,12 +2076,16 @@ create policy "anuncios_bucket_admin_delete" on storage.objects
 -- Postgres. Devuelve cero filas si no hay ningún vídeo activo para ese
 -- hueco ahora mismo (la pantalla, en ese caso, simplemente no muestra
 -- ningún hueco de publicidad).
+-- 01/10: cambia la forma de la tabla que devuelve (se añade enlace_destino),
+-- así que hay que borrarla antes de recrearla — Postgres no deja cambiar el
+-- "returns table" de una función existente con un simple "create or replace".
+drop function if exists public.elegir_anuncio_video(text);
 create or replace function public.elegir_anuncio_video(p_ubicacion text)
-returns table (id uuid, url text, nombre_referencia text)
+returns table (id uuid, url text, nombre_referencia text, enlace_destino text)
 language sql
 security definer set search_path = public
 as $$
-  select v.id, v.url, v.nombre_referencia
+  select v.id, v.url, v.nombre_referencia, v.enlace_destino
   from public.anuncios_video v
   where v.activo = true
     and v.fecha_inicio <= now()

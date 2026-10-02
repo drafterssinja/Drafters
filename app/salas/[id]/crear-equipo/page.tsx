@@ -271,6 +271,14 @@ export default function CrearEquipoPage() {
     setStep(siguiente);
   }
 
+  // Acceso a Mesas Drafters (nuevo, 01/10, pedido de Iñi): mientras no
+  // empiece a hacer publicidad, un usuario sin este acceso puede recorrer
+  // toda la pantalla (info, elegir equipo, llegar a la revisión final),
+  // pero no puede confirmar de verdad — ver el botón de más abajo y
+  // tiene_acceso_mesas_drafters() en drafters-schema.sql (mismo bloqueo
+  // repetido ahí del lado del servidor).
+  const tieneAccesoMesas = !!perfil && (perfil.rol === 'admin' || !!perfil.acceso_mesas_drafters);
+
   const isFutbol = sala?.deporte === 'futbol';
   const huecos = useMemo(() => huecosPorLinea(isFutbol ? alineacion : null), [isFutbol, alineacion]);
   const totalHuecos = huecos.POR + huecos.DEF + huecos.MED + huecos.DEL;
@@ -871,9 +879,22 @@ export default function CrearEquipoPage() {
 
             {errorEnvio && <p style={S.errorText}>{errorEnvio}</p>}
 
-            <button type="button" disabled={enviando} onClick={confirmarInscripcion} style={{ ...submitButtonStyle(true), opacity: enviando ? 0.7 : 1 }}>
-              {enviando ? (modoEdicion ? 'Guardando...' : 'Inscribiendo...') : modoEdicion ? 'Guardar cambios' : 'Confirmar inscripción'}
-            </button>
+            {tieneAccesoMesas ? (
+              <button type="button" disabled={enviando} onClick={confirmarInscripcion} style={{ ...submitButtonStyle(true), opacity: enviando ? 0.7 : 1 }}>
+                {enviando ? (modoEdicion ? 'Guardando...' : 'Inscribiendo...') : modoEdicion ? 'Guardar cambios' : 'Confirmar inscripción'}
+              </button>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ background: 'rgba(240,185,77,0.08)', border: '1px solid rgba(240,185,77,0.3)', borderRadius: 10, padding: '10px 12px' }}>
+                  <span style={{ fontSize: 12, color: S.TEXT, lineHeight: 1.45 }}>
+                    Esto es solo un adelanto de las Mesas Drafters. Muy pronto estará disponible — de momento puedes participar en las porras.
+                  </span>
+                </div>
+                <button type="button" disabled style={{ ...submitButtonStyle(false) }}>
+                  Próximamente disponible
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

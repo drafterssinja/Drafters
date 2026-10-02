@@ -62,6 +62,19 @@
   *::-webkit-scrollbar-thumb:hover {
     background: var(--muted);
   }
+
+  /* Vídeo publicitario (components/AnuncioVideoInline.tsx) — aviso de Iñi
+     (01/10), justo después de ampliar la tarjeta de arriba a 960px: "se
+     queda muy alargado la caja del vídeo". El vídeo en sí no cambia nada
+     (mismo maxHeight:220 y proporción de siempre, que es la que ya se veía
+     bien en el móvil) — lo único que se limita aquí, y solo en escritorio,
+     es el ANCHO de su caja, para que no se estire a los 960px de la tarjeta
+     y vuelva a quedar con la misma proporción que ya tenía en el móvil. */
+  .anuncio-video-caja {
+    max-width: 480px;
+    margin-left: auto;
+    margin-right: auto;
+  }
 }
 
 * {

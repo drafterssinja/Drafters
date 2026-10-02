@@ -9,7 +9,7 @@ import AnuncioVideoInline from '@/components/AnuncioVideoInline';
 import * as S from '@/lib/mockupStyles';
 import { formatEuros } from '@/lib/salaShared';
 import { GRUPO_PORRA_LABELS, ORDEN_GRUPOS, COLOR_GRUPO, type GrupoPorra } from '@/lib/porraGrupos';
-import { formatGolfScore, bonoPodioParaJugador, COLOR_TIPO_RESULTADO, ETIQUETA_TIPO_RESULTADO, type TipoResultadoHoyo } from '@/lib/golfScoring';
+import { formatGolfScore, calcularBonosPodio, COLOR_TIPO_RESULTADO, ETIQUETA_TIPO_RESULTADO, type TipoResultadoHoyo } from '@/lib/golfScoring';
 import { normalizarNombre } from '@/lib/nombreMatch';
 
 // ============================================================================
@@ -77,12 +77,14 @@ type Vista = 'porra' | 'torneo';
 // jugadores — a los que todavía no tienen resultado (no han salido, o su
 // torneo no está conectado) se les cuenta como 0 (par) en la suma, para no
 // dejar el total del equipo en blanco solo porque a uno le falte por
-// empezar.
-function totalEquipo(jugadoresIds: string[], jugadoresPorId: Map<string, JugadorRow>, aplicarBonoPodio: boolean): number {
+// empezar. `bonosPorJugador` es el resultado de calcularBonosPodio() sobre
+// el campo completo (null cuando el bono de podio no está activo/en
+// vista previa) — ver lib/golfScoring.ts para las reglas de empate.
+function totalEquipo(jugadoresIds: string[], jugadoresPorId: Map<string, JugadorRow>, bonosPorJugador: Map<string, number> | null): number {
   return jugadoresIds.reduce((acc, id) => {
     const j = jugadoresPorId.get(id);
     if (!j) return acc;
-    const bono = aplicarBonoPodio ? bonoPodioParaJugador(j.resultado_en_vivo_posicion) : 0;
+    const bono = bonosPorJugador?.get(id) ?? 0;
     return acc + (j.resultado_en_vivo_total ?? 0) + bono;
   }, 0);
 }
@@ -207,6 +209,15 @@ export default function PorraClasificacionPage() {
 
   const jugadoresPorId = useMemo(() => new Map(jugadores.map((j) => [j.id, j])), [jugadores]);
 
+  // Bono de podio de cada jugador del campo (01/10, reglas de empate — ver
+  // lib/golfScoring.ts), calculado siempre sobre el campo completo (no solo
+  // los jugadores de un equipo) porque el desempate necesita comparar a
+  // TODOS los jugadores empatados, estén o no en la misma porra. Se
+  // calcula siempre, esté o no activado el toggle de abajo — es barato
+  // (un campo de golf nunca pasa de ~150 jugadores) y así el toggle solo
+  // decide si se aplica, no si se recalcula.
+  const mapaBonosPodio = useMemo(() => calcularBonosPodio(jugadores), [jugadores]);
+
   // Orden de la vista "Torneo" (corregido 01/10, aviso de Iñi: "quiero que
   // salga ordenado por clasificación" — antes salía agrupado por lista de
   // color/precio, p.ej. todos los "Azul" juntos y dentro de ese bloque sin
@@ -235,11 +246,12 @@ export default function PorraClasificacionPage() {
   // así que una E de equipo cae igual de bien colocada que en campoOrdenado,
   // sin necesidad de ningún caso especial aquí tampoco.
   const equiposOrdenados = useMemo(() => {
+    const bonos = bonosPodio ? mapaBonosPodio : null;
     return equipos.slice().sort((a, b) => {
-      const diff = totalEquipo(a.jugadores, jugadoresPorId, bonosPodio) - totalEquipo(b.jugadores, jugadoresPorId, bonosPodio);
+      const diff = totalEquipo(a.jugadores, jugadoresPorId, bonos) - totalEquipo(b.jugadores, jugadoresPorId, bonos);
       return diff !== 0 ? diff : a.createdAt.localeCompare(b.createdAt);
     });
-  }, [equipos, jugadoresPorId, bonosPodio]);
+  }, [equipos, jugadoresPorId, bonosPodio, mapaBonosPodio]);
 
   // Hoyo a hoyo del jugador con el foco puesto (pedido de Iñi, 28/09: "cuando
   // pinchas en un resultado, abajo se ven los resultados hoyo a hoyo... de
@@ -366,6 +378,17 @@ export default function PorraClasificacionPage() {
             </div>
           </button>
 
+          {/* Mensaje de la regla de desempate del bono de podio (01/10,
+              pedido explícito de Iñi: "quiero que se indique también cuando
+              en la clasificación de la porra habilitas el botón... quiero
+              que salga un pequeño mensaje con esa regla"). Solo visible con
+              el toggle activado. */}
+          {bonosPodio && (
+            <div style={{ padding: '8px 12px', background: 'rgba(240,185,77,0.08)', border: '1px solid rgba(240,185,77,0.3)', borderRadius: 10, fontSize: 10.5, color: S.MUTED_2, lineHeight: 1.4 }}>
+              En caso de empate entre jugadores para el 1º/2º/3er puesto real del torneo, gana (se queda con la mejor posición) el jugador del grupo peor clasificado (Morado &gt; Azul &gt; Verde &gt; Amarillo). Si los empatados son del mismo grupo, el bono se reparte a partes iguales entre ellos.
+            </div>
+          )}
+
           {vista === 'porra' && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
               <div style={{ flexShrink: 0, width: 126, display: 'flex', flexDirection: 'column', gap: 5 }}>
@@ -407,7 +430,7 @@ export default function PorraClasificacionPage() {
                             {eq.nombreEquipo}
                           </span>
                           <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 12, color: S.MUTED_2 }}>
-                            {formatGolfScore(totalEquipo(eq.jugadores, jugadoresPorId, bonosPodio))}
+                            {formatGolfScore(totalEquipo(eq.jugadores, jugadoresPorId, bonosPodio ? mapaBonosPodio : null))}
                           </span>
                         </a>
                       );
@@ -441,7 +464,7 @@ export default function PorraClasificacionPage() {
                     {equipoSeleccionado.nombreEquipo}
                   </span>
                   <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, color: S.TEXT }}>
-                    {formatGolfScore(totalEquipo(equipoSeleccionado.jugadores, jugadoresPorId, bonosPodio))}
+                    {formatGolfScore(totalEquipo(equipoSeleccionado.jugadores, jugadoresPorId, bonosPodio ? mapaBonosPodio : null))}
                   </span>
                 </div>
                 {jugadoresDelEquipoSeleccionado.map((j) => (
@@ -467,12 +490,12 @@ export default function PorraClasificacionPage() {
                       <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.nombre}</span>
                       {j.grupo_porra && <span style={{ fontSize: 9.5, fontWeight: 700, color: COLOR_GRUPO[j.grupo_porra] }}>{GRUPO_PORRA_LABELS[j.grupo_porra]}</span>}
                       {estadoJugador(j) && <span style={{ fontSize: 9, color: S.MUTED_3 }}>{estadoJugador(j)}</span>}
-                      {bonosPodio && bonoPodioParaJugador(j.resultado_en_vivo_posicion) !== 0 && (
-                        <span style={{ fontSize: 9, fontWeight: 700, color: '#F0B94D' }}>Bono podio {bonoPodioParaJugador(j.resultado_en_vivo_posicion)}</span>
+                      {bonosPodio && (mapaBonosPodio.get(j.id) ?? 0) !== 0 && (
+                        <span style={{ fontSize: 9, fontWeight: 700, color: '#F0B94D' }}>Bono podio {mapaBonosPodio.get(j.id)}</span>
                       )}
                     </div>
                     <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 13, color: S.MUTED_2 }}>
-                      {formatGolfScore((j.resultado_en_vivo_total ?? 0) + (bonosPodio ? bonoPodioParaJugador(j.resultado_en_vivo_posicion) : 0))}
+                      {formatGolfScore((j.resultado_en_vivo_total ?? 0) + (bonosPodio ? (mapaBonosPodio.get(j.id) ?? 0) : 0))}
                     </span>
                   </a>
                 ))}

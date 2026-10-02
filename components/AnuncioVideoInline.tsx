@@ -46,7 +46,7 @@ import * as S from '@/lib/mockupStyles';
 // (un gesto del usuario siempre está permitido por los navegadores, aunque
 // el autoplay esté bloqueado).
 export default function AnuncioVideoInline({ ubicacion }: { ubicacion: 'clasificacion' | 'mesas' }) {
-  const [video, setVideo] = useState<{ id: string; url: string } | null | 'cargando'>('cargando');
+  const [video, setVideo] = useState<{ id: string; url: string; enlace: string | null } | null | 'cargando'>('cargando');
   const [silenciado, setSilenciado] = useState(true);
   const [necesitaToque, setNecesitaToque] = useState(false);
   const yaRegistradoRef = useRef(false);
@@ -57,7 +57,7 @@ export default function AnuncioVideoInline({ ubicacion }: { ubicacion: 'clasific
     async function cargar() {
       const { data } = await supabase.rpc('elegir_anuncio_video', { p_ubicacion: ubicacion });
       if (!activo) return;
-      setVideo(data && data.length > 0 ? { id: data[0].id, url: data[0].url } : null);
+      setVideo(data && data.length > 0 ? { id: data[0].id, url: data[0].url, enlace: data[0].enlace_destino ?? null } : null);
     }
     cargar();
     return () => {
@@ -127,10 +127,25 @@ export default function AnuncioVideoInline({ ubicacion }: { ubicacion: 'clasific
 
   if (video === 'cargando' || video === null) return null;
 
+  // Clic en el vídeo → al enlace cargado en /admin (nuevo, 01/10, pedido de
+  // Iñi: "que cuando tú cliques encima del vídeo de publicidad nos enlace a
+  // la página web que pongamos en las propiedades del vídeo"). Sin enlace
+  // cargado, el vídeo se comporta exactamente igual que antes (no clicable).
+  // Los dos botones propios (silenciar, reproducir) cortan la propagación
+  // del clic para que pulsarlos nunca abra también el enlace.
+  function irAlEnlace() {
+    if (video === 'cargando' || video === null || !video.enlace) return;
+    window.open(video.enlace, '_blank', 'noopener,noreferrer');
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 24 }}>
       <span style={{ fontSize: 10, fontWeight: 700, color: S.FAINT, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Publicidad</span>
-      <div style={{ position: 'relative' }}>
+      <div
+        className="anuncio-video-caja"
+        onClick={irAlEnlace}
+        style={{ position: 'relative', cursor: video.enlace ? 'pointer' : 'default' }}
+      >
         <video
           key={video.id}
           ref={videoRef}
@@ -153,7 +168,10 @@ export default function AnuncioVideoInline({ ubicacion }: { ubicacion: 'clasific
         {necesitaToque && (
           <button
             type="button"
-            onClick={reproducirManualmente}
+            onClick={(e) => {
+              e.stopPropagation();
+              reproducirManualmente();
+            }}
             aria-label="Reproducir el vídeo"
             style={{
               position: 'absolute',
@@ -190,7 +208,10 @@ export default function AnuncioVideoInline({ ubicacion }: { ubicacion: 'clasific
         )}
         <button
           type="button"
-          onClick={() => setSilenciado((s) => !s)}
+          onClick={(e) => {
+            e.stopPropagation();
+            setSilenciado((s) => !s);
+          }}
           aria-label={silenciado ? 'Activar el sonido del vídeo' : 'Silenciar el vídeo'}
           style={{
             position: 'absolute',
