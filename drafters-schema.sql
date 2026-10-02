@@ -240,15 +240,20 @@ alter table public.porras drop constraint if exists porras_formato_check;
 -- FÚTBOL POR JORNADAS" más abajo en este archivo.
 alter table public.porras add constraint porras_formato_check check (formato in ('clasica', 'presupuesto', 'futbol_jornada'));
 
--- Bono de podio de la clasificación en directo (nuevo, 29/09): activable por
--- porra, solo tiene sentido para porras de golf formato 'clasica' (se marca
--- al crear/editar la porra en /admin/porras-golf). Cuando está activo, al
--- liquidar la porra (y en la vista previa de la clasificación en directo) se
--- resta al resultado del equipo que tenga al 1er/2º/3er clasificado REAL del
--- torneo (por posición ESPN, no por equipo de la porra) menos 10/menos
--- 5/menos 3 golpes respectivamente — pedido de Iñi: "el primer jugador del
--- torneo va a restar menos 10, el segundo menos 5 y el tercero menos 3".
-alter table public.porras add column if not exists bono_podio_activo boolean not null default false;
+-- Bono de podio de la clasificación en directo (nuevo, 29/09; corrección
+-- 02/10). Al liquidar cualquier porra de golf (y en su clasificación en
+-- directo) se resta siempre al resultado del equipo que tenga al
+-- 1er/2º/3er clasificado REAL del torneo (por posición ESPN, no por equipo
+-- de la porra) menos 10/menos 5/menos 3 golpes respectivamente — pedido de
+-- Iñi: "el primer jugador del torneo va a restar menos 10, el segundo
+-- menos 5 y el tercero menos 3". Esto es una regla fija de toda porra de
+-- golf, no una opción por porra: Iñi aclaró el 02/10 que "siempre va a
+-- estar ese bono activo... no tiene ni que estar como opción en la
+-- configuración de la porra". Antes había un toggle por porra
+-- (bono_podio_activo, columna añadida el 29/09); se retira aquí porque ya
+-- no tiene uso — si la columna existe todavía en producción (de antes de
+-- este cambio), esta línea la elimina; si no existe, no hace nada.
+alter table public.porras drop column if exists bono_podio_activo;
 
 -- ----------------------------------------------------------------------------
 -- 4. JUGADORES (ficha maestra, editable solo por el superadministrador)
@@ -442,6 +447,39 @@ drop trigger if exists trg_jugadores_updated_at on public.jugadores;
 create trigger trg_jugadores_updated_at
   before update on public.jugadores
   for each row execute function public.set_updated_at();
+
+-- ----------------------------------------------------------------------------
+-- 5B. FAVORITOS DE EQUIPO (nuevo, 02/10)
+-- ----------------------------------------------------------------------------
+-- Pedido de Iñi: en la clasificación de las porras y de los maratones,
+-- poder marcar como favorito cualquier equipo (no solo el propio, también
+-- los de otros participantes) para seguirlo más de cerca — una estrellita
+-- al lado de cada equipo y un filtro de "solo favoritos" (ver
+-- lib/favoritosEquipo.ts, components/EstrellaFavorito.tsx,
+-- app/porras/[id]/clasificacion/page.tsx y
+-- app/salas/[id]/clasificacion/page.tsx). Es un favorito por usuario, sin
+-- límite de cuántos puede marcar, y no se liquida ni afecta a nada del
+-- juego — es solo una ayuda visual para seguir la clasificación.
+create table if not exists public.equipos_favoritos (
+  usuario_id uuid not null references public.perfiles (id) on delete cascade,
+  equipo_id uuid not null references public.equipos (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (usuario_id, equipo_id)
+);
+
+alter table public.equipos_favoritos enable row level security;
+
+drop policy if exists "equipos_favoritos_select_propio" on public.equipos_favoritos;
+create policy "equipos_favoritos_select_propio" on public.equipos_favoritos
+  for select using (auth.uid() = usuario_id);
+
+drop policy if exists "equipos_favoritos_insert_propio" on public.equipos_favoritos;
+create policy "equipos_favoritos_insert_propio" on public.equipos_favoritos
+  for insert with check (auth.uid() = usuario_id);
+
+drop policy if exists "equipos_favoritos_delete_propio" on public.equipos_favoritos;
+create policy "equipos_favoritos_delete_propio" on public.equipos_favoritos
+  for delete using (auth.uid() = usuario_id);
 
 -- ----------------------------------------------------------------------------
 -- 6. INSCRIPCIONES

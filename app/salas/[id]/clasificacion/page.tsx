@@ -10,6 +10,8 @@ import * as S from '@/lib/mockupStyles';
 import { formatEuros, posicionLabel, parteParaPremios, DEPORTE_LABELS, type Deporte } from '@/lib/salaShared';
 import { formatGolfScore, COLOR_TIPO_RESULTADO, ETIQUETA_TIPO_RESULTADO, type TipoResultadoHoyo } from '@/lib/golfScoring';
 import { calcularReparto, type TipoSala } from '@/lib/repartoPremios';
+import { cargarFavoritos, alternarFavoritoEquipo } from '@/lib/favoritosEquipo';
+import EstrellaFavorito from '@/components/EstrellaFavorito';
 
 // ============================================================================
 // CLASIFICACIÓN EN DIRECTO DE UNA MESA DRAFTERS (nuevo, 30/09)
@@ -37,6 +39,14 @@ import { calcularReparto, type TipoSala } from '@/lib/repartoPremios';
 //
 // El vídeo publicitario se queda exactamente donde ya estaba (después del
 // contenido, nunca antes) en los dos casos.
+//
+// Favoritos de equipo (02/10, pedido de Iñi): solo tienen sentido en el
+// Maratón (sala.tipo === 'maraton' — inscripción libre, muchos equipos, se
+// sigue durante días), no en el resto de mesas (Doble o Nada, Triple o
+// Nada...), así que la estrellita y el filtro "solo favoritos" de la
+// pestaña "Mesa" solo se muestran cuando `esMaraton` es true — ver
+// lib/favoritosEquipo.ts y app/porras/[id]/clasificacion/page.tsx (misma
+// función, reutilizada igual).
 
 type SalaRow = { id: string; nombre: string; competicion: string; deporte: string; tipo: string; estado: string; fecha_limite_inscripcion: string | null; buy_in: number; aforo: number | null };
 type JugadorRow = {
@@ -89,6 +99,10 @@ export default function SalaClasificacionPage() {
   // app/porras/[id]/clasificacion/page.tsx: vacío salvo en los pocos
   // torneos con más de un campo que el admin ya haya nombrado.
   const [nombresCampo, setNombresCampo] = useState<Record<string, string>>({});
+  // Favoritos de equipo (02/10) — solo se usan/muestran para el Maratón, ver
+  // comentario de cabecera del archivo.
+  const [favoritos, setFavoritos] = useState<Set<string>>(new Set());
+  const [soloFavoritos, setSoloFavoritos] = useState(false);
 
   useEffect(() => {
     let activo = true;
@@ -102,13 +116,15 @@ export default function SalaClasificacionPage() {
         return;
       }
 
-      const [{ data: perfilData }, { data: salaData }] = await Promise.all([
+      const [{ data: perfilData }, { data: salaData }, favoritosSet] = await Promise.all([
         supabase.from('perfiles').select('*').eq('id', session.user.id).single(),
         supabase.from('salas').select('id,nombre,competicion,deporte,tipo,estado,fecha_limite_inscripcion,buy_in,aforo').eq('id', salaId).single(),
+        cargarFavoritos(session.user.id),
       ]);
 
       if (!activo) return;
       if (perfilData) setPerfil(perfilData as Perfil);
+      setFavoritos(favoritosSet);
 
       if (!salaData) {
         setError('No se ha encontrado esta mesa.');
@@ -195,6 +211,20 @@ export default function SalaClasificacionPage() {
       activo = false;
     };
   }, [jugadorFocoId]);
+
+  // Marca/desmarca un equipo como favorito (02/10) — ver comentario de
+  // cabecera del archivo y lib/favoritosEquipo.ts.
+  async function alternarFavorito(equipoId: string) {
+    if (!perfil) return;
+    const estabaMarcado = favoritos.has(equipoId);
+    setFavoritos((prev) => {
+      const next = new Set(prev);
+      if (estabaMarcado) next.delete(equipoId);
+      else next.add(equipoId);
+      return next;
+    });
+    await alternarFavoritoEquipo(perfil.id, equipoId, estabaMarcado);
+  }
 
   if (cargando || !perfil) {
     return (
@@ -288,6 +318,13 @@ export default function SalaClasificacionPage() {
   // la izquierda.
   const equiposPorPuntuacion = equipos.slice().sort((a, b) => totalEquipo(a.jugadores, jugadoresPorId) - totalEquipo(b.jugadores, jugadoresPorId));
 
+  // Favoritos (02/10): solo tiene sentido en el Maratón — ver comentario de
+  // cabecera del archivo.
+  const esMaraton = sala.tipo === 'maraton';
+  const equiposVisibles = equiposPorPuntuacion
+    .map((eq, i) => ({ eq, rango: i + 1 }))
+    .filter(({ eq }) => !esMaraton || !soloFavoritos || favoritos.has(eq.equipoId));
+
   return (
     <main style={S.mainReset}>
       <div style={S.pageFrame}>
@@ -314,9 +351,38 @@ export default function SalaClasificacionPage() {
           {vista === 'mesa' && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
               <div style={{ flexShrink: 0, width: 126, display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 380, overflowY: 'auto' }}>
-                <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Equipos ({equipos.length})</span>
-                {equiposPorPuntuacion.map((eq, i) => {
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 5 }}>
+                  <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Equipos ({equipos.length})</span>
+                  {/* Filtro "solo favoritos" (02/10, pedido de Iñi) — solo
+                      tiene sentido en el Maratón, ver cabecera del archivo. */}
+                  {esMaraton && (
+                    <button
+                      type="button"
+                      onClick={() => setSoloFavoritos((v) => !v)}
+                      title={soloFavoritos ? 'Ver todos los equipos' : 'Ver solo favoritos'}
+                      style={{
+                        flexShrink: 0,
+                        width: 22,
+                        height: 18,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: 7,
+                        border: `1px solid ${soloFavoritos ? '#F0B94D' : '#1E2723'}`,
+                        background: soloFavoritos ? 'rgba(240,185,77,0.15)' : S.PANEL,
+                        color: soloFavoritos ? '#F0B94D' : S.MUTED_3,
+                        cursor: 'pointer',
+                        fontSize: 12,
+                        lineHeight: 1,
+                      }}
+                    >
+                      {soloFavoritos ? '★' : '☆'}
+                    </button>
+                  )}
+                </div>
+                {equiposVisibles.map(({ eq, rango }) => {
                   const activo = eq.equipoId === equipoSeleccionado.equipoId;
+                  const esFavorito = esMaraton && favoritos.has(eq.equipoId);
                   return (
                     <a
                       key={eq.equipoId}
@@ -329,15 +395,16 @@ export default function SalaClasificacionPage() {
                       style={{
                         display: 'flex',
                         alignItems: 'center',
-                        gap: 6,
+                        gap: esMaraton ? 5 : 6,
                         padding: 8,
-                        background: activo ? 'rgba(61,220,132,0.1)' : S.PANEL,
-                        border: `1px solid ${activo ? 'rgba(61,220,132,0.4)' : '#1E2723'}`,
+                        background: activo ? 'rgba(61,220,132,0.1)' : esFavorito ? 'rgba(240,185,77,0.1)' : S.PANEL,
+                        border: `1px solid ${activo ? 'rgba(61,220,132,0.4)' : esFavorito ? 'rgba(240,185,77,0.35)' : '#1E2723'}`,
                         borderRadius: 9,
                         textDecoration: 'none',
                       }}
                     >
-                      <span style={{ flexShrink: 0, width: 16, textAlign: 'center', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 11, color: S.MUTED_2 }}>{i + 1}</span>
+                      <span style={{ flexShrink: 0, width: esMaraton ? 14 : 16, textAlign: 'center', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 11, color: S.MUTED_2 }}>{rango}</span>
+                      {esMaraton && <EstrellaFavorito activo={esFavorito} onToggle={() => alternarFavorito(eq.equipoId)} />}
                       <span style={{ flex: 1, minWidth: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {eq.nombre}
                       </span>
@@ -347,6 +414,11 @@ export default function SalaClasificacionPage() {
                     </a>
                   );
                 })}
+                {esMaraton && soloFavoritos && !equiposPorPuntuacion.some((eq) => favoritos.has(eq.equipoId)) && (
+                  <p style={{ fontSize: 10.5, color: S.MUTED_3, lineHeight: 1.4, padding: '4px 2px' }}>
+                    Todavía no tienes ningún equipo marcado como favorito aquí — pulsa la estrella de un equipo para añadirlo.
+                  </p>
+                )}
               </div>
 
               <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>

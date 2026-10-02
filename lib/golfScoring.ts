@@ -78,14 +78,17 @@ export function colorGolfScore(golpesVsPar: GolpesVsPar): { fondo: string; texto
 // ============================================================================
 // BONO DE PODIO (nuevo, 29/09; reglas de empate añadidas 01/10)
 // ============================================================================
-// Pedido de Iñi, para la clasificación en directo de una porra de golf
-// 'clasica' con `bono_podio_activo` marcado (ver drafters-schema.sql,
-// tabla porras): "el primer jugador del torneo va a restar menos 10, el
-// segundo menos 5 y el tercero menos 3". Importante: esto es el 1º/2º/3er
-// clasificado REAL DEL TORNEO, NO el 1º/2º/3er puesto de la porra — el
-// bono se resta al resultado de CUALQUIER equipo de la porra que tenga a
-// ese jugador en su plantilla (app/porras/[id]/clasificacion/page.tsx y,
-// para la liquidación real, app/admin/pagos-pendientes/[tipo]/[id]/page.tsx).
+// Pedido de Iñi, para toda porra de golf ('clasica' o 'presupuesto'):
+// "el primer jugador del torneo va a restar menos 10, el segundo menos 5 y
+// el tercero menos 3". Corrección de Iñi (02/10): esto NO es una opción
+// configurable por porra — es una regla fija que se aplica siempre, en
+// todas las porras de golf (antes había un toggle por porra,
+// porras.bono_podio_activo, ya retirado — ver drafters-schema.sql).
+// Importante: esto es el 1º/2º/3er clasificado REAL DEL TORNEO, NO el
+// 1º/2º/3er puesto de la porra — el bono se resta al resultado de
+// CUALQUIER equipo de la porra que tenga a ese jugador en su plantilla
+// (app/porras/[id]/clasificacion/page.tsx y, para la liquidación real,
+// app/admin/pagos-pendientes/[tipo]/[id]/page.tsx).
 const BONO_PODIO_POR_PUESTO: Record<number, number> = { 1: -10, 2: -5, 3: -3 };
 
 // Reglas de empate (01/10, pedido explícito de Iñi, confirmado tras

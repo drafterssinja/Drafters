@@ -22,8 +22,9 @@ import type { GrupoPorra } from '@/lib/porraGrupos';
 // La clasificación se calcula sola cuando hay datos reales para hacerlo:
 //   - Porra de golf ('clasica'/'presupuesto'): suma de golpes respecto al
 //     par en vivo (jugadores.resultado_en_vivo_total) de los jugadores de
-//     cada equipo, con el bono de podio restado si la porra lo tiene
-//     activo (porra.bono_podio_activo — ver lib/golfScoring.ts).
+//     cada equipo, con el bono de podio siempre restado (02/10: regla fija
+//     de toda porra de golf, ya no es una opción por porra — ver
+//     lib/golfScoring.ts).
 //   - Porra de fútbol ('futbol_jornada'): aciertos sobre los partidos ya
 //     resueltos (futbol_porra_clasificacion(), drafters-schema.sql).
 // Para todo lo demás (salas de fútbol/tenis/golf: no hay motor de
@@ -33,7 +34,7 @@ import type { GrupoPorra } from '@/lib/porraGrupos';
 
 type Tipo = 'sala' | 'porra';
 
-type PorraRow = { id: string; major: string; formato: PorraFormato; precio: number; competicion: string | null; bono_podio_activo: boolean };
+type PorraRow = { id: string; major: string; formato: PorraFormato; precio: number; competicion: string | null };
 type SalaRow = { id: string; nombre: string; tipo: TipoSala; aforo: number | null; buy_in: number };
 type EquipoRow = { id: string; nombre_equipo: string | null; usuario_id: string; jugadores: string[] };
 type JugadorLive = { id: string; resultado_en_vivo_total: number | null; resultado_en_vivo_posicion: string | null; grupo_porra: GrupoPorra | null };
@@ -83,7 +84,7 @@ export default function AdminLiquidarPage() {
       if (tipo === 'porra') {
         const { data: porraData } = await supabase
           .from('porras')
-          .select('id, major, formato, precio, competicion, bono_podio_activo')
+          .select('id, major, formato, precio, competicion')
           .eq('id', itemId)
           .single();
         if (!activo) return;
@@ -178,9 +179,9 @@ export default function AdminLiquidarPage() {
   // jugadores de la competición, no solo los de un equipo) porque el
   // desempate necesita comparar a TODOS los jugadores empatados.
   const mapaBonosPodio = useMemo(() => {
-    if (!esGolf || !porra?.bono_podio_activo) return new Map<string, number>();
+    if (!esGolf) return new Map<string, number>();
     return calcularBonosPodio(Array.from(jugadoresLive.values()));
-  }, [esGolf, porra, jugadoresLive]);
+  }, [esGolf, jugadoresLive]);
 
   const golfValorPorEquipo = useMemo(() => {
     if (!esGolf) return new Map<string, number>();
@@ -291,7 +292,7 @@ export default function AdminLiquidarPage() {
             <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>
               {equipos.length} equipo{equipos.length === 1 ? '' : 's'} · Bote {formatEuros(bote)}
               {tipo === 'porra' && porra && ` · ${PORRA_FORMATO_LABELS[porra.formato]}`}
-              {esGolf && porra?.bono_podio_activo && ' · Bono de podio activo'}
+              {esGolf && ' · Bono de podio activo'}
             </p>
           </div>
 
