@@ -112,13 +112,23 @@ export default function PorraClasificacionPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [vista, setVista] = useState<Vista>('porra');
-  // Info del bono de podio (02/10, corrección de Iñi): de primeras no se
-  // muestra ningún texto — solo un botón "i" al lado de la etiqueta, que al
-  // pasar el ratón (o pulsarlo en móvil, donde no hay hover) despliega una
-  // explicación corta EN UNA CAPA SUPERPUESTA (position: absolute), para
-  // que nunca desplace la clasificación de abajo — justo lo que pedía:
-  // "no quiero que se me desplace la clasificación... que el mensaje
-  // informativo aparezca... pero que no me desplace".
+  // Bono de podio: al LIQUIDAR la porra, el bono siempre se aplica de
+  // verdad (ya no es opcional, ver DRAFTERS_Cambios_02-10_Bono_Podio_Siempre_Activo.md)
+  // — pero Iñi aclaró el 02/10 que en ESTA pantalla (la clasificación en
+  // directo, antes de que la porra termine) sí quiere poder elegir
+  // VERLA con o sin el bono restado, como una simulación: "tiene que
+  // haber una pestaña que si yo pulso la pestaña se esté restando esos
+  // menos 10, menos 5, menos 3... y que si yo quito la pestaña, que se
+  // elimine [de lo que se ve]". Por eso `mostrarBono` sigue existiendo
+  // (empieza en true, ya que es la regla real) y decide qué se pinta en
+  // esta pantalla — la liquidación real (admin/pagos-pendientes) nunca
+  // depende de este estado, solo del cálculo incondicional.
+  const [mostrarBono, setMostrarBono] = useState(true);
+  // Info del bono de podio (02/10): además del interruptor de arriba, un
+  // botón "i" que de primeras no muestra ningún texto y, al pasar el
+  // ratón (o pulsarlo en móvil, donde no hay hover), despliega una
+  // explicación corta EN UNA CAPA SUPERPUESTA (position: absolute) para
+  // que nunca desplace la clasificación de abajo.
   const [mostrarInfoBono, setMostrarInfoBono] = useState(false);
   const [equipoSeleccionadoId, setEquipoSeleccionadoId] = useState<string | null>(null);
   const [jugadorFocoId, setJugadorFocoId] = useState<string | null>(null);
@@ -225,9 +235,13 @@ export default function PorraClasificacionPage() {
   // Bono de podio de cada jugador del campo (01/10, reglas de empate — ver
   // lib/golfScoring.ts), calculado siempre sobre el campo completo (no solo
   // los jugadores de un equipo) porque el desempate necesita comparar a
-  // TODOS los jugadores empatados, estén o no en la misma porra. Se aplica
-  // siempre (02/10: ya no es una opción por porra) a la clasificación.
+  // TODOS los jugadores empatados, estén o no en la misma porra.
   const mapaBonosPodio = useMemo(() => calcularBonosPodio(jugadores), [jugadores]);
+  // Lo que de verdad se pinta en esta pantalla (02/10): el bono completo
+  // si `mostrarBono` está activado (el valor de partida, y lo que se
+  // aplica siempre al liquidar), o un mapa vacío si Iñi lo apaga para ver
+  // la clasificación "en crudo", sin el bono restado.
+  const bonosParaMostrar = useMemo(() => (mostrarBono ? mapaBonosPodio : new Map<string, number>()), [mostrarBono, mapaBonosPodio]);
 
   // Orden de la vista "Torneo" (corregido 01/10, aviso de Iñi: "quiero que
   // salga ordenado por clasificación" — antes salía agrupado por lista de
@@ -258,10 +272,10 @@ export default function PorraClasificacionPage() {
   // sin necesidad de ningún caso especial aquí tampoco.
   const equiposOrdenados = useMemo(() => {
     return equipos.slice().sort((a, b) => {
-      const diff = totalEquipo(a.jugadores, jugadoresPorId, mapaBonosPodio) - totalEquipo(b.jugadores, jugadoresPorId, mapaBonosPodio);
+      const diff = totalEquipo(a.jugadores, jugadoresPorId, bonosParaMostrar) - totalEquipo(b.jugadores, jugadoresPorId, bonosParaMostrar);
       return diff !== 0 ? diff : a.createdAt.localeCompare(b.createdAt);
     });
-  }, [equipos, jugadoresPorId, mapaBonosPodio]);
+  }, [equipos, jugadoresPorId, bonosParaMostrar]);
 
   // Hoyo a hoyo del jugador con el foco puesto (pedido de Iñi, 28/09: "cuando
   // pinchas en un resultado, abajo se ven los resultados hoyo a hoyo... de
@@ -391,20 +405,29 @@ export default function PorraClasificacionPage() {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, alignSelf: 'flex-start', position: 'relative' }}>
-            <span
+            {/* Interruptor para VER la clasificación con o sin el bono
+                restado (02/10, pedido explícito de Iñi tras la corrección
+                anterior — esto solo cambia lo que se pinta en esta
+                pantalla; la liquidación real siempre lo aplica, ver
+                comentario de `mostrarBono` más arriba). */}
+            <button
+              type="button"
+              onClick={() => setMostrarBono((v) => !v)}
+              aria-pressed={mostrarBono}
               style={{
                 fontFamily: "'Manrope', sans-serif",
                 fontWeight: 700,
                 fontSize: 11,
-                color: S.MUTED_2,
-                background: S.PANEL,
-                border: '1px solid #1E2723',
+                color: mostrarBono ? '#04140B' : S.MUTED_2,
+                background: mostrarBono ? '#F0B94D' : S.PANEL,
+                border: `1px solid ${mostrarBono ? '#F0B94D' : '#1E2723'}`,
                 borderRadius: 999,
                 padding: '6px 10px',
+                cursor: 'pointer',
               }}
             >
-              Bono de podio (−10 / −5 / −3)
-            </span>
+              Bono de podio (−10 / −5 / −3): {mostrarBono ? 'ON' : 'OFF'}
+            </button>
             <button
               type="button"
               aria-label="Más información sobre el bono de podio"
@@ -461,7 +484,14 @@ export default function PorraClasificacionPage() {
 
           {vista === 'porra' && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-              <div style={{ flexShrink: 0, width: 126, display: 'flex', flexDirection: 'column', gap: 5 }}>
+              {/* Ancho subido de 126 a 180 (02/10, pedido de Iñi: "hay que
+                  ganar un poco de espacio para el nombre completo de los
+                  equipos... tenemos espacio [de sobra] en la parte de los
+                  jugadores [el panel de la derecha]") — al ser `flex: 1` el
+                  panel de la derecha, el espacio que gana esta columna se
+                  lo quita automáticamente a ese panel, que tenía mucho de
+                  más. */}
+              <div style={{ flexShrink: 0, width: 180, display: 'flex', flexDirection: 'column', gap: 5 }}>
                 <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Equipos ({equipos.length})</span>
                 <div style={{ display: 'flex', gap: 5 }}>
                   <input
@@ -528,7 +558,7 @@ export default function PorraClasificacionPage() {
                             {eq.nombreEquipo}
                           </span>
                           <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 12, color: S.MUTED_2 }}>
-                            {formatGolfScore(totalEquipo(eq.jugadores, jugadoresPorId, mapaBonosPodio))}
+                            {formatGolfScore(totalEquipo(eq.jugadores, jugadoresPorId, bonosParaMostrar))}
                           </span>
                         </a>
                       );
@@ -567,7 +597,7 @@ export default function PorraClasificacionPage() {
                     {equipoSeleccionado.nombreEquipo}
                   </span>
                   <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, color: S.TEXT }}>
-                    {formatGolfScore(totalEquipo(equipoSeleccionado.jugadores, jugadoresPorId, mapaBonosPodio))}
+                    {formatGolfScore(totalEquipo(equipoSeleccionado.jugadores, jugadoresPorId, bonosParaMostrar))}
                   </span>
                 </div>
                 {jugadoresDelEquipoSeleccionado.map((j) => (
@@ -590,15 +620,35 @@ export default function PorraClasificacionPage() {
                     }}
                   >
                     <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
-                      <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.nombre}</span>
+                      <span style={{ display: 'flex', alignItems: 'baseline', gap: 5, minWidth: 0 }}>
+                        <span
+                          style={{
+                            minWidth: 0,
+                            flexShrink: 1,
+                            fontFamily: "'Barlow Condensed', sans-serif",
+                            fontWeight: 700,
+                            fontSize: 12.5,
+                            color: S.TEXT,
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                        >
+                          {j.nombre}
+                        </span>
+                        {/* Bono de podio del jugador (02/10): número
+                            pequeñito justo al lado del nombre, en vez de su
+                            propia línea entera — pedido de Iñi: "en algún
+                            lado en pequeñito... al lado del nombre". */}
+                        {(bonosParaMostrar.get(j.id) ?? 0) !== 0 && (
+                          <span style={{ flexShrink: 0, fontSize: 9.5, fontWeight: 800, color: '#F0B94D' }}>{bonosParaMostrar.get(j.id)}</span>
+                        )}
+                      </span>
                       {j.grupo_porra && <span style={{ fontSize: 9.5, fontWeight: 700, color: COLOR_GRUPO[j.grupo_porra] }}>{GRUPO_PORRA_LABELS[j.grupo_porra]}</span>}
                       {estadoJugador(j) && <span style={{ fontSize: 9, color: S.MUTED_3 }}>{estadoJugador(j)}</span>}
-                      {(mapaBonosPodio.get(j.id) ?? 0) !== 0 && (
-                        <span style={{ fontSize: 9, fontWeight: 700, color: '#F0B94D' }}>Bono podio {mapaBonosPodio.get(j.id)}</span>
-                      )}
                     </div>
                     <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 13, color: S.MUTED_2 }}>
-                      {formatGolfScore((j.resultado_en_vivo_total ?? 0) + (mapaBonosPodio.get(j.id) ?? 0))}
+                      {formatGolfScore((j.resultado_en_vivo_total ?? 0) + (bonosParaMostrar.get(j.id) ?? 0))}
                     </span>
                   </a>
                 ))}

@@ -350,7 +350,11 @@ export default function SalaClasificacionPage() {
 
           {vista === 'mesa' && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-              <div style={{ flexShrink: 0, width: 126, display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 380, overflowY: 'auto' }}>
+              {/* Ancho subido de 126 a 180 (02/10) — mismo motivo que
+                  app/porras/[id]/clasificacion/page.tsx: ganar espacio para
+                  el nombre completo del equipo, quitándoselo al panel de la
+                  derecha, que tenía de más. */}
+              <div style={{ flexShrink: 0, width: 180, display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 380, overflowY: 'auto' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 5 }}>
                   <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Equipos ({equipos.length})</span>
                   {/* Filtro "solo favoritos" (02/10, pedido de Iñi) — solo

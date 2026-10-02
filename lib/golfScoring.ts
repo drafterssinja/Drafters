@@ -134,11 +134,22 @@ export type JugadorParaBonoPodio = {
   grupo_porra: GrupoPorra | null;
 };
 
-/** true si la posición de ESPN es un puesto numérico real ("1", "T4"...) — false para "CUT"/"WD"/null/sin dato. */
-function posicionEnJuego(posicion: string | null): boolean {
-  if (!posicion) return false;
-  const soloNumero = posicion.trim().replace(/^T/i, '');
-  return Number.isFinite(parseInt(soloNumero, 10));
+// Corrección 02/10 (Iñi detectó, probando con la porra en marcha, que al
+// jugador que iba 1º del torneo de verdad no se le estaba restando el
+// bono): la versión anterior de esta función exigía que
+// `resultado_en_vivo_posicion` parseara como un puesto numérico limpio
+// ("1", "T4"...) para contar al jugador como "en juego" — cualquier otro
+// valor (null, vacío, o un formato de ESPN que no encajara con el parseo)
+// lo descartaba en silencio, aunque SÍ tuviera ya un
+// `resultado_en_vivo_total` real y fuera, de hecho, el líder. Ahora el
+// criterio es al revés: un jugador con resultado cuenta como "en juego"
+// SALVO que su posición diga explícitamente que ya no sigue compitiendo
+// (retirado/descalificado/no corte) — así una posición ausente o con un
+// formato inesperado ya no le quita el bono a quien de verdad va primero.
+function sigueCompitiendo(posicion: string | null): boolean {
+  if (!posicion) return true;
+  const texto = posicion.trim().toUpperCase();
+  return texto !== 'CUT' && texto !== 'WD' && texto !== 'DQ' && texto !== 'DNS' && texto !== 'MDF';
 }
 
 /**
@@ -157,7 +168,7 @@ export function calcularBonosPodio(campo: JugadorParaBonoPodio[]): Map<string, n
   // numérica real) — de esos, el orden real lo da el resultado en vivo, no
   // la posición de ESPN (que es solo para filtrar quién sigue en pie).
   const enJuego = campo
-    .filter((j) => j.resultado_en_vivo_total !== null && posicionEnJuego(j.resultado_en_vivo_posicion))
+    .filter((j) => j.resultado_en_vivo_total !== null && sigueCompitiendo(j.resultado_en_vivo_posicion))
     .sort((a, b) => (a.resultado_en_vivo_total as number) - (b.resultado_en_vivo_total as number));
 
   let puesto = 1;
