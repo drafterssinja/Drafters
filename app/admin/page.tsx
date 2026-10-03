@@ -96,6 +96,13 @@ const TARJETAS_GESTION: { href: string; titulo: string; subtitulo: string }[] = 
   { href: '/admin/videos', titulo: 'Vídeos publicitarios', subtitulo: 'Subir vídeos, prioridad y estadísticas de visualización' },
   { href: '/admin/usuarios', titulo: 'Usuarios', subtitulo: 'Listado completo de usuarios registrados' },
   { href: '/admin/actividad', titulo: 'Registro de actividad', subtitulo: 'Historial de accesos e inscripciones, filtrable por usuario' },
+  // Nueva (03/10, pedido de Iñi): registro aparte del de actividad general,
+  // para no mezclarlo — ver app/admin/mesas-sin-acceso.
+  {
+    href: '/admin/mesas-sin-acceso',
+    titulo: 'Intentos sin acceso a Mesas Drafters',
+    subtitulo: 'Usuarios sin acceso que han construido equipo y llegado al final sin poder confirmar',
+  },
 ];
 
 export default function AdminPage() {

@@ -131,7 +131,7 @@ export type JugadorParaBonoPodio = {
 // SALVO que su posición diga explícitamente que ya no sigue compitiendo
 // (retirado/descalificado/no corte) — así una posición ausente o con un
 // formato inesperado ya no le quita el bono a quien de verdad va primero.
-function sigueCompitiendo(posicion: string | null): boolean {
+export function sigueCompitiendo(posicion: string | null): boolean {
   if (!posicion) return true;
   const texto = posicion.trim().toUpperCase();
   return texto !== 'CUT' && texto !== 'WD' && texto !== 'DQ' && texto !== 'DNS' && texto !== 'MDF';

@@ -46,6 +46,11 @@ export type Perfil = {
   // porras nunca dependen de esto. Puede venir undefined en algún sitio
   // que no la seleccione explícitamente — tratar como false en ese caso.
   acceso_mesas_drafters?: boolean;
+  // Consentimiento para recibir por email información y avisos de inicio
+  // de porras (nuevo, 03/10) — ver drafters-schema.sql, columna
+  // perfiles.acepta_notificaciones_email. Respuesta obligatoria sí/no en
+  // el registro, justo debajo del email.
+  acepta_notificaciones_email?: boolean;
 };
 
 export type Movimiento = {

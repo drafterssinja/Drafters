@@ -265,21 +265,84 @@ export async function obtenerParesPorCampoDataGolf(
 /** Nombre real de cada campo (p.ej. "SA" -> "St Andrews (Old Course)"),
  * leído de field-updates — a diferencia de ESPN, Data Golf SÍ da el nombre
  * completo junto al código, así que no hace falta que el admin lo escriba
- * a mano (ver campos_golf_live en drafters-schema.sql). */
+ * a mano (ver campos_golf_live en drafters-schema.sql).
+ *
+ * Mantenida por compatibilidad — procesarTorneoDataGolf() ya usa la versión
+ * combinada de abajo (obtenerInfoCampoDataGolf) para no pedir field-updates
+ * dos veces por ciclo. */
 export async function obtenerNombresCampoDataGolf(tour: DataGolfTour): Promise<Map<string, string>> {
+  return (await obtenerInfoCampoDataGolf(tour)).nombresPorCampo;
+}
+
+export type InfoCampoDataGolf = {
+  nombresPorCampo: Map<string, string>;
+  /** Hora (UTC) de la primera salida del torneo (el "teetime" más
+   * temprano, de cualquier jugador, con round_num=1) — null si
+   * field-updates no trae ningún teetime todavía. Usado para el cierre
+   * automático de inscripciones (ver drafters-schema.sql, bloque "CIERRE
+   * AUTOMÁTICO..."). */
+  primeraSalida: Date | null;
+  /** Nº de rondas del torneo — el round_num más alto visto entre los
+   * teetimes de CUALQUIER jugador del campo (en formatos con amateurs que
+   * juegan menos rondas que los profesionales, como el Alfred Dunhill
+   * Links Championship, esto toma el máximo real del torneo, no el de un
+   * jugador suelto). null si todavía no hay ningún teetime. */
+  rondasTotales: number | null;
+};
+
+/** "YYYY-MM-DD HH:MM" (hora LOCAL del campo, tal cual la da Data Golf en
+ * cada teetime) + el desfase en segundos respecto a UTC que da field-updates
+ * (tz_offset, p.ej. 3600 = UTC+1) -> instante UTC real. Formato confirmado
+ * contra una respuesta real de field-updates (03/10, Alfred Dunhill Links
+ * Championship) — ver claude/DRAFTERS_Cambios_03-10_Cierre_y_Liquidacion_Automatica_Golf.md. */
+function parsearTeetimeUtc(teetime: unknown, tzOffsetSegundos: number): Date | null {
+  if (typeof teetime !== 'string') return null;
+  const m = teetime.trim().match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/);
+  if (!m) return null;
+  const [, y, mo, d, h, mi] = m;
+  // Date.UTC trata los números como si ya fueran UTC — como en realidad son
+  // hora local del campo, hay que restar el desfase para llegar al instante
+  // UTC real (tz_offset=3600 significa que la hora local va 1h por delante
+  // de UTC, así que UTC = local - offset).
+  const comoSiFueraUtc = Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi));
+  return new Date(comoSiFueraUtc - tzOffsetSegundos * 1000);
+}
+
+/** Versión combinada (03/10) de obtenerNombresCampoDataGolf() que, de la
+ * MISMA llamada a field-updates (nunca dos peticiones por ciclo), también
+ * saca la hora de la primera salida del torneo y su nº de rondas — ver
+ * InfoCampoDataGolf de arriba. */
+export async function obtenerInfoCampoDataGolf(tour: DataGolfTour): Promise<InfoCampoDataGolf> {
   const data = (await obtenerCampoDataGolf(tour)) as any;
   const field: any[] = Array.isArray(data?.field) ? data.field : [];
+  const tzOffsetSegundos = typeof data?.tz_offset === 'number' ? data.tz_offset : 0;
 
-  const resultado = new Map<string, string>();
+  const nombresPorCampo = new Map<string, string>();
+  let primeraSalida: Date | null = null;
+  let rondasTotales: number | null = null;
+
   for (const jugador of field) {
     const teetimes: any[] = Array.isArray(jugador?.teetimes) ? jugador.teetimes : [];
     for (const t of teetimes) {
       const code = t?.course_code;
       const nombre = t?.course_name;
-      if (code !== undefined && code !== null && typeof nombre === 'string' && nombre.trim() && !resultado.has(String(code))) {
-        resultado.set(String(code), nombre.trim());
+      if (code !== undefined && code !== null && typeof nombre === 'string' && nombre.trim() && !nombresPorCampo.has(String(code))) {
+        nombresPorCampo.set(String(code), nombre.trim());
+      }
+
+      const rondaDeEsteTeetime = parsearEntero(t?.round_num);
+      if (rondaDeEsteTeetime !== null && (rondasTotales === null || rondaDeEsteTeetime > rondasTotales)) {
+        rondasTotales = rondaDeEsteTeetime;
+      }
+
+      if (rondaDeEsteTeetime === 1) {
+        const instante = parsearTeetimeUtc(t?.teetime, tzOffsetSegundos);
+        if (instante && (primeraSalida === null || instante.getTime() < primeraSalida.getTime())) {
+          primeraSalida = instante;
+        }
       }
     }
   }
-  return resultado;
+
+  return { nombresPorCampo, primeraSalida, rondasTotales };
 }

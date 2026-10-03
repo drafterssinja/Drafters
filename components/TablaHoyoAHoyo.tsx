@@ -50,6 +50,13 @@ const ANCHO_CELDA = 27;
 const ANCHO_ETIQUETA = 46;
 const ANCHO_SUBTOTAL = 42;
 const FONDO_RESALTADO = 'rgba(170,180,174,0.07)';
+// CAMBIO 03/10 (pedido de Iñi): el bogey se pinta en negro (#0B0F0E, ver
+// COLOR_TIPO_RESULTADO en lib/golfScoring.ts) y, sin un fondo propio para
+// la tarjeta, esta tabla heredaba el fondo oscuro de la pantalla
+// (S.PANEL, #131917 — casi idéntico a ese negro), así que el cuadrado del
+// bogey casi no se distinguía del resto de la tarjeta. Fondo propio, un
+// punto más claro, solo para esta tabla.
+const FONDO_TARJETA = '#1C2621';
 
 function sumaOGuion(valores: (number | null)[]): number | null {
   const conocidos = valores.filter((v): v is number => v !== null);
@@ -123,7 +130,7 @@ export default function TablaHoyoAHoyo({ paresCompletos, filas }: Props) {
     textAlign: 'left' as const,
     padding: '6px 8px',
     fontFamily: "'Barlow Condensed', sans-serif",
-    background: S.PANEL,
+    background: FONDO_TARJETA,
     borderBottom: `1px solid ${S.CARD_BORDER}`,
   };
 
@@ -140,7 +147,7 @@ export default function TablaHoyoAHoyo({ paresCompletos, filas }: Props) {
   };
 
   return (
-    <div style={{ overflowX: 'auto', border: `1px solid ${S.CARD_BORDER}`, borderRadius: 10 }}>
+    <div style={{ overflowX: 'auto', border: `1px solid ${S.CARD_BORDER}`, borderRadius: 10, background: FONDO_TARJETA }}>
       <table style={{ borderCollapse: 'collapse', width: '100%' }}>
         <thead>
           <tr>

@@ -24,6 +24,15 @@ export default function RegistroPage() {
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [fechaNacimiento, setFechaNacimiento] = useState('');
+  // Consentimiento de notificaciones por email (nuevo, 03/10, pedido de
+  // Iñi): "un campo que tiene que ser obligatorio contestar, justo debajo
+  // del email... sí o no, sobre si consientes recibir información y
+  // notificaciones de inicio de porras" — null a propósito (ninguna opción
+  // premarcada) hasta que el usuario pulse Sí o No; se valida en el envío
+  // igual que los términos. Se guarda en perfiles.acepta_notificaciones_email
+  // vía handle_new_user() (drafters-schema.sql) y controla en exclusiva a
+  // quién le llega el aviso automático de nueva porra.
+  const [aceptaNotificaciones, setAceptaNotificaciones] = useState<boolean | null>(null);
   const [terminos, setTerminos] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cargando, setCargando] = useState(false);
@@ -60,6 +69,10 @@ export default function RegistroPage() {
     setError(null);
     setEmailYaUsado(false);
 
+    if (aceptaNotificaciones === null) {
+      setError('Tienes que indicar si quieres recibir avisos por email.');
+      return;
+    }
     if (!terminos) {
       setError('Tienes que aceptar los términos para continuar.');
       return;
@@ -92,6 +105,7 @@ export default function RegistroPage() {
           nombre_usuario: nombreUsuario.trim(),
           fecha_nacimiento: fechaNacimiento,
           terminos_aceptados: true,
+          acepta_notificaciones_email: aceptaNotificaciones,
         },
       },
     });
@@ -179,6 +193,49 @@ export default function RegistroPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 style={S.input}
               />
+            </div>
+
+            <div style={S.field}>
+              <span style={S.label}>¿Quieres recibir información y avisos de inicio de porras por email?</span>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  type="button"
+                  onClick={() => setAceptaNotificaciones(true)}
+                  style={{
+                    flex: 1,
+                    padding: '10px 0',
+                    borderRadius: 10,
+                    fontFamily: "'Manrope', sans-serif",
+                    fontWeight: 700,
+                    fontSize: 13,
+                    cursor: 'pointer',
+                    border: `1.5px solid ${aceptaNotificaciones === true ? S.ACCENT : S.BORDER}`,
+                    background: aceptaNotificaciones === true ? 'rgba(61,220,132,0.12)' : 'transparent',
+                    color: aceptaNotificaciones === true ? S.ACCENT : S.MUTED_2,
+                  }}
+                >
+                  Sí
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAceptaNotificaciones(false)}
+                  style={{
+                    flex: 1,
+                    padding: '10px 0',
+                    borderRadius: 10,
+                    fontFamily: "'Manrope', sans-serif",
+                    fontWeight: 700,
+                    fontSize: 13,
+                    cursor: 'pointer',
+                    border: `1.5px solid ${aceptaNotificaciones === false ? S.MUTED_2 : S.BORDER}`,
+                    background: aceptaNotificaciones === false ? 'rgba(139,149,143,0.14)' : 'transparent',
+                    color: aceptaNotificaciones === false ? S.TEXT : S.MUTED_2,
+                  }}
+                >
+                  No
+                </button>
+              </div>
+              <span style={{ fontSize: 11, color: S.MUTED_3 }}>Puedes cambiarlo más adelante escribiéndonos.</span>
             </div>
 
             <div style={S.field}>

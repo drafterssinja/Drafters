@@ -91,6 +91,21 @@ alter table public.perfiles add column if not exists ultima_recarga_gratis times
 
 comment on column public.perfiles.nombre_usuario is 'Nombre público del usuario: es el que se muestra cuando participa en una sala/MTT. En las porras clásicas el usuario pone en su lugar un nombre de equipo (ver equipos.nombre_equipo).';
 
+-- Consentimiento de notificaciones por email (nuevo, 03/10, pedido explícito
+-- de Iñi): respuesta obligatoria sí/no, justo debajo del correo electrónico
+-- en el formulario de alta (app/registro/page.tsx) — "si consientes recibir
+-- información y notificaciones de inicio de porras con ese correo
+-- electrónico". Se guarda tal cual (sin default implícito en el
+-- formulario: el usuario tiene que elegir una opción antes de poder
+-- enviar el registro) y es la única condición para recibir el aviso
+-- automático de "nueva porra creada" (ver más abajo, "NOTIFICACIÓN
+-- AUTOMÁTICA..."). `not null default false` es solo la red de seguridad a
+-- nivel de columna (un registro que, por lo que sea, no mande este campo);
+-- en la práctica siempre llega explícito desde el formulario.
+alter table public.perfiles add column if not exists acepta_notificaciones_email boolean not null default false;
+
+comment on column public.perfiles.acepta_notificaciones_email is 'Consentimiento explícito (sí/no obligatorio en el registro) para recibir por email información y notificaciones de inicio de porras. Controla en exclusiva a quién llega el aviso automático de nueva porra — ver la función notificar_nueva_porra_creada().';
+
 -- Acceso a Mesas Drafters (nuevo, 01/10, pedido de Iñi): mientras no
 -- empiece a hacer publicidad de la app, los usuarios nuevos solo pueden
 -- participar de verdad en las porras — las Mesas Drafters (salas/MTT/
@@ -682,7 +697,16 @@ as $$
 declare
   v_nombre_usuario text := nullif(new.raw_user_meta_data ->> 'nombre_usuario', '');
 begin
-  insert into public.perfiles (id, nombre, apellido, nombre_usuario, fecha_nacimiento, terminos_aceptados, terminos_aceptados_en, email)
+  -- acepta_notificaciones_email (nuevo, 03/10, pedido de Iñi): respuesta
+  -- obligatoria sí/no en el registro (app/registro/page.tsx, justo debajo
+  -- del email) sobre si consiente recibir por email información y avisos
+  -- de inicio de porras — controla en exclusiva a quién llega el aviso
+  -- automático de nueva porra, ver notificar_nueva_porra_creada() más
+  -- abajo. coalesce(...,false) de respaldo por si algún día se crea un
+  -- usuario sin pasar por el formulario de registro normal (p.ej. a mano
+  -- desde Supabase) — nunca debería faltar en un alta real, porque el
+  -- formulario lo exige antes de poder enviar.
+  insert into public.perfiles (id, nombre, apellido, nombre_usuario, fecha_nacimiento, terminos_aceptados, terminos_aceptados_en, email, acepta_notificaciones_email)
   values (
     new.id,
     coalesce(new.raw_user_meta_data ->> 'nombre', ''),
@@ -691,7 +715,8 @@ begin
     nullif(new.raw_user_meta_data ->> 'fecha_nacimiento', '')::date,
     coalesce((new.raw_user_meta_data ->> 'terminos_aceptados')::boolean, false),
     case when (new.raw_user_meta_data ->> 'terminos_aceptados')::boolean then now() else null end,
-    new.email
+    new.email,
+    coalesce((new.raw_user_meta_data ->> 'acepta_notificaciones_email')::boolean, false)
   );
 
   insert into public.notificaciones (usuario_id, tipo, titulo, mensaje)
@@ -711,6 +736,71 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+-- ============================================================================
+-- AVISO AUTOMÁTICO DE NUEVA PORRA POR EMAIL (nuevo, 03/10, pedido de Iñi)
+-- ============================================================================
+-- "cuando creemos una nueva porra... a los que sí que hayan aceptado [el
+-- consentimiento de perfiles.acepta_notificaciones_email, ver más arriba]
+-- se les mandará un correo de notificación... y que se lance
+-- automáticamente" — un trigger de verdad (no un cron que repase cada X
+-- minutos) es lo más fiel a "automáticamente": se dispara en el mismo
+-- instante en que se inserta la fila, venga de donde venga la inserción
+-- (cualquiera de las pantallas de /admin que crean una porra).
+--
+-- `net.http_post` es asíncrono (pg_net encola la petición y la ejecuta en
+-- segundo plano — no bloquea ni puede hacer fallar el insert que la
+-- disparó), y la extensión ya se crea más abajo en este mismo archivo (bloque
+-- del cron de resultados de golf) — se repite aquí el `create extension if
+-- not exists` porque no hace daño repetirlo y así este trigger funciona
+-- aunque algún día se mueva de sitio ese otro bloque. Reutiliza el mismo
+-- CRON_SECRET ya configurado en Vercel para el resto de rutas protegidas
+-- (no hace falta que Iñi cree un segundo secreto ni toque nada en Vercel
+-- para esto).
+--
+-- Solo porras, no Mesas Drafters/salas — así lo pidió Iñi explícitamente
+-- ("de momento solamente una nueva porra").
+--
+-- BLOQUEANTE para que el envío real funcione (el resto de este archivo
+-- funciona igual sin esto, y la columna/consentimiento ya quedan guardados
+-- desde ya): la ruta que recibe este aviso (app/api/notificaciones/
+-- nueva-porra/route.ts) necesita un proveedor de envío de emails
+-- transaccionales, que esta app no tenía hasta ahora (todo el correo
+-- anterior lo manda Supabase Auth solo, para sus propios eventos de
+-- verificación/recuperación — no sirve para avisos de negocio como este).
+-- Se ha dejado preparado para Resend (lib/server/emailResend.ts explica los
+-- pasos) — Iñi tiene que crear la cuenta, verificar un dominio propio para
+-- poder mandar a destinatarios reales, y añadir RESEND_API_KEY + EMAIL_FROM
+-- en Vercel. Hasta que eso esté puesto, este trigger se sigue disparando
+-- sin problema (nunca bloquea la creación de la porra) pero la ruta
+-- devolverá error al intentar enviar — no se pierde ningún aviso de antes,
+-- porque no hay cola: simplemente no habrá envíos reales hasta entonces.
+create extension if not exists pg_net;
+
+create or replace function public.notificar_nueva_porra_creada()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  perform net.http_post(
+    url := 'https://drafters-rho.vercel.app/api/notificaciones/nueva-porra',
+    headers := jsonb_build_object('Content-Type', 'application/json', 'x-cron-secret', 'hasiygqef1ojipcs332pj'),
+    body := jsonb_build_object('porra_id', new.id),
+    timeout_milliseconds := 55000
+  );
+  return new;
+exception when others then
+  -- Nunca debe poder impedir que se cree la porra, pase lo que pase con el
+  -- aviso (igual que registrar_evento_actividad() más abajo).
+  return new;
+end;
+$$;
+
+drop trigger if exists on_porra_created_notificar on public.porras;
+create trigger on_porra_created_notificar
+  after insert on public.porras
+  for each row execute function public.notificar_nueva_porra_creada();
 
 -- ============================================================================
 -- HELPER: ¿es superadministrador el usuario que hace la petición?
@@ -2477,6 +2567,108 @@ revoke all on function public.eventos_actividad_admin(uuid, int, timestamptz, ti
 grant execute on function public.eventos_actividad_admin(uuid, int, timestamptz, timestamptz) to authenticated;
 
 -- ============================================================================
+-- INTENTOS DE MESAS DRAFTERS SIN ACCESO (nuevo, 03/10, pedido de Iñi)
+-- ============================================================================
+-- Pedido de Iñi: "quiero que... en el registro de actividad se quede
+-- guardado también... pero que se me quede en un registro aparte, que no me
+-- ensucie todo el resto del registro de actividad que tengo" — un usuario
+-- SIN acceso a Mesas Drafters (perfiles.acceso_mesas_drafters, ver más
+-- arriba) puede recorrer toda la pantalla de crear-equipo de una sala,
+-- construir su equipo entero y llegar a la revisión final, pero el botón de
+-- confirmar no le deja (ver app/salas/[id]/crear-equipo/page.tsx — nunca
+-- llega a llamar a inscribirse_en_sala()), así que hasta ahora ese interés
+-- no quedaba registrado en ningún sitio. Esto es justo para detectar esos
+-- casos — de cara a cuando haya muchos usuarios, para saber quién está
+-- interesado en Mesas Drafters aunque todavía no tenga acceso habilitado —
+-- y se guarda en una tabla propia, separada de eventos_actividad, para no
+-- mezclarla con el registro de actividad general (login/inscripción/
+-- recarga/premio) que ya usa app/admin/actividad.
+--
+-- Un único evento por cada vez que alguien sin acceso llega a la pantalla
+-- de revisión final (no en cada paso intermedio, para no llenar esto de
+-- ruido) — ya implica, por definición, que entró a la mesa Y que construyó
+-- un equipo completo dentro del presupuesto.
+create table if not exists public.intentos_mesas_sin_acceso (
+  id uuid primary key default gen_random_uuid(),
+  usuario_id uuid not null references public.perfiles(id) on delete cascade,
+  sala_id uuid not null references public.salas(id) on delete cascade,
+  num_jugadores int not null default 0,
+  creado_en timestamptz not null default now()
+);
+
+create index if not exists intentos_mesas_sin_acceso_usuario_idx on public.intentos_mesas_sin_acceso (usuario_id);
+create index if not exists intentos_mesas_sin_acceso_creado_idx on public.intentos_mesas_sin_acceso (creado_en desc);
+
+alter table public.intentos_mesas_sin_acceso enable row level security;
+
+-- Igual que eventos_actividad: nadie lee ni escribe la tabla directamente,
+-- todo pasa por estas dos funciones security definer (sin políticas de
+-- select/insert para el usuario normal — RLS deniega todo por defecto).
+
+create or replace function public.registrar_intento_mesa_sin_acceso(p_sala_id uuid, p_num_jugadores int default 0)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  -- Nunca debe poder romper la pantalla del usuario, y solo tiene sentido
+  -- registrar esto de alguien que de verdad NO tenga acceso en este mismo
+  -- momento (si ya lo tiene, confirmar sí le funciona, así que no es un
+  -- "intento fallido" sino una inscripción normal que ya queda en
+  -- eventos_actividad).
+  if auth.uid() is null or public.tiene_acceso_mesas_drafters() then
+    return;
+  end if;
+
+  insert into public.intentos_mesas_sin_acceso (usuario_id, sala_id, num_jugadores)
+  values (auth.uid(), p_sala_id, coalesce(p_num_jugadores, 0));
+exception when others then
+  null;
+end;
+$$;
+
+revoke all on function public.registrar_intento_mesa_sin_acceso(uuid, int) from public;
+grant execute on function public.registrar_intento_mesa_sin_acceso(uuid, int) to authenticated;
+
+-- Lectura para el panel de admin (app/admin/mesas-sin-acceso/page.tsx) —
+-- mismo patrón que eventos_actividad_admin(): junta nombre/apellido/email
+-- del usuario y el nombre de la sala, más reciente primero.
+create or replace function public.intentos_mesas_sin_acceso_admin(p_usuario_id uuid default null, p_limite int default 300)
+returns table (
+  id uuid,
+  usuario_id uuid,
+  nombre text,
+  apellido text,
+  nombre_usuario text,
+  email text,
+  sala_id uuid,
+  sala_nombre text,
+  num_jugadores int,
+  creado_en timestamptz
+)
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if not public.es_admin() then
+    raise exception 'No autorizado';
+  end if;
+
+  return query
+  select i.id, i.usuario_id, p.nombre, p.apellido, p.nombre_usuario, p.email, i.sala_id, s.nombre, i.num_jugadores, i.creado_en
+  from public.intentos_mesas_sin_acceso i
+  join public.perfiles p on p.id = i.usuario_id
+  left join public.salas s on s.id = i.sala_id
+  where p_usuario_id is null or i.usuario_id = p_usuario_id
+  order by i.creado_en desc
+  limit greatest(1, least(coalesce(p_limite, 300), 1000));
+end;
+$$;
+
+revoke all on function public.intentos_mesas_sin_acceso_admin(uuid, int) from public;
+grant execute on function public.intentos_mesas_sin_acceso_admin(uuid, int) to authenticated;
+
+-- ============================================================================
 -- RESULTADOS EN VIVO DE GOLF, SACADOS AUTOMÁTICAMENTE DE ESPN (28/09)
 -- ============================================================================
 -- Pedido de Iñi: que la clasificación en directo de las porras se actualice
@@ -3450,6 +3642,107 @@ update public.perfiles set rol = 'admin' where id = (
 -- admin, añado aquí una línea igual que esta con su email — no hace falta
 -- tocar nada más del código, la tarjeta de "Mi cuenta" y la protección de
 -- /admin ya funcionan para cualquier cuenta con rol = 'admin'.
+
+-- ============================================================================
+-- CIERRE AUTOMÁTICO DE INSCRIPCIONES Y LIQUIDACIÓN AUTOMÁTICA AL TERMINAR
+-- EL TORNEO (nuevo, 03/10 — pedido explícito de Iñi, ver
+-- claude/DRAFTERS_Cambios_03-10_Cierre_y_Liquidacion_Automatica_Golf.md)
+-- ============================================================================
+-- Dos piezas nuevas, las dos ejecutadas por el mismo ciclo de sincronización
+-- (app/api/admin/actualizar-golf-en-vivo/route.ts, rama Data Golf — es la
+-- única fuente que da la hora de salida de cada jugador y el nº de rondas
+-- del torneo, field-updates), sin ningún cron nuevo:
+--
+--   1. CIERRE AUTOMÁTICO: en cuanto se conoce la hora de la primera salida
+--      del torneo (el "teetime" más temprano con round_num=1, de CUALQUIER
+--      jugador del campo, convertido a UTC con el tz_offset que da Data
+--      Golf), se cierra la inscripción de toda porra/mesa de esa
+--      competición 5 minutos antes — pero SOLO si el admin no le había
+--      puesto ya una fecha a mano (fecha_limite_inscripcion is null):
+--      nunca pisa una fecha que Iñi haya fijado él mismo.
+--   2. LIQUIDACIÓN AUTOMÁTICA (solo porras de golf — 'clasica'/
+--      'presupuesto', NO porras de fútbol ni Mesas Drafters: las mesas no
+--      tienen ningún motor de puntuación automático, ver
+--      /admin/pagos-pendientes, así que siguen liquidándose a mano):
+--      en cuanto TODOS los jugadores del campo que siguen compitiendo (ni
+--      CUT, ni WD, ni DQ, ni DNS, ni MDF) llevan thru=18 en la última
+--      ronda del torneo, se guarda el momento exacto
+--      (listo_para_liquidar_desde). Pedido explícito de Iñi (03/10,
+--      segunda vuelta): no liquidar en ese mismo instante, porque si hay
+--      empate en el primer puesto puede haber un playoff (hoyos de
+--      muerte súbita) que todavía no se ha resuelto — "lanzar la
+--      clasificación final una hora después de que todos los jugadores
+--      tengan el thru 18". Así que se espera 1 hora exacta desde ese
+--      instante y, si para entonces sigue sin haberse liquidado, se
+--      calcula el reparto con los datos de ESE momento (no con los de
+--      hace una hora — si hubo playoff, para entonces Data Golf ya debería
+--      reflejar la posición/resultado real ya resuelto) y se llama a
+--      liquidar_evento() con clave de servicio, exactamente igual que si
+--      el admin hubiera pulsado "Confirmar y repartir" a mano. Los
+--      empates que de verdad sigan sin resolverse (sin playoff real, p.ej.
+--      un torneo que reparte el título) se tratan igual que siempre: el
+--      premio se divide a partes iguales (repartirPremiosConEmpates()).
+--
+--      Aviso honesto (no encontrado, tras revisar lo que da Data Golf):
+--      no hay ningún campo explícito de "hay playoff"/"se ha resuelto el
+--      desempate" en field-updates ni en preds/in-play — el diseño de
+--      arriba confía en que, pasado ese margen de 1 hora,
+--      current_score/current_pos de preds/in-play ya reflejen el
+--      resultado real, resuelto el playoff o no.
+--
+-- liquidar_evento() ya acepta llamadas de service_role sin cambios (ver su
+-- comentario más abajo) — nada de esto toca esa función.
+alter table public.torneos_golf_live add column if not exists primera_salida_en timestamptz;
+alter table public.torneos_golf_live add column if not exists rondas_totales int;
+alter table public.torneos_golf_live add column if not exists listo_para_liquidar_desde timestamptz;
+alter table public.torneos_golf_live add column if not exists finalizado_en timestamptz;
+
+-- Cierra (si no estaba ya cerrada a mano) la inscripción de toda
+-- porra/mesa de esta competición — llamada por la ruta de sincronización
+-- en cuanto conoce la hora de la primera salida del torneo.
+create or replace function public.aplicar_cierre_automatico_inscripciones(
+  p_competicion text,
+  p_cierre timestamptz
+)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if not (public.es_admin() or auth.role() = 'service_role') then
+    raise exception 'No autorizado';
+  end if;
+
+  update public.porras set fecha_limite_inscripcion = p_cierre
+    where competicion = p_competicion and fecha_limite_inscripcion is null;
+
+  update public.salas set fecha_limite_inscripcion = p_cierre
+    where competicion = p_competicion and fecha_limite_inscripcion is null;
+end;
+$$;
+
+revoke all on function public.aplicar_cierre_automatico_inscripciones(text, timestamptz) from public;
+grant execute on function public.aplicar_cierre_automatico_inscripciones(text, timestamptz) to authenticated, service_role;
+
+-- Lectura pública mínima de torneos_golf_live (esa tabla, por lo demás, no
+-- tiene política de lectura pública — ver su comentario más arriba): solo
+-- expone si el torneo ya se ha dado por terminado, para que la pantalla de
+-- clasificación de la porra pueda cambiar "Premios" por "Clasificación
+-- final" sola. Devuelve una fila vacía (todo null) si la competición no
+-- tiene ningún torneo conectado todavía.
+create or replace function public.obtener_estado_torneo_golf(p_competicion text)
+returns table(finalizado_en timestamptz, listo_para_liquidar_desde timestamptz)
+language sql
+security definer set search_path = public
+stable
+as $$
+  select t.finalizado_en, t.listo_para_liquidar_desde
+  from public.torneos_golf_live t
+  where t.competicion = p_competicion;
+$$;
+
+revoke all on function public.obtener_estado_torneo_golf(text) from public;
+grant execute on function public.obtener_estado_torneo_golf(text) to anon, authenticated, service_role;
 
 -- ============================================================================
 -- CRON DE RESULTADOS DE GOLF — PASO MANUAL, RELLENAR ANTES DE EJECUTAR

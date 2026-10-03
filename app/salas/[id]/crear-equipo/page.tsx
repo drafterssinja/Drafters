@@ -266,11 +266,6 @@ export default function CrearEquipoPage() {
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
-  function avanzarPaso(siguiente: 'draft' | 'confirm') {
-    window.history.pushState({ paso: siguiente }, '', window.location.href);
-    setStep(siguiente);
-  }
-
   // Acceso a Mesas Drafters (nuevo, 01/10, pedido de Iñi): mientras no
   // empiece a hacer publicidad, un usuario sin este acceso puede recorrer
   // toda la pantalla (info, elegir equipo, llegar a la revisión final),
@@ -278,6 +273,28 @@ export default function CrearEquipoPage() {
   // tiene_acceso_mesas_drafters() en drafters-schema.sql (mismo bloqueo
   // repetido ahí del lado del servidor).
   const tieneAccesoMesas = !!perfil && (perfil.rol === 'admin' || !!perfil.acceso_mesas_drafters);
+
+  function avanzarPaso(siguiente: 'draft' | 'confirm') {
+    window.history.pushState({ paso: siguiente }, '', window.location.href);
+    setStep(siguiente);
+
+    // Registro de intentos sin acceso (nuevo, 03/10, pedido de Iñi): cuando
+    // alguien SIN acceso a Mesas Drafters llega a la revisión final con su
+    // equipo ya construido — a falta solo del botón, que no le va a dejar
+    // confirmar — se registra el intento en un registro aparte del de
+    // actividad general (ver intentos_mesas_sin_acceso en
+    // drafters-schema.sql y app/admin/mesas-sin-acceso). No se espera la
+    // respuesta ni se avisa de ningún error: nunca debe notarse ni
+    // bloquear la pantalla de quien está construyendo su equipo. No aplica
+    // al editar (modoEdicion) — quien edita un equipo ya inscrito, por
+    // definición, ya tenía acceso cuando lo creó.
+    if (siguiente === 'confirm' && !modoEdicion && !tieneAccesoMesas && sala) {
+      supabase.rpc('registrar_intento_mesa_sin_acceso', { p_sala_id: sala.id, p_num_jugadores: selected.length }).then(
+        () => {},
+        () => {}
+      );
+    }
+  }
 
   const isFutbol = sala?.deporte === 'futbol';
   const huecos = useMemo(() => huecosPorLinea(isFutbol ? alineacion : null), [isFutbol, alineacion]);

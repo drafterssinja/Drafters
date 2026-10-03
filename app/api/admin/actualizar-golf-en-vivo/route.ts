@@ -5,11 +5,27 @@ import { obtenerLeaderboardEspn, obtenerHoyosJugadorEspn, conConcurrenciaLimitad
 import {
   obtenerEnJuegoDataGolfParseado,
   obtenerParesPorCampoDataGolf,
-  obtenerNombresCampoDataGolf,
+  obtenerInfoCampoDataGolf,
   startHoleDesdeEndHole,
   type DataGolfTour,
 } from '@/lib/dataGolf';
-import { tipoResultadoHoyo } from '@/lib/golfScoring';
+import { tipoResultadoHoyo, sigueCompitiendo } from '@/lib/golfScoring';
+import { liquidarPorrasGolfDeCompeticion } from '@/lib/liquidacionGolfAutomatica';
+
+// Cuánto hay que esperar, UNA VEZ que todos los jugadores que siguen
+// compitiendo llevan thru=18 en la última ronda del torneo, antes de dar
+// el torneo por terminado de verdad y liquidar las porras de golf solas —
+// pedido explícito de Iñi (03/10, segunda vuelta): si hay empate en el
+// primer puesto puede haber un playoff (hoyos de muerte súbita) que
+// Data Golf no distingue con ningún campo propio ("no sé si esto Data
+// Golf... de alguna forma te lo devuelve... habría que buscar eso, pero
+// igual lanzar la clasificación final una hora después de que todos los
+// jugadores tengan el thru 18"). Al cumplirse la espera, el reparto se
+// calcula con los datos de ESE momento (no con los de hace una hora), así
+// que si hubo playoff debería estar ya resuelto en current_score/
+// current_pos. Ver el bloque "CIERRE AUTOMÁTICO..." en
+// drafters-schema.sql para el diseño completo.
+const ESPERA_LIQUIDACION_MS = 60 * 60 * 1000;
 
 // Biblioteca de pares de campo (01/10, pedido de Iñi: "si yo lo he puesto a
 // mano, pues coges el de a mano, y si no, cuando actualicemos la extracción
@@ -254,7 +270,15 @@ async function procesarTorneoEspn(
 // ============================================================================
 async function procesarTorneoDataGolf(
   admin: ReturnType<typeof crearClienteAdmin>,
-  torneo: { id: string; competicion: string; tourDataGolf: DataGolfTour },
+  torneo: {
+    id: string;
+    competicion: string;
+    tourDataGolf: DataGolfTour;
+    primeraSalidaEn: string | null;
+    rondasTotales: number | null;
+    listoParaLiquidarDesde: string | null;
+    finalizadoEn: string | null;
+  },
   aliasPorNombreOrigen: Map<string, string>,
   resultado: ResultadoTorneo
 ): Promise<void> {
@@ -290,10 +314,18 @@ async function procesarTorneoDataGolf(
 
   // Nombre real de cada campo (Data Golf SÍ lo da, a diferencia de ESPN) —
   // se guarda en campos_golf_live sin que el admin tenga que escribir nada
-  // (ver el comentario de esa tabla en drafters-schema.sql).
+  // (ver el comentario de esa tabla en drafters-schema.sql). De la MISMA
+  // llamada a field-updates sale también la hora de la primera salida del
+  // torneo y su nº de rondas (ver obtenerInfoCampoDataGolf) — se usan más
+  // abajo para el cierre automático de inscripciones.
   let nombresPorCampo: Map<string, string>;
+  let primeraSalidaDetectada: Date | null = null;
+  let rondasTotalesDetectadas: number | null = null;
   try {
-    nombresPorCampo = await obtenerNombresCampoDataGolf(torneo.tourDataGolf);
+    const info = await obtenerInfoCampoDataGolf(torneo.tourDataGolf);
+    nombresPorCampo = info.nombresPorCampo;
+    primeraSalidaDetectada = info.primeraSalida;
+    rondasTotalesDetectadas = info.rondasTotales;
   } catch {
     nombresPorCampo = new Map(); // si falla, se sigue sin nombre — nunca debe tirar abajo el resto del ciclo
   }
@@ -424,6 +456,68 @@ async function procesarTorneoDataGolf(
       p_pares: pares,
     });
   }
+
+  // ==========================================================================
+  // CIERRE AUTOMÁTICO DE INSCRIPCIONES (ver drafters-schema.sql, bloque
+  // "CIERRE AUTOMÁTICO..."): en cuanto se conoce la hora de la primera
+  // salida, se cierra (si no estaba ya cerrada a mano) la inscripción de
+  // toda porra/mesa de esta competición, 5 minutos antes. Se llama cada
+  // ciclo que haya primeraSalidaDetectada — es idempotente (la función SQL
+  // solo toca filas con fecha_limite_inscripcion todavía null), así que no
+  // hace falta guardar un "ya se aplicó" aparte.
+  if (primeraSalidaDetectada) {
+    await admin
+      .from('torneos_golf_live')
+      .update({ primera_salida_en: primeraSalidaDetectada.toISOString(), rondas_totales: rondasTotalesDetectadas })
+      .eq('id', torneo.id);
+
+    const cierre = new Date(primeraSalidaDetectada.getTime() - 5 * 60 * 1000);
+    await admin.rpc('aplicar_cierre_automatico_inscripciones', {
+      p_competicion: torneo.competicion,
+      p_cierre: cierre.toISOString(),
+    });
+  }
+
+  // ==========================================================================
+  // DETECCIÓN DE "TORNEO TERMINADO" Y LIQUIDACIÓN AUTOMÁTICA (solo porras
+  // de golf — ver lib/liquidacionGolfAutomatica.ts y el comentario largo de
+  // ESPERA_LIQUIDACION_MS, arriba del todo de este archivo).
+  const rondasTotalesEfectivo = rondasTotalesDetectadas ?? torneo.rondasTotales;
+  if (rondasTotalesEfectivo !== null && torneo.finalizadoEn === null) {
+    // Estado de cada jugador tras ESTE ciclo: el de la base de datos, con
+    // los que se han actualizado ahora mismo (actualizacionesJugadores) por
+    // encima — sin otra consulta aparte.
+    const actualizacionesPorId = new Map(actualizacionesJugadores.map((a) => [a.id, a]));
+    const estadoActual = jugadores.map((j) => {
+      const act = actualizacionesPorId.get(j.id);
+      return {
+        posicion: act ? act.resultado_en_vivo_posicion : null,
+        total: act ? act.resultado_en_vivo_total : j.resultado_en_vivo_total,
+        ronda: act ? act.resultado_en_vivo_ronda : j.resultado_en_vivo_ronda,
+        thru: act ? act.resultado_en_vivo_thru : j.resultado_en_vivo_thru,
+      };
+    });
+
+    const activos = estadoActual.filter((j) => j.total !== null && sigueCompitiendo(j.posicion));
+    const todosListos = activos.length > 0 && activos.every((j) => j.ronda === rondasTotalesEfectivo && j.thru === 18);
+
+    if (todosListos) {
+      if (!torneo.listoParaLiquidarDesde) {
+        await admin.from('torneos_golf_live').update({ listo_para_liquidar_desde: new Date().toISOString() }).eq('id', torneo.id);
+      } else {
+        const transcurrido = Date.now() - new Date(torneo.listoParaLiquidarDesde).getTime();
+        if (transcurrido >= ESPERA_LIQUIDACION_MS) {
+          await liquidarPorrasGolfDeCompeticion(admin, torneo.competicion);
+          await admin.from('torneos_golf_live').update({ finalizado_en: new Date().toISOString() }).eq('id', torneo.id);
+        }
+      }
+    } else if (torneo.listoParaLiquidarDesde) {
+      // Ya no están todos a thru=18 en la última ronda (dato que había
+      // cambiado, o un ciclo raro) — se descarta el reloj, nunca se liquida
+      // con un "listo" que resultó no serlo.
+      await admin.from('torneos_golf_live').update({ listo_para_liquidar_desde: null }).eq('id', torneo.id);
+    }
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -451,6 +545,9 @@ export async function POST(req: NextRequest) {
     espn_event_id: string | null;
     temporada: number | null;
     tour_datagolf: DataGolfTour | null;
+    rondas_totales: number | null;
+    listo_para_liquidar_desde: string | null;
+    finalizado_en: string | null;
   }[]) ?? [];
 
   const resultados: ResultadoTorneo[] = [];
@@ -488,7 +585,15 @@ export async function POST(req: NextRequest) {
         if (!torneo.tour_datagolf) throw new Error('Torneo marcado como fuente_datos=datagolf sin tour_datagolf.');
         await procesarTorneoDataGolf(
           admin,
-          { id: torneo.id, competicion: torneo.competicion, tourDataGolf: torneo.tour_datagolf },
+          {
+            id: torneo.id,
+            competicion: torneo.competicion,
+            tourDataGolf: torneo.tour_datagolf,
+            primeraSalidaEn: null, // no se necesita leer el valor guardado: cada ciclo lo vuelve a calcular (y a guardar) desde field-updates
+            rondasTotales: torneo.rondas_totales,
+            listoParaLiquidarDesde: torneo.listo_para_liquidar_desde,
+            finalizadoEn: torneo.finalizado_en,
+          },
           aliasPorNombreOrigen,
           resultado
         );

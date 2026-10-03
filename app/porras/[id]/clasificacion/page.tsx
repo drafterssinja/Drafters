@@ -12,7 +12,7 @@ import { formatEuros, posicionLabel, parteParaPremios } from '@/lib/salaShared';
 import { GRUPO_PORRA_LABELS, ORDEN_GRUPOS, COLOR_GRUPO, type GrupoPorra } from '@/lib/porraGrupos';
 import { formatGolfScore, calcularBonosPodio, COLOR_TIPO_RESULTADO, ETIQUETA_TIPO_RESULTADO, type TipoResultadoHoyo } from '@/lib/golfScoring';
 import { normalizarNombre } from '@/lib/nombreMatch';
-import { calcularTramosPorInscritos } from '@/lib/repartoPremios';
+import { calcularTramosPorInscritos, repartirPremiosConEmpates, type ClasificacionEntrada } from '@/lib/repartoPremios';
 import { cargarFavoritos, alternarFavoritoEquipo } from '@/lib/favoritosEquipo';
 import { cargarFavoritosJugador, alternarFavoritoJugador } from '@/lib/favoritosJugador';
 import { reproducirSonidoAviso, leerPreferenciaSonido, guardarPreferenciaSonido } from '@/lib/sonidoAviso';
@@ -174,6 +174,13 @@ export default function PorraClasificacionPage() {
   const [sonidoActivado, setSonidoActivado] = useState(true);
   // Cola de avisos de resultado no-par (03/10) — ver el efecto de más abajo.
   const [avisos, setAvisos] = useState<{ id: string; jugador: string; tipo: TipoResultadoHoyo }[]>([]);
+  // Torneo terminado (nuevo, 03/10, pedido de Iñi): lo decide en exclusiva
+  // la ruta de sincronización (ver el bloque "CIERRE AUTOMÁTICO..." en
+  // drafters-schema.sql — torneos_golf_live.finalizado_en), nunca esta
+  // pantalla. En cuanto está puesto, la pestaña "Premios" pasa a llamarse
+  // "Clasificación final" y muestra el reparto ya calculado en vez de solo
+  // los tramos — ver más abajo.
+  const [torneoFinalizado, setTorneoFinalizado] = useState(false);
 
   useEffect(() => {
     let activo = true;
@@ -216,7 +223,7 @@ export default function PorraClasificacionPage() {
       const porraRow = porraData as PorraRow;
       setPorra(porraRow);
 
-      const [{ data: jugData }, { data: equiposData }, { data: camposData }] = await Promise.all([
+      const [{ data: jugData }, { data: equiposData }, { data: camposData }, { data: estadoTorneoData }] = await Promise.all([
         porraRow.competicion
           ? supabase
               .from('jugadores')
@@ -235,11 +242,18 @@ export default function PorraClasificacionPage() {
         porraRow.competicion
           ? supabase.from('campos_golf_live').select('campo_id,nombre').eq('competicion', porraRow.competicion)
           : Promise.resolve({ data: [] as { campo_id: string; nombre: string }[] }),
+        // Si el torneo ya se dio por terminado (03/10) — ver el comentario
+        // de torneoFinalizado más arriba.
+        porraRow.competicion
+          ? supabase.rpc('obtener_estado_torneo_golf', { p_competicion: porraRow.competicion })
+          : Promise.resolve({ data: [] as { finalizado_en: string | null }[] }),
       ]);
 
       if (!activo) return;
 
       setJugadores(((jugData as JugadorRow[]) ?? []).filter((j) => j.grupo_porra !== null));
+      const filaEstadoTorneo = ((estadoTorneoData as { finalizado_en: string | null }[]) ?? [])[0];
+      setTorneoFinalizado(!!filaEstadoTorneo?.finalizado_en);
       const camposArr = (camposData as { campo_id: string; nombre: string }[]) ?? [];
       setNombresCampo(Object.fromEntries(camposArr.map((c) => [c.campo_id, c.nombre])));
       if (camposArr.length > 0) {
@@ -601,7 +615,7 @@ export default function PorraClasificacionPage() {
               Torneo
             </button>
             <button type="button" onClick={() => setVista('premios')} style={vistaPillStyle(vista === 'premios')}>
-              Premios
+              {torneoFinalizado ? 'Clasificación final' : 'Premios'}
             </button>
             {/* Pestaña Información (nueva, 03/10, pedido de Iñi: "va a haber
                 gente que entre por primera vez y quiero que sepan cómo
@@ -1056,18 +1070,58 @@ export default function PorraClasificacionPage() {
             </div>
           )}
 
-          {/* Pestaña Premios (nueva, 02/10, pedido de Iñi: "tiene que haber
-              una tercera pestaña que sea premios y que se vea lo mismo que
-              se ve en la información de la porra... pero con el look and
-              feel... de tonos negros y verdes, no con los amarillos").
-              Mismo cálculo exacto que la pestaña Premios de /porras/[id]
-              (parteParaPremios + calcularTramosPorInscritos sobre los
-              equipos ya inscritos), solo que con el acento verde de las
-              pantallas de clasificación en vez del dorado de esa pantalla. */}
+          {/* Pestaña Premios / Clasificación final (02/10 y 03/10, pedido
+              de Iñi: "tiene que haber una tercera pestaña que sea premios...
+              con el look and feel... de tonos negros y verdes" y, más
+              adelante, "cuando se finalice un torneo... en vez de premios
+              aparezca clasificación final... que en los puestos premiados
+              se calcule cuánto es el dinero que gana cada uno... que
+              aparezca ahí directamente"). Mientras el torneo no se ha dado
+              por terminado (torneoFinalizado, decidido por la ruta de
+              sincronización — ver drafters-schema.sql), se ve solo el
+              reparto por tramos, igual que siempre; en cuanto termina, se
+              ve la clasificación real de cada equipo con su premio ya
+              calculado (mismo cálculo exacto que la liquidación automática,
+              lib/liquidacionGolfAutomatica.ts, con el bono de podio siempre
+              aplicado — nunca el bonosParaMostrar simulable de más arriba). */}
           {vista === 'premios' &&
             (() => {
               const bote = parteParaPremios(porra.precio) * equipos.length;
               const tramosPremios = calcularTramosPorInscritos(equipos.length);
+
+              if (torneoFinalizado) {
+                const clasificacionFinal: ClasificacionEntrada[] = equiposOrdenados.map((eq) => ({
+                  equipoId: eq.equipoId,
+                  valor: totalEquipo(eq.jugadores, jugadoresPorId, mapaBonosPodio),
+                }));
+                const repartoFinal = repartirPremiosConEmpates(clasificacionFinal, tramosPremios, bote, 'asc').sort((a, b) => a.posicion - b.posicion);
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '20px 14px', background: 'rgba(61,220,132,0.08)', border: '1px solid rgba(61,220,132,0.35)', borderRadius: 12 }}>
+                      <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#3DDC84' }}>Torneo terminado · Bote total</span>
+                      <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 30, color: '#3DDC84' }}>{formatEuros(bote)}</span>
+                    </div>
+                    {repartoFinal.map((r) => {
+                      const eq = equiposOrdenados.find((e) => e.equipoId === r.equipoId);
+                      return (
+                        <div key={r.equipoId} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
+                          <span style={{ flexShrink: 0, width: 32, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, color: r.importe > 0 ? '#F0B94D' : S.MUTED_3 }}>{r.posicion}º</span>
+                          <span style={{ flex: 1, minWidth: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 13, color: S.TEXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {eq?.nombreEquipo ?? 'Equipo'}
+                          </span>
+                          <span style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 700, color: S.MUTED_2 }}>
+                            {eq ? formatGolfScore(totalEquipo(eq.jugadores, jugadoresPorId, mapaBonosPodio)) : ''}
+                          </span>
+                          <span style={{ flexShrink: 0, width: 70, textAlign: 'right', fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13, color: r.importe > 0 ? '#3DDC84' : S.MUTED_3 }}>
+                            {formatEuros(r.importe)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              }
+
               return (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '20px 14px', background: 'rgba(61,220,132,0.08)', border: '1px solid rgba(61,220,132,0.35)', borderRadius: 12 }}>
