@@ -2465,9 +2465,12 @@ grant execute on function public.eventos_actividad_admin(uuid, int, timestamptz,
 --      ruta de servidor que de verdad llama a ESPN, empareja jugadores por
 --      nombre y escribe los resultados. La llama tanto un botón "Actualizar
 --      ahora" en /admin/resultados-golf como, automáticamente, un cron de
---      Supabase (pg_cron + pg_net) cada 5 minutos — ver el bloque final de
---      este archivo, "CRON DE RESULTADOS DE GOLF", que necesita rellenarse
---      con la URL real de la app y una clave secreta antes de ejecutarse.
+--      Supabase (pg_cron + pg_net) cada minuto (subido desde cada 5 minutos
+--      el 03/10, pedido de Iñi — el límite de Data Golf es 45
+--      peticiones/minuto, de sobra, y ESPN no publica ningún límite) — ver
+--      el bloque final de este archivo, "CRON DE RESULTADOS DE GOLF", que
+--      necesita rellenarse con la URL real de la app y una clave secreta
+--      antes de ejecutarse.
 --   3. Resultado total (golpes respecto al par, en qué hoyo va, posición) se
 --      guarda directamente en `jugadores` (columnas resultado_en_vivo_*) —
 --      cada fila de `jugadores` ya pertenece a un único torneo (ver el
@@ -3278,12 +3281,12 @@ update public.perfiles set rol = 'admin' where id = (
 -- CRON DE RESULTADOS DE GOLF — PASO MANUAL, RELLENAR ANTES DE EJECUTAR
 -- ============================================================================
 -- Este bloque programa, dentro de la propia base de datos de Supabase, que
--- se llame cada 5 minutos a la ruta que sincroniza los resultados de golf
--- desde ESPN (app/api/admin/actualizar-golf-en-vivo/route.ts) — así no
--- depende de tener activado ningún plan de pago de Vercel (su "Cron Jobs"
--- gratuito solo deja programar como mucho una vez al día, no cada 5
--- minutos; con esto se programa desde Supabase en su lugar, que si lo
--- permite gratis).
+-- se llame CADA MINUTO (subido desde cada 5 minutos el 03/10, pedido de
+-- Iñi) a la ruta que sincroniza los resultados de golf desde ESPN
+-- (app/api/admin/actualizar-golf-en-vivo/route.ts) — así no depende de
+-- tener activado ningún plan de pago de Vercel (su "Cron Jobs" gratuito
+-- solo deja programar como mucho una vez al día, no cada minuto; con esto
+-- se programa desde Supabase en su lugar, que si lo permite gratis).
 --
 -- ANTES DE EJECUTAR ESTE BLOQUE EN CONCRETO (el resto del archivo, por
 -- encima de este punto, se puede pegar y ejecutar tal cual como siempre):
@@ -3311,7 +3314,7 @@ create extension if not exists pg_net;
 
 select cron.schedule(
   'actualizar-golf-en-vivo',
-  '*/5 * * * *',
+  '* * * * *',
   $cron$
   select net.http_post(
     url := 'https://drafters-rho.vercel.app/api/admin/actualizar-golf-en-vivo',

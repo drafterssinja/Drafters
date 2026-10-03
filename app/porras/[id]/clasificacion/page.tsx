@@ -31,7 +31,7 @@ import EstrellaFavorito from '@/components/EstrellaFavorito';
 // plantilla real de 5 jugadores de cada equipo inscrito
 // (equipos_porra_clasificacion()) y — desde el 28/09 — la puntuación en
 // vivo de verdad: `jugadores.resultado_en_vivo_*` y
-// `resultados_golf_hoyo` se rellenan solos cada 5 minutos desde ESPN (ver
+// `resultados_golf_hoyo` se rellenan solos cada minuto desde ESPN (ver
 // app/api/admin/actualizar-golf-en-vivo/route.ts y el admin
 // /admin/resultados-golf, donde se conecta cada competición con su torneo
 // de ESPN). Mientras un jugador no tenga ningún resultado todavía
@@ -877,7 +877,7 @@ export default function PorraClasificacionPage() {
           )}
 
           <span style={{ fontSize: 10, color: S.FAINT }}>
-            *Clasificación en directo: resultado respecto al par de cada jugador/equipo (no puntos), actualizado automáticamente cada 5 minutos. Se ve "E" (par)
+            *Clasificación en directo: resultado respecto al par de cada jugador/equipo (no puntos), actualizado automáticamente cada minuto. Se ve "E" (par)
             mientras un jugador todavía no tiene ningún resultado registrado.
           </span>
 

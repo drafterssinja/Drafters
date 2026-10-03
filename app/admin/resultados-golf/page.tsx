@@ -31,7 +31,7 @@ import { normalizarNombre } from '@/lib/nombreMatch';
 // ese número (o código) es el que va aquí.
 //
 // El botón "Actualizar ahora" llama a la misma ruta que usa el cron
-// automático de Supabase (cada 5 minutos, ver el final de
+// automático de Supabase (cada minuto, ver el final de
 // drafters-schema.sql), pero autenticado con la sesión del admin en vez
 // del secreto compartido — útil para probar una configuración nueva sin
 // esperar al siguiente ciclo del cron.
@@ -117,6 +117,19 @@ export default function AdminResultadosGolfPage() {
   const [sincronizando, setSincronizando] = useState(false);
   const [resultadoSync, setResultadoSync] = useState<ResultadoSync[] | null>(null);
   const [errorSync, setErrorSync] = useState<string | null>(null);
+
+  // Diagnóstico de Data Golf (02/10, preparación — ver lib/dataGolf.ts): como
+  // Data Golf no documenta en ningún sitio la forma exacta del JSON que
+  // devuelve, este botón solo pide el endpoint elegido y muestra la
+  // respuesta cruda tal cual, para copiarla y mandármela en cuanto haya una
+  // clave de API real.
+  const [dgEndpoint, setDgEndpoint] = useState<
+    'get-schedule' | 'field-updates' | 'live-tournament-stats' | 'in-play' | 'live-hole-stats' | 'get-player-list'
+  >('get-schedule');
+  const [dgTour, setDgTour] = useState<'pga' | 'euro'>('euro');
+  const [dgProbando, setDgProbando] = useState(false);
+  const [dgResultado, setDgResultado] = useState<unknown | null>(null);
+  const [dgError, setDgError] = useState<string | null>(null);
 
   // Campos (varios campos en el mismo torneo, p.ej. rotación del Dunhill
   // Links — nuevo, 01/10, pedido de Iñi). Se cargan a demanda por torneo
@@ -449,6 +462,40 @@ export default function AdminResultadosGolfPage() {
     }
   }
 
+  async function probarDataGolf() {
+    setDgProbando(true);
+    setDgError(null);
+    setDgResultado(null);
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session) {
+      setDgProbando(false);
+      setDgError('Tu sesión ha caducado. Vuelve a iniciar sesión.');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/admin/probar-data-golf', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: dgEndpoint, tour: dgTour }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setDgError(body.error ?? 'No se ha podido llamar a Data Golf.');
+      } else {
+        setDgResultado(body.data);
+      }
+    } catch (e) {
+      setDgError(e instanceof Error ? e.message : 'No se ha podido llamar a Data Golf.');
+    } finally {
+      setDgProbando(false);
+    }
+  }
+
   async function cargarCampos(t: TorneoGolfLive) {
     setErrorCampos(null);
     setCamposPorTorneo((prev) => ({ ...prev, [t.id]: 'cargando' }));
@@ -527,7 +574,7 @@ export default function AdminResultadosGolfPage() {
               Resultados de golf en vivo
             </h1>
             <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0, lineHeight: 1.5 }}>
-              Conecta cada competición de Drafters con su torneo en ESPN. Se sincroniza solo, cada 5 minutos, mediante un
+              Conecta cada competición de Drafters con su torneo en ESPN. Se sincroniza solo, cada minuto, mediante un
               cron programado en Supabase. Los resultados se ven en la{' '}
               <Link href="/" style={{ color: S.ACCENT }}>
                 clasificación en directo
@@ -685,7 +732,7 @@ export default function AdminResultadosGolfPage() {
                     onChange={(e) => actualizarTorneo(t.id, { activo: e.target.checked })}
                     style={{ width: 16, height: 16, flexShrink: 0, accentColor: S.ACCENT, cursor: 'pointer' }}
                   />
-                  Activo (se sincroniza en el cron de cada 5 minutos)
+                  Activo (se sincroniza en el cron de cada minuto)
                 </label>
 
                 {/* Campos del torneo (01/10) — solo hace falta para los
@@ -752,6 +799,83 @@ export default function AdminResultadosGolfPage() {
             ))}
 
             {errorCampos && <p style={S.errorText}>{errorCampos}</p>}
+          </div>
+
+          {/* Diagnóstico de Data Golf (02/10, preparación — ver lib/dataGolf.ts
+              y DRAFTERS_Manual_DataGolf_Alta_e_Integracion.md). No depende de
+              ninguna "competición conectada" de arriba: es solo para probar
+              la API directamente en cuanto haya una clave real. */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 14 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={S.sectionLabel}>Probar Data Golf (nuevo)</span>
+              <p style={{ fontSize: 12, color: S.MUTED_2, margin: 0, lineHeight: 1.5 }}>
+                Llama a un endpoint de Data Golf y muestra la respuesta tal cual la manda, sin procesarla — esto es a
+                propósito: Data Golf no publica la forma exacta de su JSON, así que la idea es probarlo en cuanto
+                tengas la clave de API y pasármelo. Hace falta la variable de entorno{' '}
+                <code style={{ fontSize: 11 }}>DATA_GOLF_API_KEY</code> puesta en Vercel.
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <div style={S.field}>
+                <span style={S.label}>Endpoint</span>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {(['get-schedule', 'field-updates', 'live-tournament-stats', 'in-play', 'live-hole-stats', 'get-player-list'] as const).map((ep) => (
+                    <button key={ep} type="button" style={S.pill(dgEndpoint === ep)} onClick={() => setDgEndpoint(ep)}>
+                      {ep}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div style={S.field}>
+              <span style={S.label}>Tour</span>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button type="button" style={S.pill(dgTour === 'pga')} onClick={() => setDgTour('pga')}>
+                  PGA Tour
+                </button>
+                <button type="button" style={S.pill(dgTour === 'euro')} onClick={() => setDgTour('euro')}>
+                  DP World Tour
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              disabled={dgProbando}
+              onClick={probarDataGolf}
+              style={{ ...S.secondaryLinkButton, width: 'auto', padding: '8px 14px', opacity: dgProbando ? 0.7 : 1, cursor: 'pointer', border: 'none' }}
+            >
+              {dgProbando ? 'Llamando...' : 'Probar'}
+            </button>
+
+            {dgError && <p style={S.errorText}>{dgError}</p>}
+
+            {dgResultado !== null && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: S.MUTED_3, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                  Respuesta cruda de Data Golf — copia todo este texto y pásamelo:
+                </span>
+                <pre
+                  style={{
+                    fontSize: 10.5,
+                    color: S.TEXT,
+                    background: '#0a0a0a',
+                    border: `1px solid ${S.CARD_BORDER}`,
+                    borderRadius: 8,
+                    padding: 10,
+                    maxHeight: 420,
+                    overflow: 'auto',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    margin: 0,
+                  }}
+                >
+                  {JSON.stringify(dgResultado, null, 2)}
+                </pre>
+              </div>
+            )}
           </div>
 
           {/* Biblioteca de pares de campo (nuevo, 01/10) — ver la nota larga

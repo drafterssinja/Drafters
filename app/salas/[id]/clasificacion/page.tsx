@@ -24,7 +24,7 @@ import EstrellaFavorito from '@/components/EstrellaFavorito';
 // - Mesas de GOLF: reutiliza exactamente la misma pieza que ya alimenta la
 //   clasificación en directo de las porras de golf —
 //   jugadores.resultado_en_vivo_* (golpes respecto al par), sincronizados
-//   solos cada 5 minutos desde ESPN — así que el diseño y el cálculo son
+//   solos cada minuto desde ESPN — así que el diseño y el cálculo son
 //   los mismos que en app/porras/[id]/clasificacion/page.tsx, sin el
 //   toggle de "bono de podio" (eso es una regla propia de la porra clásica,
 //   no de las mesas) ni los grupos de color (las mesas se draftean por
@@ -669,7 +669,7 @@ export default function SalaClasificacionPage() {
           )}
 
           <span style={{ fontSize: 10, color: S.FAINT }}>
-            *Clasificación en directo: resultado respecto al par de cada jugador/equipo (no puntos), actualizado automáticamente cada 5 minutos. Se ve "E"
+            *Clasificación en directo: resultado respecto al par de cada jugador/equipo (no puntos), actualizado automáticamente cada minuto. Se ve "E"
             (par) mientras un jugador todavía no tiene ningún resultado registrado.
           </span>
 

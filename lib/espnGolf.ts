@@ -59,7 +59,7 @@ function parsearThru(valor: unknown): number | null {
 
 /**
  * Clasificación completa de un torneo en curso — UNA sola llamada a ESPN
- * para todo el campo (barato: se puede pedir cada 5 minutos sin problema).
+ * para todo el campo (barato: se puede pedir cada minuto sin problema).
  *
  * CAMBIO 01/10 (aviso de Iñi, primera prueba real con un torneo del DP
  * World Tour — Alfred Dunhill Links 2026 — ESPN respondió 404 con
