@@ -133,8 +133,21 @@ export default function AnuncioVideoInline({ ubicacion }: { ubicacion: 'clasific
   // cargado, el vídeo se comporta exactamente igual que antes (no clicable).
   // Los dos botones propios (silenciar, reproducir) cortan la propagación
   // del clic para que pulsarlos nunca abra también el enlace.
+  //
+  // Registro del clic (nuevo, 03/10, pedido de Iñi: "quiero que se quede
+  // registrado cuántas veces se pulsa encima del vídeo y, por lo tanto, se
+  // visita la página del publicitante") — fire-and-forget, igual que
+  // alEmpezarReproduccion() más arriba: nunca debe poder retrasar ni
+  // bloquear la apertura real del enlace, que es lo que de verdad le
+  // importa a quien ha pulsado.
   function irAlEnlace() {
     if (video === 'cargando' || video === null || !video.enlace) return;
+    supabase.rpc('registrar_clic_anuncio', { p_video_id: video.id, p_ubicacion: ubicacion }).then(({ error }) => {
+      if (error) {
+        // eslint-disable-next-line no-console
+        console.error('No se ha podido registrar el clic en el vídeo publicitario:', error.message);
+      }
+    });
     window.open(video.enlace, '_blank', 'noopener,noreferrer');
   }
 

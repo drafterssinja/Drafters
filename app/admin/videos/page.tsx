@@ -51,8 +51,18 @@ type VideoRow = {
 // Separado en pasivas (clasificación en directo + Mesas Drafters, se
 // reproducen solas) y recarga (el usuario elige activamente verlo a
 // cambio de 20€) — pedido de Iñi, 28/09: son audiencias distintas para un
-// anunciante, así que no tiene sentido enseñar un único número.
-type EstadisticaVideo = { video_id: string; visualizaciones_pasivas: number; visualizaciones_recarga: number; total_visualizaciones: number };
+// anunciante, así que no tiene sentido enseñar un único número. `clics`
+// (nuevo, 03/10, pedido de Iñi: "quiero que se quede registrado cuántas
+// veces se pulsa encima del vídeo y se visita la página del publicitante")
+// — cuántas veces se ha pulsado el vídeo para ir al enlace del anunciante,
+// ver registrar_clic_anuncio() en drafters-schema.sql.
+type EstadisticaVideo = {
+  video_id: string;
+  visualizaciones_pasivas: number;
+  visualizaciones_recarga: number;
+  total_visualizaciones: number;
+  clics: number;
+};
 
 // Extrae la ruta dentro del bucket "anuncios" a partir de la URL pública
 // (formato fijo de Supabase Storage: ".../object/public/anuncios/<ruta>")
@@ -442,6 +452,11 @@ export default function AdminPublicidadPage() {
                     <span style={{ fontSize: 11.5, color: S.MUTED_3 }}>
                       <span style={{ color: S.TEXT, fontWeight: 700 }}>{stats?.total_visualizaciones ?? 0}</span> en total
                     </span>
+                    {v.enlace_destino && (
+                      <span style={{ fontSize: 11.5, color: S.ACCENT }}>
+                        <span style={{ color: S.TEXT, fontWeight: 700 }}>{stats?.clics ?? 0}</span> clics al enlace del anunciante
+                      </span>
+                    )}
                   </div>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>

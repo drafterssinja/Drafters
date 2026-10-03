@@ -143,6 +143,16 @@ export default function SalaClasificacionPage() {
       const salaRow = salaData as SalaRow;
       setSala(salaRow);
 
+      // Registro de actividad (03/10, pedido de Iñi, mismo criterio que
+      // app/porras/[id]/clasificacion/page.tsx): un evento por cada vez que
+      // alguien abre la clasificación en directo de una mesa drafter,
+      // participe o no en ella. Fire-and-forget: no debe retrasar ni poder
+      // romper la carga de la clasificación.
+      supabase.rpc('registrar_evento_actividad', { p_tipo: 'clasificacion', p_detalle: { modo: 'sala', nombre: salaRow.nombre } }).then(
+        () => {},
+        () => {}
+      );
+
       if (salaRow.deporte !== 'golf') {
         // Fútbol/tenis: sin motor de resultados en directo todavía — no hace
         // falta cargar nada más, ver el aviso más abajo.

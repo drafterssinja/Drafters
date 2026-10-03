@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState, Suspense, type CSSProperties } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import Link from 'next/link';
 import { supabase, Perfil } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
@@ -40,6 +39,7 @@ type SalaFila = {
   aforo: number | null;
   buy_in: number;
   estado: string;
+  fecha_limite_inscripcion: string | null;
 };
 
 type SortKey = 'nombre' | 'juego' | 'jugadores' | 'buyin';
@@ -85,7 +85,7 @@ function SalasPageInner() {
         supabase.from('perfiles').select('*').eq('id', session.user.id).single(),
         supabase
           .from('salas')
-          .select('id,nombre,competicion,deporte,tipo,aforo,buy_in,estado')
+          .select('id,nombre,competicion,deporte,tipo,aforo,buy_in,estado,fecha_limite_inscripcion')
           .neq('tipo', 'maraton')
           .neq('estado', 'finalizada'),
         // RPC (no una select directa): equipos/inscripciones tienen RLS que
@@ -247,11 +247,18 @@ function SalasPageInner() {
             {salasFiltradas.map((s) => {
               const estadoInfo = estadoSalaInfo(s.estado, s.aforo, s.signedUp);
               const juegoLabel = TIPO_SALA_LABELS[s.tipo as TipoSala] ?? s.tipo;
+              // Empezada (03/10, pedido de Iñi: "en las mesas y en las
+              // porras que ya están empezadas... tiene que haber un botón
+              // para ir directamente a la clasificación") — mismo criterio
+              // que salaEmpezada en app/salas/[id]/page.tsx: la fecha
+              // límite ya ha pasado (el estado no cambia solo hasta
+              // liquidarla).
+              const empezada = !!s.fecha_limite_inscripcion && new Date(s.fecha_limite_inscripcion).getTime() <= Date.now();
               return (
-                <Link
+                <div
                   key={s.id}
-                  href={`/salas/${s.id}`}
-                  style={{ background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 6, textDecoration: 'none' }}
+                  onClick={() => router.push(`/salas/${s.id}`)}
+                  style={{ background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 6, cursor: 'pointer' }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                     <span style={{ flex: 1, minWidth: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, color: S.TEXT }}>{s.nombre}</span>
@@ -282,7 +289,38 @@ function SalasPageInner() {
                     </span>
                     <span style={{ flexShrink: 0, width: 58, textAlign: 'right', fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13, color: '#F0B94D' }}>{formatEuros(s.buy_in)}</span>
                   </div>
-                </Link>
+                  {empezada && (
+                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          router.push(`/salas/${s.id}/clasificacion`);
+                        }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 5,
+                          fontFamily: "'Barlow Condensed', sans-serif",
+                          fontWeight: 700,
+                          fontSize: 11,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.03em',
+                          color: '#FF7A45',
+                          background: 'rgba(255,122,69,0.14)',
+                          border: '1px solid rgba(255,122,69,0.45)',
+                          borderRadius: 8,
+                          padding: '6px 10px',
+                          whiteSpace: 'nowrap',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#FF7A45', flexShrink: 0 }} />
+                        Clasificación en directo
+                      </button>
+                    </div>
+                  )}
+                </div>
               );
             })}
           </div>

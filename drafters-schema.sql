@@ -2232,6 +2232,34 @@ alter table public.anuncios_video_reproducciones enable row level security;
 drop policy if exists "anuncios_video_reproducciones_admin_lee" on public.anuncios_video_reproducciones;
 create policy "anuncios_video_reproducciones_admin_lee" on public.anuncios_video_reproducciones
   for select using (public.es_admin());
+
+-- Clics en el vídeo (nuevo, 03/10, pedido de Iñi: "quiero que se quede
+-- registrado cuántas veces se pulsa encima del vídeo y, por lo tanto, se
+-- visita la página del publicitante") — tabla propia, separada de
+-- anuncios_video_reproducciones: un clic es un evento distinto de una
+-- visualización (un vídeo puede verse muchas veces sin que nadie llegue a
+-- pulsarlo, o pulsarse nada más empezar), así que mezclarlos en la misma
+-- tabla complicaría las estadísticas sin necesidad. Solo tiene sentido en
+-- los huecos clicables de components/AnuncioVideoInline.tsx
+-- ('clasificacion' y 'mesas' — el de /recargar no lleva a ningún enlace).
+create table if not exists public.anuncios_video_clics (
+  id uuid primary key default gen_random_uuid(),
+  video_id uuid not null references public.anuncios_video(id) on delete cascade,
+  usuario_id uuid not null references auth.users(id) on delete cascade,
+  ubicacion text not null check (ubicacion in ('clasificacion', 'mesas')),
+  creado_at timestamptz not null default now()
+);
+
+create index if not exists anuncios_video_clics_video_idx on public.anuncios_video_clics (video_id, creado_at);
+
+alter table public.anuncios_video_clics enable row level security;
+drop policy if exists "anuncios_video_clics_admin_lee" on public.anuncios_video_clics;
+create policy "anuncios_video_clics_admin_lee" on public.anuncios_video_clics
+  for select using (public.es_admin());
+-- Igual que anuncios_video_reproducciones: sin política de insert para
+-- nadie — solo se escribe desde registrar_clic_anuncio() (security
+-- definer), nunca directamente desde el cliente.
+
 -- Sin política de insert/update/delete para nadie: solo se escribe desde
 -- dentro de las funciones security definer de más abajo, nunca directamente
 -- desde el cliente — así nadie puede insertarse a sí mismo una
@@ -2340,6 +2368,36 @@ $$;
 revoke all on function public.registrar_visualizacion_anuncio(uuid, text, boolean) from public;
 grant execute on function public.registrar_visualizacion_anuncio(uuid, text, boolean) to authenticated;
 
+-- Registra un clic en el vídeo, es decir, una visita real a la página del
+-- anunciante (nuevo, 03/10, pedido de Iñi: "quiero que se quede registrado
+-- cuántas veces se pulsa encima del vídeo y, por lo tanto, se visita la
+-- página del publicitante") — llamada desde irAlEnlace() en
+-- components/AnuncioVideoInline.tsx, justo antes de abrir el enlace en una
+-- pestaña nueva. Sin límite de ninguna clase (a diferencia de
+-- registrar_visualizacion_anuncio(): aquí cada clic es, por definición, una
+-- intención real del usuario de visitar al anunciante, así que todos
+-- cuentan, por muchas veces que un mismo usuario lo pulse).
+create or replace function public.registrar_clic_anuncio(p_video_id uuid, p_ubicacion text)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if auth.uid() is null or p_ubicacion not in ('clasificacion', 'mesas') then
+    return;
+  end if;
+
+  insert into public.anuncios_video_clics (video_id, usuario_id, ubicacion) values (p_video_id, auth.uid(), p_ubicacion);
+exception when others then
+  -- Nunca debe poder romper el clic real del usuario (que siempre debe
+  -- abrir el enlace aunque, por lo que sea, no se pueda registrar).
+  null;
+end;
+$$;
+
+revoke all on function public.registrar_clic_anuncio(uuid, text) from public;
+grant execute on function public.registrar_clic_anuncio(uuid, text) to authenticated;
+
 -- Total de visualizaciones de cada vídeo, para el panel de admin — pensado
 -- para poder enseñarle el dato real a cada anunciante. Solo el admin puede
 -- llamarla (comprobado dentro, con el mismo criterio que el resto de
@@ -2361,10 +2419,13 @@ grant execute on function public.registrar_visualizacion_anuncio(uuid, text, boo
 -- visualizaciones_pasivas/visualizaciones_recarga/total_visualizaciones) —
 -- Postgres no permite que `create or replace function` cambie las columnas
 -- de salida de una función ya existente, así que hay que borrarla primero.
+-- 03/10: se añade `clics` (cuántas veces se ha pulsado el vídeo para
+-- visitar al anunciante, ver anuncios_video_clics más arriba) — mismo
+-- motivo, hay que borrarla primero.
 drop function if exists public.estadisticas_anuncios_video();
 
 create or replace function public.estadisticas_anuncios_video()
-returns table (video_id uuid, visualizaciones_pasivas bigint, visualizaciones_recarga bigint, total_visualizaciones bigint)
+returns table (video_id uuid, visualizaciones_pasivas bigint, visualizaciones_recarga bigint, total_visualizaciones bigint, clics bigint)
 language plpgsql
 security definer set search_path = public
 as $$
@@ -2378,8 +2439,12 @@ begin
       r.video_id,
       count(*) filter (where r.ubicacion in ('clasificacion', 'mesas')) as visualizaciones_pasivas,
       count(*) filter (where r.ubicacion = 'recarga') as visualizaciones_recarga,
-      count(*) as total_visualizaciones
+      count(*) as total_visualizaciones,
+      coalesce(max(c.clics), 0) as clics
     from public.anuncios_video_reproducciones r
+    left join (
+      select video_id, count(*) as clics from public.anuncios_video_clics group by video_id
+    ) c on c.video_id = r.video_id
     group by r.video_id;
 end;
 $$;
@@ -2482,11 +2547,13 @@ grant execute on function public.recargar_por_video(uuid) to authenticated;
 create table if not exists public.eventos_actividad (
   id uuid primary key default gen_random_uuid(),
   usuario_id uuid not null references public.perfiles(id) on delete cascade,
-  tipo text not null check (tipo in ('login', 'inscripcion', 'recarga', 'premio')),
+  tipo text not null check (tipo in ('login', 'inscripcion', 'recarga', 'premio', 'clasificacion')),
   -- Detalle libre según el tipo — en 'inscripcion', algo como {"modo":
   -- "sala", "nombre": "Duelo Golf #4"}; en 'recarga' (añadido 28/09, pedido
-  -- de Iñi), {"tipo_recarga": "gratuita"} o {"tipo_recarga": "video"} — así
-  -- para poder mostrarlo en el registro sin tener que volver a cruzar con
+  -- de Iñi), {"tipo_recarga": "gratuita"} o {"tipo_recarga": "video"}; en
+  -- 'clasificacion' (añadido 03/10, mismo formato que 'inscripcion'):
+  -- {"modo": "porra", "nombre": "Masters 2026"} — así para poder mostrarlo
+  -- en el registro sin tener que volver a cruzar con
   -- `equipos`/`salas`/`porras` (que además pueden haberse borrado ya).
   detalle jsonb,
   creado_en timestamptz not null default now()
@@ -2504,8 +2571,15 @@ create table if not exists public.eventos_actividad (
 -- registrar_evento_actividad(), porque el evento es del usuario GANADOR, no
 -- del admin que confirma el reparto; liquidar_evento() es security definer
 -- así que puede escribir en la tabla sin pasar por RLS).
+-- 'clasificacion' añadido el 03/10 (pedido de Iñi: "quiero que... se vea
+-- quién va entrando también en la clasificación de la porra, ¿quién entra
+-- a ver la clasificación?") — un evento cada vez que alguien ABRE la
+-- pantalla de clasificación en directo de una porra (app/porras/[id]/
+-- clasificacion/page.tsx), participe o no en esa porra (ver CAMBIOS
+-- 01-10_Acceso_Mesas_Drafters_Preview: el botón está habilitado para
+-- cualquier usuario logueado una vez la porra ha empezado).
 alter table public.eventos_actividad drop constraint if exists eventos_actividad_tipo_check;
-alter table public.eventos_actividad add constraint eventos_actividad_tipo_check check (tipo in ('login', 'inscripcion', 'recarga', 'premio'));
+alter table public.eventos_actividad add constraint eventos_actividad_tipo_check check (tipo in ('login', 'inscripcion', 'recarga', 'premio', 'clasificacion'));
 
 create index if not exists eventos_actividad_usuario_idx on public.eventos_actividad (usuario_id);
 create index if not exists eventos_actividad_creado_idx on public.eventos_actividad (creado_en desc);
@@ -2525,11 +2599,13 @@ as $$
 begin
   -- No interrumpe el flujo del usuario si por lo que sea no hay sesión o el
   -- tipo no se reconoce — registrar actividad nunca debe poder romper un
-  -- login, una inscripción o una recarga real. 'recarga' añadido el 28/09
-  -- (pedido de Iñi) — se llama desde recargar_gratis_mensual() y
-  -- recargar_por_video() más abajo, con p_detalle indicando de cuál de las
-  -- dos se trata.
-  if auth.uid() is null or p_tipo not in ('login', 'inscripcion', 'recarga') then
+  -- login, una inscripción, una recarga real o la carga de una
+  -- clasificación. 'recarga' añadido el 28/09 (pedido de Iñi) — se llama
+  -- desde recargar_gratis_mensual() y recargar_por_video() más abajo, con
+  -- p_detalle indicando de cuál de las dos se trata. 'clasificacion'
+  -- añadido el 03/10 (pedido de Iñi) — se llama desde app/porras/[id]/
+  -- clasificacion/page.tsx cada vez que alguien abre esa pantalla.
+  if auth.uid() is null or p_tipo not in ('login', 'inscripcion', 'recarga', 'clasificacion') then
     return;
   end if;
 
@@ -2541,24 +2617,28 @@ revoke all on function public.registrar_evento_actividad(text, jsonb) from publi
 grant execute on function public.registrar_evento_actividad(text, jsonb) to authenticated;
 
 -- Lectura para el panel de admin (app/admin/actividad/page.tsx): un único
--- listado global, más reciente primero, opcionalmente filtrado por usuario
--- y/o por un rango de fechas (p_fecha_desde/p_fecha_hasta, añadido 28/09 a
+-- listado global, más reciente primero, opcionalmente filtrado por usuario,
+-- por un rango de fechas (p_fecha_desde/p_fecha_hasta, añadido 28/09 a
 -- petición de Iñi: "que haya también un filtro por fechas, de tal día a
--- tal día") — junta nombre/apellido/email para no tener que hacer una
+-- tal día") y por tipo de evento (p_tipo, añadido 03/10, mismo pedido:
+-- "que haya un segundo filtro que se pueda filtrar por tipo de
+-- actividad") — junta nombre/apellido/email para no tener que hacer una
 -- segunda consulta a `perfiles` por cada fila.
 --
 -- El `drop` de antes es necesario porque se añaden parámetros nuevos: para
 -- Postgres, una función con distinta lista de parámetros es una función
--- distinta (podría quedarse la de dos parámetros conviviendo con esta como
--- una sobrecarga), así que se borra primero la versión vieja para que no
--- quede duplicada.
+-- distinta (podría quedarse la de cuatro parámetros conviviendo con esta
+-- como una sobrecarga), así que se borra primero la versión vieja para que
+-- no quede duplicada.
 drop function if exists public.eventos_actividad_admin(uuid, int);
+drop function if exists public.eventos_actividad_admin(uuid, int, timestamptz, timestamptz);
 
 create or replace function public.eventos_actividad_admin(
   p_usuario_id uuid default null,
   p_limite int default 200,
   p_fecha_desde timestamptz default null,
-  p_fecha_hasta timestamptz default null
+  p_fecha_hasta timestamptz default null,
+  p_tipo text default null
 )
 returns table (
   id uuid,
@@ -2591,13 +2671,14 @@ begin
   where (p_usuario_id is null or e.usuario_id = p_usuario_id)
     and (p_fecha_desde is null or e.creado_en >= p_fecha_desde)
     and (p_fecha_hasta is null or e.creado_en <= p_fecha_hasta)
+    and (p_tipo is null or e.tipo = p_tipo)
   order by e.creado_en desc
   limit greatest(1, least(coalesce(p_limite, 200), 1000));
 end;
 $$;
 
-revoke all on function public.eventos_actividad_admin(uuid, int, timestamptz, timestamptz) from public;
-grant execute on function public.eventos_actividad_admin(uuid, int, timestamptz, timestamptz) to authenticated;
+revoke all on function public.eventos_actividad_admin(uuid, int, timestamptz, timestamptz, text) from public;
+grant execute on function public.eventos_actividad_admin(uuid, int, timestamptz, timestamptz, text) to authenticated;
 
 -- ============================================================================
 -- INTENTOS DE MESAS DRAFTERS SIN ACCESO (nuevo, 03/10, pedido de Iñi)

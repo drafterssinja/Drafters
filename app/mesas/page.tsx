@@ -470,11 +470,15 @@ function MesasPageInner() {
                 const signedUp = inscritosPorSala.get(m.id) ?? 0;
                 const estadoInfo = estadoSalaInfo(m.estado, null, signedUp);
                 const cierra = closesAtLabel(m.fecha_limite_inscripcion);
+                // Empezada (03/10, pedido de Iñi, mismo criterio que en
+                // app/porras/page.tsx y app/salas/page.tsx): la fecha
+                // límite ya ha pasado.
+                const empezada = !!m.fecha_limite_inscripcion && new Date(m.fecha_limite_inscripcion).getTime() <= Date.now();
                 return (
-                  <Link
+                  <div
                     key={m.id}
-                    href={`/salas/${m.id}`}
-                    style={{ background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8, textDecoration: 'none' }}
+                    onClick={() => router.push(`/salas/${m.id}`)}
+                    style={{ background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8, cursor: 'pointer' }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
                       <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, color: S.TEXT }}>{m.nombre}</span>
@@ -494,6 +498,36 @@ function MesasPageInner() {
                         >
                           Cierra el {cierra}
                         </span>
+                      )}
+                      {!cierra && empezada && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            router.push(`/salas/${m.id}/clasificacion`);
+                          }}
+                          style={{
+                            flexShrink: 0,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 5,
+                            fontFamily: "'Barlow Condensed', sans-serif",
+                            fontWeight: 700,
+                            fontSize: 11,
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.03em',
+                            color: '#FF7A45',
+                            background: 'rgba(255,122,69,0.14)',
+                            border: '1px solid rgba(255,122,69,0.45)',
+                            borderRadius: 8,
+                            padding: '6px 10px',
+                            whiteSpace: 'nowrap',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#FF7A45', flexShrink: 0 }} />
+                          Clasificación en directo
+                        </button>
                       )}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -518,7 +552,7 @@ function MesasPageInner() {
                       </span>
                       <span style={{ fontSize: 12, color: estadoInfo.color }}>{estadoInfo.label}</span>
                     </div>
-                  </Link>
+                  </div>
                 );
               })}
             </div>

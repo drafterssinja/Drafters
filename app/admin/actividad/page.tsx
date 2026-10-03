@@ -20,17 +20,22 @@ import { conTiempoMaximo } from '@/lib/conTiempoMaximo';
 // nombre/apellido/email del usuario — aquí no hace falta ninguna comprobación
 // extra de permisos aparte del auth-check de siempre.
 //
-// Se registran tres tipos de evento (registrar_evento_actividad() se llama
-// desde /login, desde confirmarInscripcion() en las pantallas de
-// crear-equipo de salas y porras, y desde recargar_gratis_mensual() /
-// recargar_por_video() en el propio servidor — sección "REGISTRO DE
-// ACTIVIDAD" de drafters-schema.sql):
+// Se registran cuatro tipos de evento (registrar_evento_actividad() se
+// llama desde /login, desde confirmarInscripcion() en las pantallas de
+// crear-equipo de salas y porras, desde recargar_gratis_mensual() /
+// recargar_por_video() en el propio servidor, y desde la pantalla de
+// clasificación en directo de la porra — sección "REGISTRO DE ACTIVIDAD" de
+// drafters-schema.sql):
 //   - 'login': cada vez que alguien entra con usuario y contraseña.
 //   - 'inscripcion': cada vez que alguien se inscribe (por primera vez, no al
 //     editar un equipo ya existente) a una mesa o a una porra.
 //   - 'recarga' (añadido 28/09, pedido de Iñi): cada vez que alguien recarga
 //     saldo, diferenciando en `detalle.tipo_recarga` si fue la recarga
 //     gratuita mensual ('gratuita') o viendo un vídeo publicitario ('video').
+//   - 'clasificacion' (añadido 03/10, pedido de Iñi: "quiero que se vea
+//     quién va entrando también en la clasificación de la porra") — cada
+//     vez que alguien abre la clasificación en directo de una porra,
+//     participe o no en ella.
 
 type EventoActividad = {
   id: string;
@@ -38,7 +43,7 @@ type EventoActividad = {
   nombre: string | null;
   apellido: string | null;
   email: string | null;
-  tipo: 'login' | 'inscripcion' | 'recarga';
+  tipo: 'login' | 'inscripcion' | 'recarga' | 'clasificacion';
   detalle: { modo?: 'sala' | 'porra'; nombre?: string; tipo_recarga?: 'gratuita' | 'video' } | null;
   creado_en: string;
 };
@@ -52,6 +57,10 @@ export default function AdminActividadPage() {
   const [usuarios, setUsuarios] = useState<Perfil[]>([]);
   const [eventos, setEventos] = useState<EventoActividad[]>([]);
   const [usuarioFiltro, setUsuarioFiltro] = useState<string>('todos');
+  // Filtro por tipo de evento (03/10, pedido de Iñi: "que haya un segundo
+  // filtro que se pueda filtrar por tipo de actividad") — mismo criterio
+  // que el filtro por usuario: 'todos' no manda p_tipo a la RPC.
+  const [tipoFiltro, setTipoFiltro] = useState<string>('todos');
   // Filtro por fechas (28/09, pedido de Iñi: "de tal día a tal día") — los
   // <input type="date"> dan "AAAA-MM-DD" en hora local; para "desde" se
   // manda tal cual (medianoche de ese día) y para "hasta" se manda con
@@ -63,13 +72,14 @@ export default function AdminActividadPage() {
   const [error, setError] = useState<string | null>(null);
   const [errorAcceso, setErrorAcceso] = useState<string | null>(null);
 
-  async function cargarEventos(usuarioId: string, desde: string, hasta: string) {
+  async function cargarEventos(usuarioId: string, desde: string, hasta: string, tipo: string) {
     setCargandoEventos(true);
     const { data, error: eventosError } = await supabase.rpc('eventos_actividad_admin', {
       p_usuario_id: usuarioId === 'todos' ? null : usuarioId,
       p_limite: LIMITE_EVENTOS,
       p_fecha_desde: desde ? new Date(desde).toISOString() : null,
       p_fecha_hasta: hasta ? new Date(`${hasta}T23:59:59`).toISOString() : null,
+      p_tipo: tipo === 'todos' ? null : tipo,
     });
     setCargandoEventos(false);
 
@@ -137,7 +147,7 @@ export default function AdminActividadPage() {
         if (usuariosError) setError('No se han podido cargar los usuarios para el filtro.');
         else setUsuarios((usuariosData as Perfil[]) ?? []);
 
-        await cargarEventos('todos', '', '');
+        await cargarEventos('todos', '', '', 'todos');
       } catch (e) {
         if (!activo) return;
         setErrorAcceso(e instanceof Error ? `No se ha podido comprobar tu acceso: ${e.message}` : 'No se ha podido comprobar tu acceso.');
@@ -153,13 +163,18 @@ export default function AdminActividadPage() {
 
   async function onCambiarFiltro(usuarioId: string) {
     setUsuarioFiltro(usuarioId);
-    await cargarEventos(usuarioId, fechaDesde, fechaHasta);
+    await cargarEventos(usuarioId, fechaDesde, fechaHasta, tipoFiltro);
+  }
+
+  async function onCambiarTipo(tipo: string) {
+    setTipoFiltro(tipo);
+    await cargarEventos(usuarioFiltro, fechaDesde, fechaHasta, tipo);
   }
 
   async function onCambiarFechas(desde: string, hasta: string) {
     setFechaDesde(desde);
     setFechaHasta(hasta);
-    await cargarEventos(usuarioFiltro, desde, hasta);
+    await cargarEventos(usuarioFiltro, desde, hasta, tipoFiltro);
   }
 
   if (errorAcceso) {
@@ -213,18 +228,24 @@ export default function AdminActividadPage() {
       return e.detalle?.tipo_recarga === 'video' ? 'Ha recargado 20 € viendo un vídeo' : 'Ha recargado 20 € (gratuita mensual)';
     }
     const nombreObjetivo = e.detalle?.nombre ?? '';
+    if (e.tipo === 'clasificacion') {
+      return e.detalle?.modo === 'sala'
+        ? `Ha visto la clasificación de la mesa "${nombreObjetivo}"`
+        : `Ha visto la clasificación de la porra "${nombreObjetivo}"`;
+    }
     if (e.detalle?.modo === 'porra') return `Se ha inscrito en la porra "${nombreObjetivo}"`;
     if (e.detalle?.modo === 'sala') return `Se ha inscrito en la mesa "${nombreObjetivo}"`;
     return 'Se ha inscrito';
   }
 
   // Etiqueta y color de la pastilla de cada fila — antes era un booleano
-  // esLogin/no-esLogin (solo había dos tipos); con 'recarga' añadido
-  // (28/09) hace falta un tercer color propio para no confundirla con una
-  // inscripción.
+  // esLogin/no-esLogin (solo había dos tipos); con 'recarga' (28/09) y
+  // 'clasificacion' (03/10) hacen falta colores propios para no confundirlas
+  // con una inscripción.
   function etiquetaEvento(e: EventoActividad): { texto: string; color: string; fondo: string } {
     if (e.tipo === 'login') return { texto: 'Login', color: S.MUTED, fondo: 'rgba(148,163,184,0.14)' };
     if (e.tipo === 'recarga') return { texto: 'Recarga', color: '#F0B94D', fondo: 'rgba(240,185,77,0.14)' };
+    if (e.tipo === 'clasificacion') return { texto: 'Clasificación', color: '#7AA7FF', fondo: 'rgba(122,167,255,0.14)' };
     return { texto: 'Inscripción', color: S.ACCENT, fondo: 'rgba(61,220,132,0.12)' };
   }
 
@@ -258,6 +279,17 @@ export default function AdminActividadPage() {
                   {u.nombre_usuario ? ` (@${u.nombre_usuario})` : ''}
                 </option>
               ))}
+            </select>
+          </div>
+
+          <div style={S.field}>
+            <span style={S.label}>Filtrar por tipo de actividad</span>
+            <select value={tipoFiltro} onChange={(e) => onCambiarTipo(e.target.value)} style={S.input}>
+              <option value="todos">Todos los tipos</option>
+              <option value="login">Login</option>
+              <option value="inscripcion">Inscripción</option>
+              <option value="recarga">Recarga</option>
+              <option value="clasificacion">Clasificación</option>
             </select>
           </div>
 

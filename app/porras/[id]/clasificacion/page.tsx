@@ -223,6 +223,18 @@ export default function PorraClasificacionPage() {
       const porraRow = porraData as PorraRow;
       setPorra(porraRow);
 
+      // Registro de actividad (03/10, pedido de Iñi): "quiero que se vea
+      // quién va entrando también en la clasificación de la porra" — un
+      // evento por cada vez que alguien abre esta pantalla, participe o no
+      // en la porra (ver comentario de 'clasificacion' en
+      // drafters-schema.sql). Fire-and-forget, igual que
+      // registrar_intento_mesa_sin_acceso en crear-equipo: no debe
+      // retrasar ni poder romper la carga de la clasificación.
+      supabase.rpc('registrar_evento_actividad', { p_tipo: 'clasificacion', p_detalle: { modo: 'porra', nombre: porraRow.major } }).then(
+        () => {},
+        () => {}
+      );
+
       const [{ data: jugData }, { data: equiposData }, { data: camposData }, { data: estadoTorneoData }] = await Promise.all([
         porraRow.competicion
           ? supabase
