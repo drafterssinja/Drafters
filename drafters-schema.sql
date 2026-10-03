@@ -1552,6 +1552,18 @@ begin
   if v_sala.estado in ('completa', 'finalizada') then
     raise exception 'Esta sala ya no admite inscripciones';
   end if;
+  -- FALTABA (encontrado 03/10 al revisar el mismo fallo en
+  -- inscribirse_en_porra(), aviso de Iñi): esta función tampoco comprobaba
+  -- fecha_limite_inscripcion, solo el `estado` — y `estado` no pasa a
+  -- 'completa'/'finalizada' solo porque haya pasado la fecha límite (el
+  -- cierre automático de golf, aplicar_cierre_automatico_inscripciones(),
+  -- solo pone la fecha, nunca toca `estado`), así que una sala con aforo
+  -- libre seguía admitiendo inscripciones nuevas pasada su fecha límite.
+  -- editar_equipo_sala() sí tenía esta comprobación (más abajo) — faltaba
+  -- aquí, en el alta nueva.
+  if v_sala.fecha_limite_inscripcion is not null and v_sala.fecha_limite_inscripcion <= now() then
+    raise exception 'El plazo de inscripción de esta sala ya ha cerrado';
+  end if;
 
   -- Maratón es la excepción: se permite más de un equipo por usuario
   -- (nuevo, 26/09 novena vuelta, pedido de Iñi: "en los torneos maratón se
@@ -1658,6 +1670,21 @@ begin
   end if;
   if v_porra.estado = 'finalizada' then
     raise exception 'Esta porra ya no admite inscripciones';
+  end if;
+  -- FALTABA (encontrado 03/10, aviso de Iñi: "te deja crear otro equipo
+  -- cuando no se debería... la porra lleva dos días jugándose" — acababa de
+  -- recibir una inscripción nueva pasada la fecha límite) — esta función es
+  -- la única de las cuatro de inscripción/edición (esta,
+  -- inscribirse_en_porra_futbol(), inscribirse_en_sala(),
+  -- editar_equipo_sala()) que NO comprobaba fecha_limite_inscripcion, solo
+  -- `estado = 'finalizada'` — y `estado` no pasa a 'finalizada' hasta que
+  -- se liquida la porra entera (a mano, o 1h después de acabar el torneo
+  -- con el cierre automático de golf), así que había una ventana real —
+  -- normalmente de días— en la que la inscripción seguía abierta de hecho
+  -- aunque ya hubiera pasado su fecha límite. Mismo mensaje que usa
+  -- inscribirse_en_porra_futbol() para esta misma comprobación.
+  if v_porra.fecha_limite_inscripcion is not null and v_porra.fecha_limite_inscripcion <= now() then
+    raise exception 'El plazo de inscripción de esta porra ya ha cerrado';
   end if;
 
   -- Un usuario puede tener varios equipos en la misma porra (pedido de Iñi,
@@ -1778,6 +1805,12 @@ begin
   select * into v_porra from public.porras where id = v_equipo.porra_id for update;
   if not found or v_porra.estado = 'finalizada' then
     raise exception 'Esta porra ya no admite cambios';
+  end if;
+  -- Mismo fallo que en inscribirse_en_porra() (ver el comentario de ahí
+  -- arriba, 03/10) — editar un equipo ya inscrito tampoco comprobaba la
+  -- fecha límite.
+  if v_porra.fecha_limite_inscripcion is not null and v_porra.fecha_limite_inscripcion <= now() then
+    raise exception 'Ya ha pasado la fecha límite para modificar tu equipo en esta porra';
   end if;
 
   if p_nombre_equipo is null or length(trim(p_nombre_equipo)) = 0 then

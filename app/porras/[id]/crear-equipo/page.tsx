@@ -37,7 +37,7 @@ import EscudoEquipoFutbol from '@/components/EscudoEquipoFutbol';
 // para los dos — la validación de la composición del equipo (grupos vs.
 // presupuesto) vive en el servidor, ver drafters-schema.sql.
 
-type PorraRow = { id: string; major: string; precio: number; competicion: string | null; estado: string; formato: PorraFormato };
+type PorraRow = { id: string; major: string; precio: number; competicion: string | null; estado: string; formato: PorraFormato; fecha_limite_inscripcion: string | null };
 type JugadorRow = { id: string; nombre: string; grupo_porra: GrupoPorra | null; precio: number };
 // Porra de fútbol por jornadas (29/09) — sin jugadores que elegir, 10
 // partidos públicos (iguales para todos) a pronosticar (1/X/2). El nombre
@@ -104,7 +104,7 @@ export default function CrearEquipoPorraPage() {
 
       const [{ data: perfilData }, { data: porraData }] = await Promise.all([
         supabase.from('perfiles').select('*').eq('id', session.user.id).single(),
-        supabase.from('porras').select('id,major,precio,competicion,estado,formato').eq('id', porraId).single(),
+        supabase.from('porras').select('id,major,precio,competicion,estado,formato,fecha_limite_inscripcion').eq('id', porraId).single(),
       ]);
 
       if (!activo) return;
@@ -126,7 +126,20 @@ export default function CrearEquipoPorraPage() {
         return;
       }
 
-      if (porraRow.estado === 'finalizada') {
+      // FALLO CORREGIDO (03/10, aviso de Iñi: "te deja crear otro equipo
+      // cuando no se debería... ya ha pasado la fecha límite y la porra
+      // lleva dos días jugándose") — antes esta pantalla (y las funciones
+      // del servidor inscribirse_en_porra()/editar_equipo_porra()) solo
+      // miraban `estado === 'finalizada'`, pero una porra no pasa a
+      // 'finalizada' hasta que se liquida del todo (a mano, o 1h después de
+      // acabar el torneo con el cierre automático de golf) — así que había
+      // una ventana real, de días, en la que se seguían pudiendo crear o
+      // editar equipos aunque ya hubiera pasado la fecha límite de
+      // inscripción. Ahora se comprueba también aquí (igual que ya hacía
+      // salas/[id]/crear-equipo) y, por si acaso, también del lado del
+      // servidor en las dos funciones (drafters-schema.sql).
+      const limiteYaPasado = !!porraRow.fecha_limite_inscripcion && new Date(porraRow.fecha_limite_inscripcion).getTime() <= Date.now();
+      if (porraRow.estado === 'finalizada' || limiteYaPasado) {
         // replace, no push — ver el mismo comentario en salas/[id]/crear-equipo (bug de la flecha de volver, 23/09).
         router.replace(`/porras/${porraId}`);
         return;

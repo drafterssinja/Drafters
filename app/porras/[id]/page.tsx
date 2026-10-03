@@ -242,16 +242,22 @@ export default function PorraDetallePage() {
   })).filter((g) => g.jugadores.length > 0);
   const hayListaEspanoles = gruposConJugadores.some((g) => g.grupo === 'espanoles');
 
-  // Se puede crear otro equipo aunque ya tengas uno o varios (pedido de
-  // Iñi, 23/09: "en la porra puedo participar todas las veces que quiera").
-  const showJoinCta = porra.estado !== 'finalizada';
-
   // "Empezada" = ya pasó su fecha límite de inscripción, o ya está
   // finalizada — mismo criterio que ya usa participantes_porra() (sección
   // 11.7 de la arquitectura técnica) para dejar de ocultar los nombres de
   // los equipos. Solo a partir de ahí tiene sentido enlazar a la
   // clasificación en directo.
   const porraEmpezada = porra.estado === 'finalizada' || (!!porra.fecha_limite_inscripcion && new Date(porra.fecha_limite_inscripcion).getTime() <= Date.now());
+
+  // Se puede crear otro equipo aunque ya tengas uno o varios (pedido de
+  // Iñi, 23/09: "en la porra puedo participar todas las veces que quiera")
+  // — pero solo mientras la inscripción siga abierta. FALLO CORREGIDO
+  // (03/10, aviso de Iñi: "te deja crear otro equipo cuando no se
+  // debería... ya ha pasado la fecha límite") — este botón solo miraba
+  // `estado !== 'finalizada'`, ignorando la fecha límite por completo (una
+  // porra no pasa a 'finalizada' hasta que se liquida del todo, días
+  // después) — ahora usa `porraEmpezada`, que sí la tiene en cuenta.
+  const showJoinCta = !porraEmpezada;
 
   return (
     <main style={S.mainReset}>
@@ -398,7 +404,9 @@ export default function PorraDetallePage() {
                   <div key={eq.id} style={{ display: 'flex', flexDirection: 'column', gap: 8, background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: 14 }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                       <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 16, color: S.TEXT }}>{eq.nombre_equipo}</span>
-                      {porra.estado !== 'finalizada' && (
+                      {/* Mismo fallo que showJoinCta más arriba (03/10) —
+                          ignoraba la fecha límite de inscripción. */}
+                      {!porraEmpezada && (
                         <Link
                           href={`/porras/${porra.id}/crear-equipo?equipo=${eq.id}`}
                           style={{ flexShrink: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11.5, color: '#3DDC84', textDecoration: 'none', border: '1px solid rgba(61,220,132,0.35)', borderRadius: 8, padding: '6px 11px' }}

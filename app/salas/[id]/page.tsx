@@ -240,13 +240,22 @@ export default function SalaDetallePage() {
   // nuevos aunque ya tengas alguno — mismo patrón que "Crear otro equipo"
   // ya usado en las porras clásicas (sección 11.7) — así que ahí el botón
   // sigue visible y solo cambia de texto.
-  const showJoinCta = (!hasEquipo || isMaraton) && !isFinalizada;
+  // FALLO CORREGIDO (03/10, aviso de Iñi sobre el mismo fallo en porras: "te
+  // deja crear otro equipo cuando no se debería... ya ha pasado la fecha
+  // límite") — este botón (y joinDisabled) solo miraban isFinalizada/isFull,
+  // ignorando por completo la fecha límite de inscripción — igual que
+  // showJoinCta en porras, y exactamente el mismo patrón que el fallo real
+  // de inscribirse_en_sala() del lado del servidor (ya corregido también).
+  // Usa salaEmpezada, que ya tiene en cuenta la fecha límite.
+  const showJoinCta = (!hasEquipo || isMaraton) && !salaEmpezada;
   const joinLabel = isFull
     ? 'Sala completa'
-    : hasEquipo && isMaraton
-      ? `Crear otro equipo · ${formatEuros(sala.buy_in)}`
-      : `Unirse · ${formatEuros(sala.buy_in)}`;
-  const joinDisabled = isFull;
+    : salaEmpezada
+      ? 'Inscripción cerrada'
+      : hasEquipo && isMaraton
+        ? `Crear otro equipo · ${formatEuros(sala.buy_in)}`
+        : `Unirse · ${formatEuros(sala.buy_in)}`;
+  const joinDisabled = isFull || salaEmpezada;
 
   return (
     <main style={S.mainReset}>

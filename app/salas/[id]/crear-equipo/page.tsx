@@ -38,6 +38,7 @@ type SalaRow = {
   aforo: number | null;
   buy_in: number;
   estado: string;
+  fecha_limite_inscripcion: string | null;
 };
 
 type JugadorRow = { id: string; nombre: string; posicion: string | null; precio: number; lesionado: boolean; equipo_real: string | null };
@@ -137,7 +138,7 @@ export default function CrearEquipoPage() {
 
       const [{ data: perfilData }, { data: salaData }] = await Promise.all([
         supabase.from('perfiles').select('*').eq('id', session.user.id).single(),
-        supabase.from('salas').select('id,nombre,competicion,deporte,tipo,aforo,buy_in,estado').eq('id', salaId).single(),
+        supabase.from('salas').select('id,nombre,competicion,deporte,tipo,aforo,buy_in,estado,fecha_limite_inscripcion').eq('id', salaId).single(),
       ]);
 
       if (!activo) return;
@@ -154,10 +155,16 @@ export default function CrearEquipoPage() {
       // admite entrar. Al EDITAR uno ya inscrito, en cambio, "llena" no
       // importa — Iñi, 27/09, décima vuelta: "el botón de modificar equipo
       // va a estar disponible hasta que finalice la hora de inscripción, da
-      // igual si la sala está llena o no" — así que solo se bloquea si ya
-      // ha finalizado (la fecha límite de inscripción, si la sala tiene una
-      // fijada, se comprueba del lado del servidor en editar_equipo_sala()).
-      if (salaRow.estado === 'finalizada' || (!modoEdicion && salaRow.estado === 'completa')) {
+      // igual si la sala está llena o no" — es decir, lo único que SÍ corta
+      // tanto el alta como la edición es la fecha límite de inscripción,
+      // por eso se comprueba aquí también para los dos (antes solo lo
+      // comprobaba el servidor en editar_equipo_sala() — añadido aquí el
+      // 03/10 para no dejar que alguien se construya el equipo entero y se
+      // encuentre el error solo al confirmar; mismo bug que se corrigió ese
+      // día en inscribirse_en_sala(), que hasta entonces ni siquiera lo
+      // comprobaba del lado del servidor para el alta nueva).
+      const limiteYaPasado = !!salaRow.fecha_limite_inscripcion && new Date(salaRow.fecha_limite_inscripcion).getTime() <= Date.now();
+      if (salaRow.estado === 'finalizada' || limiteYaPasado || (!modoEdicion && salaRow.estado === 'completa')) {
         // replace, no push: esto es un redirect de "no deberías estar aquí",
         // no una navegación del usuario — con push, la flecha "volver" de la
         // cabecera (que usa el historial) rebotaba de vuelta a esta misma
