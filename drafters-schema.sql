@@ -482,6 +482,36 @@ create policy "equipos_favoritos_delete_propio" on public.equipos_favoritos
   for delete using (auth.uid() = usuario_id);
 
 -- ----------------------------------------------------------------------------
+-- 5C. FAVORITOS DE JUGADOR (nuevo, 03/10)
+-- ----------------------------------------------------------------------------
+-- Mismo mecanismo que 5B (FAVORITOS DE EQUIPO), pero sobre jugadores
+-- individuales en vez de equipos — pedido de Iñi: "me gustaría que los
+-- jugadores también tuviesen la estrellita para poder seleccionar los
+-- jugadores favoritos". Ver lib/favoritosJugador.ts,
+-- components/EstrellaFavorito.tsx (reutilizado tal cual) y
+-- app/porras/[id]/clasificacion/page.tsx.
+create table if not exists public.jugadores_favoritos (
+  usuario_id uuid not null references public.perfiles (id) on delete cascade,
+  jugador_id uuid not null references public.jugadores (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (usuario_id, jugador_id)
+);
+
+alter table public.jugadores_favoritos enable row level security;
+
+drop policy if exists "jugadores_favoritos_select_propio" on public.jugadores_favoritos;
+create policy "jugadores_favoritos_select_propio" on public.jugadores_favoritos
+  for select using (auth.uid() = usuario_id);
+
+drop policy if exists "jugadores_favoritos_insert_propio" on public.jugadores_favoritos;
+create policy "jugadores_favoritos_insert_propio" on public.jugadores_favoritos
+  for insert with check (auth.uid() = usuario_id);
+
+drop policy if exists "jugadores_favoritos_delete_propio" on public.jugadores_favoritos;
+create policy "jugadores_favoritos_delete_propio" on public.jugadores_favoritos
+  for delete using (auth.uid() = usuario_id);
+
+-- ----------------------------------------------------------------------------
 -- 6. INSCRIPCIONES
 -- ----------------------------------------------------------------------------
 -- Historial de cada cobro: qué equipo, cuánto se descontó del saldo y cuándo.

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase, Perfil } from '@/lib/supabaseClient';
@@ -70,11 +71,14 @@ function totalEquipo(jugadoresIds: string[], jugadoresPorId: Map<string, Jugador
   }, 0);
 }
 
+// CAMBIO 03/10 (pedido de Iñi): "después de cuántos hoyos lleva ese
+// resultado" y, si ha acabado la vuelta, una "F" — mismo criterio que
+// cualquier marcador de golf real (ESPN ya lo llama "thru" tal cual).
 function estadoJugador(j: JugadorRow): string | null {
   if (j.resultado_en_vivo_posicion === null && j.resultado_en_vivo_thru === null) return null;
   const posicion = j.resultado_en_vivo_posicion ? `Pos. ${j.resultado_en_vivo_posicion}` : null;
   const ronda = j.resultado_en_vivo_ronda ? `Ronda ${j.resultado_en_vivo_ronda}` : null;
-  const thru = j.resultado_en_vivo_thru !== null ? (j.resultado_en_vivo_thru >= 18 ? 'Hoyo 18 (terminada)' : `Va por el hoyo ${j.resultado_en_vivo_thru}`) : null;
+  const thru = j.resultado_en_vivo_thru !== null ? (j.resultado_en_vivo_thru >= 18 ? 'F' : `Thru ${j.resultado_en_vivo_thru}`) : null;
   return [posicion, ronda, thru].filter(Boolean).join(' · ') || null;
 }
 
@@ -388,7 +392,9 @@ export default function SalaClasificacionPage() {
                   const activo = eq.equipoId === equipoSeleccionado.equipoId;
                   const esFavorito = esMaraton && favoritos.has(eq.equipoId);
                   return (
-                    <a
+                    <motion.a
+                      layout
+                      transition={{ type: 'spring', stiffness: 420, damping: 38 }}
                       key={eq.equipoId}
                       href="#"
                       onClick={(e) => {
@@ -415,7 +421,7 @@ export default function SalaClasificacionPage() {
                       <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 12, color: S.MUTED_2 }}>
                         {formatGolfScore(totalEquipo(eq.jugadores, jugadoresPorId))}
                       </span>
-                    </a>
+                    </motion.a>
                   );
                 })}
                 {esMaraton && soloFavoritos && !equiposPorPuntuacion.some((eq) => favoritos.has(eq.equipoId)) && (
@@ -435,7 +441,9 @@ export default function SalaClasificacionPage() {
                   </span>
                 </div>
                 {jugadoresDelEquipoSeleccionado.map((j) => (
-                  <a
+                  <motion.a
+                    layout
+                    transition={{ type: 'spring', stiffness: 420, damping: 38 }}
                     key={j.id}
                     href="#"
                     onClick={(e) => {
@@ -460,7 +468,7 @@ export default function SalaClasificacionPage() {
                     <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 13, color: S.MUTED_2 }}>
                       {formatGolfScore(j.resultado_en_vivo_total ?? 0)}
                     </span>
-                  </a>
+                  </motion.a>
                 ))}
               </div>
             </div>
@@ -477,7 +485,7 @@ export default function SalaClasificacionPage() {
                 // ese equipo ya seleccionado.
                 const equiposConEsteJugador = jugadorFocoId === j.id ? equiposPorPuntuacion.filter((eq) => eq.jugadores.includes(j.id)) : [];
                 return (
-                  <div key={j.id} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <motion.div layout transition={{ type: 'spring', stiffness: 420, damping: 38 }} key={j.id} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     <a
                       href="#"
                       onClick={(e) => {
@@ -527,7 +535,7 @@ export default function SalaClasificacionPage() {
                         )}
                       </div>
                     )}
-                  </div>
+                  </motion.div>
                 );
               })}
             </div>
@@ -580,32 +588,41 @@ export default function SalaClasificacionPage() {
 
               {hoyosFoco === 'cargando' && <p style={{ fontSize: 12.5, color: S.MUTED_3, margin: 0 }}>Cargando el hoyo a hoyo...</p>}
 
-              {hoyosFoco !== 'cargando' && (!hoyosFoco || hoyosFoco.length === 0) && (
-                <p style={{ fontSize: 12.5, lineHeight: 1.5, color: S.MUTED_2, margin: 0 }}>
-                  Todavía no hay ningún hoyo registrado para {jugadorFoco.nombre} — en cuanto empiece a jugar (o su torneo se conecte con ESPN
-                  desde el panel de administración), aquí verás el desglose hoyo a hoyo, golpe a golpe.
-                </p>
-              )}
-
+              {/* CAMBIO 03/10 (pedido de Iñi, mismo cambio que
+                  app/porras/[id]/clasificacion/page.tsx): siempre se
+                  pintan los 18 huecos de la ronda, vacíos los que
+                  todavía no tienen resultado — la ronda por defecto es la
+                  EN VIVO del jugador, aunque todavía no tenga ningún hoyo
+                  jugado en ella. */}
               {Array.isArray(hoyosFoco) &&
-                hoyosFoco.length > 0 &&
                 (() => {
                   const hoyos: HoyoRow[] = hoyosFoco;
-                  const rondas = Array.from(new Set(hoyos.map((h) => h.ronda))).sort((a, b) => a - b);
-                  const hoyosRonda = hoyos.filter((h) => h.ronda === rondaSeleccionada);
+                  const rondasConDatos = Array.from(new Set(hoyos.map((h) => h.ronda)));
+                  const rondaEnVivo = jugadorFoco.resultado_en_vivo_ronda;
+                  const rondasConocidas = Array.from(new Set([...rondasConDatos, ...(rondaEnVivo ? [rondaEnVivo] : [])])).sort((a, b) => a - b);
+                  const rondaMostrada = rondaSeleccionada ?? rondaEnVivo ?? rondasConocidas[rondasConocidas.length - 1] ?? 1;
+                  const hoyosRonda = hoyos.filter((h) => h.ronda === rondaMostrada);
+                  const hoyosPorNumero = new Map(hoyosRonda.map((h) => [h.hoyo, h]));
                   // Nombre del campo de la ronda (01/10) — ver comentario
                   // de nombresCampo más arriba.
                   const campoIdRondaSel = hoyosRonda[0]?.campo_id ?? null;
                   const nombreCampoRondaSel = campoIdRondaSel ? nombresCampo[campoIdRondaSel] : null;
                   return (
                     <>
-                      {rondas.length > 1 && (
+                      {hoyosRonda.length === 0 && (
+                        <p style={{ fontSize: 11.5, lineHeight: 1.5, color: S.MUTED_2, margin: 0 }}>
+                          Todavía no hay ningún hoyo registrado para la ronda {rondaMostrada} de {jugadorFoco.nombre} — en cuanto empiece a
+                          jugar se irán rellenando los círculos de abajo.
+                        </p>
+                      )}
+
+                      {rondasConocidas.length > 1 && (
                         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                          {rondas.map((r) => {
+                          {rondasConocidas.map((r) => {
                             const campoIdR = hoyos.find((h) => h.ronda === r)?.campo_id ?? null;
                             const nombreCampoR = campoIdR ? nombresCampo[campoIdR] : null;
                             return (
-                              <button key={r} type="button" onClick={() => setRondaSeleccionada(r)} style={vistaPillStyle(rondaSeleccionada === r)}>
+                              <button key={r} type="button" onClick={() => setRondaSeleccionada(r)} style={vistaPillStyle(rondaMostrada === r)}>
                                 Ronda {r}
                                 {nombreCampoR ? ` · ${nombreCampoR}` : ''}
                               </button>
@@ -614,18 +631,43 @@ export default function SalaClasificacionPage() {
                         </div>
                       )}
 
-                      {campoIdRondaSel && rondas.length <= 1 && (
+                      {campoIdRondaSel && rondasConocidas.length <= 1 && (
                         <span style={{ fontSize: 10.5, color: S.MUTED_3 }}>
                           {nombreCampoRondaSel ?? `Campo ${campoIdRondaSel} (todavía sin nombre — se puede poner desde el panel de administración)`}
                         </span>
                       )}
 
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 6 }}>
-                        {hoyosRonda.map((h) => {
+                        {Array.from({ length: 18 }, (_, i) => i + 1).map((n) => {
+                          const h = hoyosPorNumero.get(n);
+                          if (!h) {
+                            return (
+                              <div key={n} title={`Hoyo ${n} — todavía sin resultado`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+                                <span style={{ fontSize: 8.5, color: S.MUTED_3 }}>{n} · P–</span>
+                                <div
+                                  style={{
+                                    width: 30,
+                                    height: 30,
+                                    borderRadius: '50%',
+                                    border: `1px dashed ${S.CARD_BORDER}`,
+                                    color: S.MUTED_3,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontFamily: "'Barlow Condensed', sans-serif",
+                                    fontWeight: 800,
+                                    fontSize: 13,
+                                  }}
+                                >
+                                  –
+                                </div>
+                              </div>
+                            );
+                          }
                           const color = COLOR_TIPO_RESULTADO[h.tipo_resultado];
                           return (
                             <div
-                              key={h.hoyo}
+                              key={n}
                               title={`Hoyo ${h.hoyo} · Par ${h.par} · ${ETIQUETA_TIPO_RESULTADO[h.tipo_resultado]}`}
                               style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}
                             >

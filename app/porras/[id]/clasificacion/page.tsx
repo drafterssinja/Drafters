@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { motion } from 'framer-motion';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase, Perfil } from '@/lib/supabaseClient';
@@ -13,6 +14,8 @@ import { formatGolfScore, calcularBonosPodio, COLOR_TIPO_RESULTADO, ETIQUETA_TIP
 import { normalizarNombre } from '@/lib/nombreMatch';
 import { calcularTramosPorInscritos } from '@/lib/repartoPremios';
 import { cargarFavoritos, alternarFavoritoEquipo } from '@/lib/favoritosEquipo';
+import { cargarFavoritosJugador, alternarFavoritoJugador } from '@/lib/favoritosJugador';
+import { reproducirSonidoAviso, leerPreferenciaSonido, guardarPreferenciaSonido } from '@/lib/sonidoAviso';
 import EstrellaFavorito from '@/components/EstrellaFavorito';
 
 // ============================================================================
@@ -95,11 +98,14 @@ function totalEquipo(jugadoresIds: string[], jugadoresPorId: Map<string, Jugador
   }, 0);
 }
 
+// CAMBIO 03/10 (pedido de Iñi): "después de cuántos hoyos lleva ese
+// resultado" y, si ha acabado la vuelta, una "F" — mismo criterio que
+// cualquier marcador de golf real (ESPN ya lo llama "thru" tal cual).
 function estadoJugador(j: JugadorRow): string | null {
   if (j.resultado_en_vivo_posicion === null && j.resultado_en_vivo_thru === null) return null;
   const posicion = j.resultado_en_vivo_posicion ? `Pos. ${j.resultado_en_vivo_posicion}` : null;
   const ronda = j.resultado_en_vivo_ronda ? `Ronda ${j.resultado_en_vivo_ronda}` : null;
-  const thru = j.resultado_en_vivo_thru !== null ? (j.resultado_en_vivo_thru >= 18 ? 'Hoyo 18 (terminada)' : `Va por el hoyo ${j.resultado_en_vivo_thru}`) : null;
+  const thru = j.resultado_en_vivo_thru !== null ? (j.resultado_en_vivo_thru >= 18 ? 'F' : `Thru ${j.resultado_en_vivo_thru}`) : null;
   return [posicion, ronda, thru].filter(Boolean).join(' · ') || null;
 }
 
@@ -152,6 +158,14 @@ export default function PorraClasificacionPage() {
   // Favoritos de equipo (02/10, pedido de Iñi) — ver lib/favoritosEquipo.ts.
   const [favoritos, setFavoritos] = useState<Set<string>>(new Set());
   const [soloFavoritos, setSoloFavoritos] = useState(false);
+  // Favoritos de jugador (03/10, pedido de Iñi) — mismo mecanismo que los
+  // de equipo, ver lib/favoritosJugador.ts.
+  const [favoritosJugador, setFavoritosJugador] = useState<Set<string>>(new Set());
+  const [soloFavoritosJugador, setSoloFavoritosJugador] = useState(false);
+  // Sonido de aviso (03/10, pedido de Iñi) — ver lib/sonidoAviso.ts.
+  const [sonidoActivado, setSonidoActivado] = useState(true);
+  // Cola de avisos de resultado no-par (03/10) — ver el efecto de más abajo.
+  const [avisos, setAvisos] = useState<{ id: string; jugador: string; tipo: TipoResultadoHoyo }[]>([]);
 
   useEffect(() => {
     let activo = true;
@@ -165,15 +179,17 @@ export default function PorraClasificacionPage() {
         return;
       }
 
-      const [{ data: perfilData }, { data: porraData }, favoritosSet] = await Promise.all([
+      const [{ data: perfilData }, { data: porraData }, favoritosSet, favoritosJugadorSet] = await Promise.all([
         supabase.from('perfiles').select('*').eq('id', session.user.id).single(),
         supabase.from('porras').select('id,major,competicion,estado,fecha_limite_inscripcion,formato,precio').eq('id', porraId).single(),
         cargarFavoritos(session.user.id),
+        cargarFavoritosJugador(session.user.id),
       ]);
 
       if (!activo) return;
       if (perfilData) setPerfil(perfilData as Perfil);
       setFavoritos(favoritosSet);
+      setFavoritosJugador(favoritosJugadorSet);
 
       if (!porraData) {
         setError('No se ha encontrado esta porra.');
@@ -281,12 +297,30 @@ export default function PorraClasificacionPage() {
     });
   }, [equipos, jugadoresPorId, bonosParaMostrar]);
 
+  // Hoyo a hoyo del jugador con el foco puesto — extraído a su propia
+  // función (03/10) para poder llamarla también desde el refresco
+  // automático de más abajo, no solo al cambiar de jugador.
+  async function cargarHoyosFoco(jugadorId: string): Promise<void> {
+    const { data } = await supabase
+      .from('resultados_golf_hoyo')
+      .select('ronda,hoyo,par,golpes,campo_id,tipo_resultado')
+      .eq('jugador_id', jugadorId)
+      .order('ronda', { ascending: true })
+      .order('hoyo', { ascending: true });
+    setHoyosFoco((data as HoyoRow[]) ?? []);
+  }
+
   // Hoyo a hoyo del jugador con el foco puesto (pedido de Iñi, 28/09: "cuando
   // pinchas en un resultado, abajo se ven los resultados hoyo a hoyo... de
   // qué par es cada hoyo... y el color según sea eagle/birdie/par/bogey/doble
   // bogey"). Se pide solo cuando hace falta (no de golpe para los 5 del
   // equipo), y solo se guarda lo más reciente por si el usuario cambia de
-  // jugador rápido mientras todavía está cargando el anterior.
+  // jugador rápido mientras todavía está cargando el anterior. CAMBIO 03/10:
+  // ya no fija aquí la ronda seleccionada por defecto (antes: "la última
+  // ronda con datos") — ahora se calcula al pintar (ver más abajo, usa
+  // también la ronda EN VIVO del jugador aunque todavía no tenga ningún
+  // hoyo jugado en ella) para poder mostrar siempre la tira de 18 hoyos,
+  // llena o vacía.
   useEffect(() => {
     let activo = true;
     if (!jugadorFocoId) {
@@ -296,18 +330,9 @@ export default function PorraClasificacionPage() {
     }
     setHoyosFoco('cargando');
     setRondaSeleccionada(null);
-    supabase
-      .from('resultados_golf_hoyo')
-      .select('ronda,hoyo,par,golpes,campo_id,tipo_resultado')
-      .eq('jugador_id', jugadorFocoId)
-      .order('ronda', { ascending: true })
-      .order('hoyo', { ascending: true })
-      .then(({ data }) => {
-        if (!activo) return;
-        const filas = (data as HoyoRow[]) ?? [];
-        setHoyosFoco(filas);
-        if (filas.length > 0) setRondaSeleccionada(filas[filas.length - 1].ronda);
-      });
+    cargarHoyosFoco(jugadorFocoId).then(() => {
+      if (!activo) return;
+    });
     return () => {
       activo = false;
     };
@@ -327,6 +352,100 @@ export default function PorraClasificacionPage() {
     });
     await alternarFavoritoEquipo(perfil.id, equipoId, estabaMarcado);
   }
+
+  // Marca/desmarca un jugador como favorito (03/10) — mismo patrón que
+  // alternarFavorito() de arriba, ver lib/favoritosJugador.ts.
+  async function alternarFavoritoJug(jugadorId: string) {
+    if (!perfil) return;
+    const estabaMarcado = favoritosJugador.has(jugadorId);
+    setFavoritosJugador((prev) => {
+      const next = new Set(prev);
+      if (estabaMarcado) next.delete(jugadorId);
+      else next.add(jugadorId);
+      return next;
+    });
+    await alternarFavoritoJugador(perfil.id, jugadorId, estabaMarcado);
+  }
+
+  // ============================================================================
+  // ACTUALIZACIÓN AUTOMÁTICA + AVISOS DE RESULTADO (nuevo, 03/10, pedido de Iñi)
+  // ============================================================================
+  // "Yo estoy aquí viendo la pantalla... debería verse cómo se va
+  // actualizando" — cada minuto (mismo ritmo que el cron de sincronización,
+  // ver app/api/admin/actualizar-golf-en-vivo/route.ts) se vuelve a pedir
+  // el resultado en vivo de todos los jugadores de esta porra, y se revisa
+  // si ha aparecido algún hoyo nuevo (de cualquier jugador, no solo el que
+  // tenga el foco puesto) que no sea par — en ese caso se encola un aviso
+  // con sonido. Usa refs para que el intervalo (creado una sola vez) lea
+  // siempre el estado más reciente sin tener que recrearse.
+  const sonidoActivadoRef = useRef(sonidoActivado);
+  sonidoActivadoRef.current = sonidoActivado;
+  const jugadorFocoIdRef = useRef(jugadorFocoId);
+  jugadorFocoIdRef.current = jugadorFocoId;
+  const ultimaRevisionRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    setSonidoActivado(leerPreferenciaSonido());
+  }, []);
+
+  useEffect(() => {
+    const competicion = porra?.competicion;
+    if (!competicion) return;
+
+    async function revisar() {
+      const { data: jugData } = await supabase
+        .from('jugadores')
+        .select('id,nombre,grupo_porra,precio,resultado_en_vivo_total,resultado_en_vivo_thru,resultado_en_vivo_ronda,resultado_en_vivo_posicion')
+        .eq('deporte', 'golf')
+        .eq('competicion', competicion as string);
+      const jugadoresNuevos = ((jugData as JugadorRow[]) ?? []).filter((j) => j.grupo_porra !== null);
+      if (jugadoresNuevos.length > 0) setJugadores(jugadoresNuevos);
+
+      const idsActuales = jugadoresNuevos.map((j) => j.id);
+      const desde = ultimaRevisionRef.current;
+      const ahora = new Date().toISOString();
+      if (desde && idsActuales.length > 0) {
+        const { data: hoyosNuevos } = await supabase
+          .from('resultados_golf_hoyo')
+          .select('jugador_id,tipo_resultado,actualizado_en')
+          .in('jugador_id', idsActuales)
+          .gt('actualizado_en', desde)
+          .order('actualizado_en', { ascending: true });
+
+        const nombrePorId = new Map(jugadoresNuevos.map((j) => [j.id, j.nombre]));
+        ((hoyosNuevos as { jugador_id: string; tipo_resultado: TipoResultadoHoyo }[]) ?? [])
+          .filter((h) => h.tipo_resultado !== 'par')
+          .forEach((h) => {
+            const nombreJugador = nombrePorId.get(h.jugador_id);
+            if (!nombreJugador) return;
+            setAvisos((prev) => [...prev, { id: `${h.jugador_id}:::${Date.now()}:::${Math.random()}`, jugador: nombreJugador, tipo: h.tipo_resultado }]);
+            if (sonidoActivadoRef.current) reproducirSonidoAviso();
+          });
+      }
+      ultimaRevisionRef.current = ahora;
+
+      if (jugadorFocoIdRef.current) await cargarHoyosFoco(jugadorFocoIdRef.current);
+    }
+
+    ultimaRevisionRef.current = new Date().toISOString();
+    const intervalo = setInterval(revisar, 60000);
+    return () => clearInterval(intervalo);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [porra?.competicion]);
+
+  // Quita el primer aviso de la cola a los 5 segundos de mostrarse (pedido
+  // de Iñi: "una tira que dure 5 segundos") — si llega uno nuevo detrás
+  // mientras el actual sigue visible, no le reinicia el cronómetro (solo
+  // depende del id del PRIMERO de la cola, no de la cola entera).
+  useEffect(() => {
+    if (avisos.length === 0) return;
+    const idAMostrar = avisos[0].id;
+    const timer = setTimeout(() => {
+      setAvisos((prev) => prev.filter((a) => a.id !== idAMostrar));
+    }, 5000);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [avisos.length > 0 ? avisos[0].id : null]);
 
   if (cargando || !perfil) {
     return (
@@ -484,7 +603,65 @@ export default function PorraClasificacionPage() {
                 Se resta al equipo que tenga a ese jugador: −10 al 1º, −5 al 2º y −3 al 3er clasificado real del torneo (no de la porra). En caso de empate, gana el grupo peor clasificado (Morado &gt; Azul &gt; Verde &gt; Amarillo); si es el mismo grupo, se reparte entre los empatados.
               </div>
             )}
+
+            {/* Campanita de sonido (03/10, pedido de Iñi): justo a la
+                derecha del bono de podio — verde con la campana sola
+                cuando está activado, roja con la campana tachada cuando
+                está desactivado. Controla el sonido de los avisos de
+                resultado de más abajo; se recuerda por dispositivo (ver
+                lib/sonidoAviso.ts). */}
+            <button
+              type="button"
+              onClick={() => {
+                const nuevoValor = !sonidoActivado;
+                setSonidoActivado(nuevoValor);
+                guardarPreferenciaSonido(nuevoValor);
+              }}
+              aria-pressed={sonidoActivado}
+              aria-label={sonidoActivado ? 'Desactivar el sonido de los avisos' : 'Activar el sonido de los avisos'}
+              title={sonidoActivado ? 'Sonido de avisos activado' : 'Sonido de avisos desactivado'}
+              style={{
+                flexShrink: 0,
+                width: 28,
+                height: 28,
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 14,
+                cursor: 'pointer',
+                border: `1px solid ${sonidoActivado ? 'rgba(61,220,132,0.4)' : 'rgba(255,92,92,0.4)'}`,
+                background: sonidoActivado ? 'rgba(61,220,132,0.12)' : 'rgba(255,92,92,0.12)',
+              }}
+            >
+              {sonidoActivado ? '🔔' : '🔕'}
+            </button>
           </div>
+
+          {/* Aviso de resultado no-par (03/10, pedido de Iñi): tira de 5
+              segundos justo debajo del bono de podio, con sonido (si está
+              activado), cada vez que cualquier jugador de esta porra hace
+              un birdie, eagle, bogey o doble bogey — ver el efecto de
+              arriba que rellena `avisos`. */}
+          {avisos.length > 0 && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '9px 14px',
+                borderRadius: 10,
+                alignSelf: 'flex-start',
+                background: 'rgba(240,185,77,0.12)',
+                border: '1px solid rgba(240,185,77,0.4)',
+              }}
+            >
+              <span style={{ width: 9, height: 9, borderRadius: '50%', flexShrink: 0, background: COLOR_TIPO_RESULTADO[avisos[0].tipo].fondo }} />
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: S.TEXT }}>
+                {avisos[0].jugador} ha hecho {ETIQUETA_TIPO_RESULTADO[avisos[0].tipo].toLowerCase()}
+              </span>
+            </div>
+          )}
 
           {vista === 'porra' && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
@@ -537,7 +714,9 @@ export default function PorraClasificacionPage() {
                       const activo = eq.equipoId === equipoSeleccionado.equipoId;
                       const esFavorito = favoritos.has(eq.equipoId);
                       return (
-                        <a
+                        <motion.a
+                          layout
+                          transition={{ type: 'spring', stiffness: 420, damping: 38 }}
                           key={eq.equipoId}
                           href="#"
                           onClick={(e) => {
@@ -564,7 +743,7 @@ export default function PorraClasificacionPage() {
                           <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 12, color: S.MUTED_2 }}>
                             {formatGolfScore(totalEquipo(eq.jugadores, jugadoresPorId, bonosParaMostrar))}
                           </span>
-                        </a>
+                        </motion.a>
                       );
                     })}
                   {soloFavoritos && !equiposOrdenados.some((eq) => favoritos.has(eq.equipoId)) && (
@@ -605,7 +784,9 @@ export default function PorraClasificacionPage() {
                   </span>
                 </div>
                 {jugadoresDelEquipoSeleccionado.map((j) => (
-                  <a
+                  <motion.a
+                    layout
+                    transition={{ type: 'spring', stiffness: 420, damping: 38 }}
                     key={j.id}
                     href="#"
                     onClick={(e) => {
@@ -623,6 +804,9 @@ export default function PorraClasificacionPage() {
                       textDecoration: 'none',
                     }}
                   >
+                    {/* Favorito de jugador (03/10, pedido de Iñi) — mismo
+                        mecanismo que la estrellita de equipo. */}
+                    <EstrellaFavorito activo={favoritosJugador.has(j.id)} onToggle={() => alternarFavoritoJug(j.id)} />
                     <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
                       <span style={{ display: 'flex', alignItems: 'baseline', gap: 5, minWidth: 0 }}>
                         <span
@@ -654,7 +838,7 @@ export default function PorraClasificacionPage() {
                     <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 13, color: S.MUTED_2 }}>
                       {formatGolfScore((j.resultado_en_vivo_total ?? 0) + (bonosParaMostrar.get(j.id) ?? 0))}
                     </span>
-                  </a>
+                  </motion.a>
                 ))}
               </div>
             </div>
@@ -663,16 +847,42 @@ export default function PorraClasificacionPage() {
           {vista === 'torneo' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
               <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Campo completo ({campoOrdenado.length} jugadores)</span>
-              <input
-                value={busquedaJugador}
-                onChange={(e) => setBusquedaJugador(e.target.value)}
-                placeholder="Buscar jugador..."
-                style={{ ...S.input, padding: '7px 10px', fontSize: 12 }}
-              />
+              <div style={{ display: 'flex', gap: 5 }}>
+                <input
+                  value={busquedaJugador}
+                  onChange={(e) => setBusquedaJugador(e.target.value)}
+                  placeholder="Buscar jugador..."
+                  style={{ ...S.input, flex: 1, minWidth: 0, padding: '7px 10px', fontSize: 12 }}
+                />
+                {/* Filtro "solo favoritos" (03/10, pedido de Iñi) — mismo
+                    patrón que el de equipos de la pestaña Porra. */}
+                <button
+                  type="button"
+                  onClick={() => setSoloFavoritosJugador((v) => !v)}
+                  title={soloFavoritosJugador ? 'Ver todos los jugadores' : 'Ver solo favoritos'}
+                  style={{
+                    flexShrink: 0,
+                    width: 30,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: 8,
+                    border: `1px solid ${soloFavoritosJugador ? '#F0B94D' : '#1E2723'}`,
+                    background: soloFavoritosJugador ? 'rgba(240,185,77,0.15)' : S.PANEL,
+                    color: soloFavoritosJugador ? '#F0B94D' : S.MUTED_3,
+                    cursor: 'pointer',
+                    fontSize: 13,
+                    lineHeight: 1,
+                  }}
+                >
+                  {soloFavoritosJugador ? '★' : '☆'}
+                </button>
+              </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 380, overflowY: 'auto' }}>
                 {campoOrdenado
                   .map((j, i) => ({ j, rango: i + 1 }))
                   .filter(({ j }) => !busquedaJugador.trim() || normalizarNombre(j.nombre).includes(normalizarNombre(busquedaJugador)))
+                  .filter(({ j }) => !soloFavoritosJugador || favoritosJugador.has(j.id))
                   .map(({ j, rango }) => {
                     // Equipos de ESTA porra que tienen a este jugador (nuevo,
                     // 02/10, pedido de Iñi: "cuando pulses encima de un
@@ -684,7 +894,7 @@ export default function PorraClasificacionPage() {
                     // equipo ya seleccionado.
                     const equiposConEsteJugador = jugadorFocoId === j.id ? equiposOrdenados.filter((eq) => eq.jugadores.includes(j.id)) : [];
                     return (
-                      <div key={j.id} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <motion.div layout transition={{ type: 'spring', stiffness: 420, damping: 38 }} key={j.id} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                         <a
                           href="#"
                           onClick={(e) => {
@@ -703,6 +913,7 @@ export default function PorraClasificacionPage() {
                           }}
                         >
                           <span style={{ flexShrink: 0, width: 20, textAlign: 'center', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 11, color: S.MUTED_2 }}>{rango}</span>
+                          <EstrellaFavorito activo={favoritosJugador.has(j.id)} onToggle={() => alternarFavoritoJug(j.id)} />
                           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
                             <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.nombre}</span>
                             {j.grupo_porra && <span style={{ fontSize: 9.5, fontWeight: 700, color: COLOR_GRUPO[j.grupo_porra] }}>{GRUPO_PORRA_LABELS[j.grupo_porra]}</span>}
@@ -735,9 +946,14 @@ export default function PorraClasificacionPage() {
                             )}
                           </div>
                         )}
-                      </div>
+                      </motion.div>
                     );
                   })}
+                {soloFavoritosJugador && !campoOrdenado.some((j) => favoritosJugador.has(j.id)) && (
+                  <p style={{ fontSize: 10.5, color: S.MUTED_3, lineHeight: 1.4, padding: '4px 2px' }}>
+                    Todavía no tienes ningún jugador marcado como favorito aquí — pulsa la estrella de un jugador para añadirlo.
+                  </p>
+                )}
               </div>
             </div>
           )}
@@ -790,19 +1006,24 @@ export default function PorraClasificacionPage() {
 
               {hoyosFoco === 'cargando' && <p style={{ fontSize: 12.5, color: S.MUTED_3, margin: 0 }}>Cargando el hoyo a hoyo...</p>}
 
-              {hoyosFoco !== 'cargando' && (!hoyosFoco || hoyosFoco.length === 0) && (
-                <p style={{ fontSize: 12.5, lineHeight: 1.5, color: S.MUTED_2, margin: 0 }}>
-                  Todavía no hay ningún hoyo registrado para {jugadorFoco.nombre} — en cuanto empiece a jugar (o su torneo se conecte con ESPN
-                  desde el panel de administración), aquí verás el desglose hoyo a hoyo, golpe a golpe.
-                </p>
-              )}
-
+              {/* CAMBIO 03/10 (pedido de Iñi): "aunque no tengamos
+                  resultados... que se vea ya la tira de los 18 hoyos" —
+                  antes esta sección solo aparecía si ya había al menos un
+                  hoyo guardado; ahora SIEMPRE se pintan los 18 huecos de la
+                  ronda (los que todavía no tienen resultado, vacíos), y la
+                  ronda por defecto es la EN VIVO del jugador
+                  (resultado_en_vivo_ronda), aunque todavía no tenga ningún
+                  hoyo jugado en ella — así se ve la jornada de hoy desde
+                  el principio, no solo la última con datos. */}
               {Array.isArray(hoyosFoco) &&
-                hoyosFoco.length > 0 &&
                 (() => {
                   const hoyos: HoyoRow[] = hoyosFoco;
-                  const rondas = Array.from(new Set(hoyos.map((h) => h.ronda))).sort((a, b) => a - b);
-                  const hoyosRonda = hoyos.filter((h) => h.ronda === rondaSeleccionada);
+                  const rondasConDatos = Array.from(new Set(hoyos.map((h) => h.ronda)));
+                  const rondaEnVivo = jugadorFoco.resultado_en_vivo_ronda;
+                  const rondasConocidas = Array.from(new Set([...rondasConDatos, ...(rondaEnVivo ? [rondaEnVivo] : [])])).sort((a, b) => a - b);
+                  const rondaMostrada = rondaSeleccionada ?? rondaEnVivo ?? rondasConocidas[rondasConocidas.length - 1] ?? 1;
+                  const hoyosRonda = hoyos.filter((h) => h.ronda === rondaMostrada);
+                  const hoyosPorNumero = new Map(hoyosRonda.map((h) => [h.hoyo, h]));
                   // Nombre del campo de la ronda (01/10) — solo aparece en
                   // los pocos torneos con más de un campo (ver
                   // campos_golf_live); en el resto, campo_id siempre es
@@ -811,13 +1032,20 @@ export default function PorraClasificacionPage() {
                   const nombreCampoRondaSel = campoIdRondaSel ? nombresCampo[campoIdRondaSel] : null;
                   return (
                     <>
-                      {rondas.length > 1 && (
+                      {hoyosRonda.length === 0 && (
+                        <p style={{ fontSize: 11.5, lineHeight: 1.5, color: S.MUTED_2, margin: 0 }}>
+                          Todavía no hay ningún hoyo registrado para la ronda {rondaMostrada} de {jugadorFoco.nombre} — en cuanto empiece a
+                          jugar se irán rellenando los círculos de abajo.
+                        </p>
+                      )}
+
+                      {rondasConocidas.length > 1 && (
                         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                          {rondas.map((r) => {
+                          {rondasConocidas.map((r) => {
                             const campoIdR = hoyos.find((h) => h.ronda === r)?.campo_id ?? null;
                             const nombreCampoR = campoIdR ? nombresCampo[campoIdR] : null;
                             return (
-                              <button key={r} type="button" onClick={() => setRondaSeleccionada(r)} style={vistaPillStyle(rondaSeleccionada === r)}>
+                              <button key={r} type="button" onClick={() => setRondaSeleccionada(r)} style={vistaPillStyle(rondaMostrada === r)}>
                                 Ronda {r}
                                 {nombreCampoR ? ` · ${nombreCampoR}` : ''}
                               </button>
@@ -826,18 +1054,43 @@ export default function PorraClasificacionPage() {
                         </div>
                       )}
 
-                      {campoIdRondaSel && rondas.length <= 1 && (
+                      {campoIdRondaSel && rondasConocidas.length <= 1 && (
                         <span style={{ fontSize: 10.5, color: S.MUTED_3 }}>
                           {nombreCampoRondaSel ?? `Campo ${campoIdRondaSel} (todavía sin nombre — se puede poner desde el panel de administración)`}
                         </span>
                       )}
 
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 6 }}>
-                        {hoyosRonda.map((h) => {
+                        {Array.from({ length: 18 }, (_, i) => i + 1).map((n) => {
+                          const h = hoyosPorNumero.get(n);
+                          if (!h) {
+                            return (
+                              <div key={n} title={`Hoyo ${n} — todavía sin resultado`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+                                <span style={{ fontSize: 8.5, color: S.MUTED_3 }}>{n} · P–</span>
+                                <div
+                                  style={{
+                                    width: 30,
+                                    height: 30,
+                                    borderRadius: '50%',
+                                    border: `1px dashed ${S.CARD_BORDER}`,
+                                    color: S.MUTED_3,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontFamily: "'Barlow Condensed', sans-serif",
+                                    fontWeight: 800,
+                                    fontSize: 13,
+                                  }}
+                                >
+                                  –
+                                </div>
+                              </div>
+                            );
+                          }
                           const color = COLOR_TIPO_RESULTADO[h.tipo_resultado];
                           return (
                             <div
-                              key={h.hoyo}
+                              key={n}
                               title={`Hoyo ${h.hoyo} · Par ${h.par} · ${ETIQUETA_TIPO_RESULTADO[h.tipo_resultado]}`}
                               style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}
                             >

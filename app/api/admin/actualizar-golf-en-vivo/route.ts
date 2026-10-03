@@ -79,6 +79,10 @@ const CONCURRENCIA_HOYOS = 8;
 
 type ResultadoTorneo = {
   competicion: string;
+  // 03/10: para que el admin, al guardar un alias desde un nombre sin
+  // emparejar, pueda marcarlo con la fuente real (antes se guardaba
+  // siempre como 'espn', aunque el nombre viniera de Data Golf).
+  fuenteDatos: 'espn' | 'datagolf';
   ok: boolean;
   jugadoresEnCampo: number;
   jugadoresEmparejados: number;
@@ -471,6 +475,7 @@ export async function POST(req: NextRequest) {
   for (const torneo of torneos) {
     const resultado: ResultadoTorneo = {
       competicion: torneo.competicion,
+      fuenteDatos: torneo.fuente_datos,
       ok: false,
       jugadoresEnCampo: 0,
       jugadoresEmparejados: 0,

@@ -66,6 +66,8 @@ type CampoDetectado = { campo_id: string; nombre: string | null };
 
 type ResultadoSync = {
   competicion: string;
+  // 03/10: para guardar el alias con la fuente real en vez de siempre 'espn'.
+  fuenteDatos: 'espn' | 'datagolf';
   ok: boolean;
   jugadoresEnCampo: number;
   jugadoresEmparejados: number;
@@ -181,6 +183,15 @@ export default function AdminResultadosGolfPage() {
   // Clave: `${competicion}:::${nombreOrigen}` -> id del jugador elegido en el desplegable.
   const [seleccionAlias, setSeleccionAlias] = useState<Record<string, string>>({});
   const [guardandoAlias, setGuardandoAlias] = useState<string | null>(null);
+  // 03/10 (pedido de Iñi): tras guardar, que el botón deje de verse como un
+  // botón pulsable y en su lugar se vea claramente "Guardado" — se borra
+  // solo al pedir una sincronización nueva (actualizarAhora), porque a
+  // partir de ahí ese nombre debería dejar de aparecer sin emparejar.
+  const [aliasGuardadosClave, setAliasGuardadosClave] = useState<Set<string>>(new Set());
+  // 03/10 (pedido de Iñi): buscador dentro del desplegable de jugadores —
+  // con cientos de jugadores en el campo, bajar uno a uno por el
+  // desplegable nativo es muy incómodo. Clave: misma `${competicion}:::${nombreOrigen}`.
+  const [filtroJugadorAlias, setFiltroJugadorAlias] = useState<Record<string, string>>({});
 
   async function cargarTorneos() {
     const { data, error: torneosError } = await supabase.from('torneos_golf_live').select('*').order('competicion');
@@ -294,7 +305,7 @@ export default function AdminResultadosGolfPage() {
     setJugadoresPorCompeticion((prev) => ({ ...prev, [competicion]: (data as JugadorSimple[]) ?? [] }));
   }
 
-  async function guardarAlias(competicion: string, nombreOrigen: string) {
+  async function guardarAlias(competicion: string, nombreOrigen: string, fuenteDatos: 'espn' | 'datagolf') {
     const clave = `${competicion}:::${nombreOrigen}`;
     const jugadorId = seleccionAlias[clave];
     const jugadoresDeEstaCompeticion = jugadoresPorCompeticion[competicion];
@@ -313,7 +324,9 @@ export default function AdminResultadosGolfPage() {
         nombre_normalizado_origen: normalizarNombre(nombreOrigen),
         nombre_destino: jugadorElegido.nombre,
         nombre_normalizado_destino: normalizarNombre(jugadorElegido.nombre),
-        fuente: 'espn',
+        // CAMBIO 03/10: antes siempre 'espn' — ahora refleja de verdad de
+        // qué sincronización venía el nombre sin emparejar.
+        fuente: fuenteDatos,
       },
       { onConflict: 'deporte,nombre_normalizado_origen' }
     );
@@ -323,6 +336,9 @@ export default function AdminResultadosGolfPage() {
       setErrorAlias(`No se ha podido guardar el alias: ${upsertError.message}`);
       return;
     }
+    // 03/10: marca esta fila como "Guardado" en vez de dejar el botón
+    // pulsable sin más indicación — se borra en la próxima sincronización.
+    setAliasGuardadosClave((prev) => new Set(prev).add(clave));
     await cargarAlias();
   }
 
@@ -470,6 +486,10 @@ export default function AdminResultadosGolfPage() {
     setSincronizando(true);
     setErrorSync(null);
     setResultadoSync(null);
+    // Nueva sincronización: lo guardado en la anterior ya debería haberse
+    // aplicado (o seguir sin emparejar por otro motivo, en cuyo caso vuelve
+    // a aparecer el formulario normal) — se limpia el estado "Guardado".
+    setAliasGuardadosClave(new Set());
 
     const {
       data: { session },
@@ -726,24 +746,46 @@ export default function AdminResultadosGolfPage() {
                     {r.nombresSinEmparejar.length > 0 && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 2 }}>
                         <span style={{ fontSize: 10.5, fontWeight: 700, color: S.MUTED_3, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
-                          Sin emparejar en ESPN — elige a quién corresponde cada uno:
+                          Sin emparejar en {r.fuenteDatos === 'datagolf' ? 'Data Golf' : 'ESPN'} — elige a quién corresponde cada uno:
                         </span>
                         {r.nombresSinEmparejar.map((nombreOrigen) => {
                           const clave = `${r.competicion}:::${nombreOrigen}`;
                           const jugadoresComp = jugadoresPorCompeticion[r.competicion];
+                          const yaGuardado = aliasGuardadosClave.has(clave);
+                          const filtro = filtroJugadorAlias[clave] ?? '';
+                          const jugadoresFiltrados = Array.isArray(jugadoresComp)
+                            ? jugadoresComp.filter((j) => !filtro.trim() || normalizarNombre(j.nombre).includes(normalizarNombre(filtro)))
+                            : [];
                           return (
                             <div key={nombreOrigen} style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                               <span style={{ fontSize: 11, color: S.TEXT, flexShrink: 0, minWidth: 140 }}>{nombreOrigen}</span>
                               {jugadoresComp === 'cargando' && <span style={{ fontSize: 10.5, color: S.MUTED_3 }}>Cargando jugadores...</span>}
-                              {Array.isArray(jugadoresComp) && (
+                              {/* 03/10 (pedido de Iñi): una vez guardado, se ve claramente
+                                  como guardado — ya no un botón pulsable sin más — hasta
+                                  la próxima sincronización. */}
+                              {yaGuardado && (
+                                <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, color: S.ACCENT }}>
+                                  ✓ Guardado
+                                </span>
+                              )}
+                              {!yaGuardado && Array.isArray(jugadoresComp) && (
                                 <>
+                                  {/* 03/10 (pedido de Iñi): buscador dentro del desplegable
+                                      — con el campo completo (100-150 jugadores) es muy
+                                      incómodo bajar uno a uno sin poder filtrar. */}
+                                  <input
+                                    value={filtro}
+                                    onChange={(e) => setFiltroJugadorAlias((prev) => ({ ...prev, [clave]: e.target.value }))}
+                                    placeholder="Buscar..."
+                                    style={{ ...S.input, width: 110, padding: '5px 8px', fontSize: 11.5 }}
+                                  />
                                   <select
                                     value={seleccionAlias[clave] ?? ''}
                                     onChange={(e) => setSeleccionAlias((prev) => ({ ...prev, [clave]: e.target.value }))}
                                     style={{ ...S.input, flex: 1, minWidth: 160, padding: '5px 8px', fontSize: 11.5 }}
                                   >
                                     <option value="">— selecciona el jugador —</option>
-                                    {jugadoresComp.map((j) => (
+                                    {jugadoresFiltrados.map((j) => (
                                       <option key={j.id} value={j.id}>
                                         {j.nombre}
                                       </option>
@@ -752,7 +794,7 @@ export default function AdminResultadosGolfPage() {
                                   <button
                                     type="button"
                                     disabled={guardandoAlias === clave || !seleccionAlias[clave]}
-                                    onClick={() => guardarAlias(r.competicion, nombreOrigen)}
+                                    onClick={() => guardarAlias(r.competicion, nombreOrigen, r.fuenteDatos)}
                                     style={{ ...S.primaryButton, width: 'auto', padding: '5px 10px', fontSize: 11, opacity: guardandoAlias === clave || !seleccionAlias[clave] ? 0.6 : 1 }}
                                   >
                                     {guardandoAlias === clave ? 'Guardando...' : 'Guardar alias'}
@@ -763,9 +805,9 @@ export default function AdminResultadosGolfPage() {
                           );
                         })}
                         <span style={{ fontSize: 10, color: S.MUTED_3, lineHeight: 1.4 }}>
-                          Al guardar queda memorizado para siempre — la próxima vez que ESPN escriba este mismo nombre (en
-                          este torneo o en cualquier otro), se reconocerá solo. Pulsa &quot;Actualizar ahora&quot; otra vez
-                          para aplicarlo ya.
+                          Al guardar queda memorizado para siempre — la próxima vez que esta fuente escriba este mismo
+                          nombre (en este torneo o en cualquier otro), se reconocerá solo. Pulsa &quot;Actualizar ahora&quot;
+                          otra vez para aplicarlo ya.
                         </span>
                       </div>
                     )}
