@@ -316,7 +316,20 @@ export default function PorraDetallePage() {
               nombres de los equipos ya se ven siempre, ver más abajo). La
               porra de fútbol tiene su propia "clasificación" — la pestaña
               "Clasificación" de aquí arriba, por aciertos. */}
-          {!esFutbol && porraEmpezada && misEquipos.length > 0 && (
+          {/* Habilitado para CUALQUIER usuario logueado, participe o no en
+              esta porra (03/10, pedido de Iñi: "que el botón de
+              clasificación en vivo esté habilitado para cualquiera, aunque
+              no participe en la porra") — antes exigía también
+              `misEquipos.length > 0`, así que solo lo veían quienes ya
+              tenían equipo aquí. La página de destino
+              (/porras/[id]/clasificacion) ya era accesible para cualquier
+              usuario logueado de todas formas (ni el cliente ni la RPC
+              equipos_porra_clasificacion() comprueban participación, solo
+              que la porra haya empezado) — este cambio es solo para que el
+              botón deje de ocultarse y la gente que se está dando de alta
+              ahora pueda ver la clasificación en directo de la que ya está
+              en marcha. */}
+          {!esFutbol && porraEmpezada && (
             <Link
               href={`/porras/${porra.id}/clasificacion`}
               style={{ display: 'flex', alignItems: 'center', gap: 6, alignSelf: 'flex-start', padding: '7px 12px', background: 'rgba(240,185,77,0.12)', border: '1px solid rgba(240,185,77,0.4)', borderRadius: 20, textDecoration: 'none' }}

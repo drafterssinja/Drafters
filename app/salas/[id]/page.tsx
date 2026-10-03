@@ -265,7 +265,15 @@ export default function SalaDetallePage() {
             </div>
           </div>
 
-          {salaEmpezada && hasEquipo && (
+          {/* Habilitado para CUALQUIER usuario logueado, participe o no en
+              esta mesa (03/10, pedido de Iñi, mismo cambio que en porras:
+              "que el botón de clasificación en vivo esté habilitado para
+              cualquiera, aunque no participe") — antes exigía también
+              `hasEquipo`. La página de destino ya era accesible para
+              cualquier usuario logueado de todas formas (ni el cliente ni
+              la RPC equipos_sala_clasificacion() comprueban participación,
+              solo que la sala haya empezado). */}
+          {salaEmpezada && (
             <Link
               href={`/salas/${sala.id}/clasificacion`}
               style={{
