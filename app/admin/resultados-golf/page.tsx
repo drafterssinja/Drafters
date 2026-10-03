@@ -16,7 +16,14 @@ import { normalizarNombre } from '@/lib/nombreMatch';
 // `torneos_golf_live` (drafters-schema.sql) — la relación entre una
 // "competicion" de Drafters (el mismo texto libre que ya usan
 // jugadores.competicion / porras.competicion / salas.competicion) y el
-// torneo correspondiente en ESPN (tour + id de evento).
+// torneo correspondiente en la fuente de datos en vivo elegida.
+//
+// CAMBIO 03/10 (pedido de Iñi: "no quiero que estemos leyendo de dos
+// fuentes diferentes, prefiero que cojamos todo de Data Golf"): cada
+// torneo elige UNA fuente, Data Golf (recomendada, API oficial de pago) o
+// ESPN (gratuita, no oficial, se deja solo como respaldo) — nunca las dos
+// a la vez para el mismo torneo. Ver app/api/admin/actualizar-golf-en-vivo/
+// route.ts, que llama solo a la fuente marcada.
 //
 // El texto de "competicion" tiene que ser EXACTAMENTE igual, carácter a
 // carácter, al que tengan ya los jugadores de esa porra en la tabla
@@ -24,11 +31,13 @@ import { normalizarNombre } from '@/lib/nombreMatch';
 // jugador de ese torneo (columna "jugadoresEnCampo" de la última
 // sincronización se quedaría a 0, ver abajo).
 //
-// El id de evento de ESPN se saca de la propia web pública de ESPN: entra
-// en https://www.espn.com/golf/leaderboard (o .../schedule del tour que
-// toque) y busca el torneo — la URL de su leaderboard lleva
+// Con fuente "ESPN": el id de evento se saca de la propia web pública de
+// ESPN — entra en https://www.espn.com/golf/leaderboard (o .../schedule
+// del tour que toque) y busca el torneo — la URL de su leaderboard lleva
 // "...leaderboard?tournamentId=XXXXXX&..." o "/leaderboard/_/id/XXXXXX/...";
-// ese número (o código) es el que va aquí.
+// ese número (o código) es el que va aquí. Con fuente "Data Golf" no hace
+// falta ningún id — basta con elegir el tour, Data Golf detecta solo el
+// torneo activo de ese tour.
 //
 // El botón "Actualizar ahora" llama a la misma ruta que usa el cron
 // automático de Supabase (cada minuto, ver el final de
@@ -39,9 +48,15 @@ import { normalizarNombre } from '@/lib/nombreMatch';
 type TorneoGolfLive = {
   id: string;
   competicion: string;
-  tour: 'pga' | 'eur';
-  espn_event_id: string;
-  temporada: number;
+  // 03/10: cada torneo usa UNA sola fuente, nunca las dos a la vez — ver
+  // el bloque "INTEGRACIÓN DATA GOLF" en drafters-schema.sql. Con
+  // fuente_datos='espn' solo hacen falta tour/espn_event_id/temporada; con
+  // 'datagolf' solo hace falta tour_datagolf.
+  fuente_datos: 'espn' | 'datagolf';
+  tour: 'pga' | 'eur' | null;
+  espn_event_id: string | null;
+  temporada: number | null;
+  tour_datagolf: 'pga' | 'euro' | null;
   activo: boolean;
   ultima_actualizacion: string | null;
   ultimo_error: string | null;
@@ -60,6 +75,8 @@ type ResultadoSync = {
 };
 
 const TOUR_LABELS: Record<'pga' | 'eur', string> = { pga: 'PGA Tour', eur: 'DP World Tour' };
+// Slug distinto al de ESPN ('eur') — Data Golf usa 'euro' para el mismo tour.
+const TOUR_DATAGOLF_LABELS: Record<'pga' | 'euro', string> = { pga: 'PGA Tour', euro: 'DP World Tour' };
 
 // Biblioteca de pares de campo (nuevo, 01/10 — ver drafters-schema.sql,
 // bloque "BIBLIOTECA DE PARES DE CAMPO DE GOLF"): un campo real (p.ej. St
@@ -108,9 +125,15 @@ export default function AdminResultadosGolfPage() {
 
   // Formulario de nuevo torneo.
   const [competicion, setCompeticion] = useState('');
+  // 03/10: Data Golf es la fuente recomendada ahora (ver instrucción de
+  // Iñi — "no quiero que estemos leyendo de dos fuentes diferentes,
+  // prefiero que cojamos todo de Data Golf"), así que empieza marcado por
+  // defecto; ESPN se deja disponible solo como respaldo manual.
+  const [fuenteDatos, setFuenteDatos] = useState<'espn' | 'datagolf'>('datagolf');
   const [tour, setTour] = useState<'pga' | 'eur'>('pga');
   const [espnEventId, setEspnEventId] = useState('');
   const [temporada, setTemporada] = useState(String(new Date().getFullYear()));
+  const [tourDataGolf, setTourDataGolf] = useState<'pga' | 'euro'>('euro');
   const [guardando, setGuardando] = useState(false);
   const [errorGuardar, setErrorGuardar] = useState<string | null>(null);
 
@@ -371,24 +394,41 @@ export default function AdminResultadosGolfPage() {
       setErrorGuardar('Pon el nombre exacto de la competición (tal cual está en jugadores/porras).');
       return;
     }
-    if (!espnEventId.trim()) {
-      setErrorGuardar('Pon el id del evento en ESPN.');
-      return;
-    }
-    const temporadaNum = parseInt(temporada, 10);
-    if (!Number.isFinite(temporadaNum)) {
-      setErrorGuardar('La temporada tiene que ser un año válido.');
-      return;
+
+    let fila: Record<string, unknown>;
+    if (fuenteDatos === 'datagolf') {
+      fila = {
+        competicion: competicion.trim(),
+        fuente_datos: 'datagolf',
+        tour_datagolf: tourDataGolf,
+        tour: null,
+        espn_event_id: null,
+        temporada: null,
+        activo: true,
+      };
+    } else {
+      if (!espnEventId.trim()) {
+        setErrorGuardar('Pon el id del evento en ESPN.');
+        return;
+      }
+      const temporadaNum = parseInt(temporada, 10);
+      if (!Number.isFinite(temporadaNum)) {
+        setErrorGuardar('La temporada tiene que ser un año válido.');
+        return;
+      }
+      fila = {
+        competicion: competicion.trim(),
+        fuente_datos: 'espn',
+        tour,
+        espn_event_id: espnEventId.trim(),
+        temporada: temporadaNum,
+        tour_datagolf: null,
+        activo: true,
+      };
     }
 
     setGuardando(true);
-    const { error: insertError } = await supabase.from('torneos_golf_live').insert({
-      competicion: competicion.trim(),
-      tour,
-      espn_event_id: espnEventId.trim(),
-      temporada: temporadaNum,
-      activo: true,
-    });
+    const { error: insertError } = await supabase.from('torneos_golf_live').insert(fila);
     setGuardando(false);
 
     if (insertError) {
@@ -402,7 +442,10 @@ export default function AdminResultadosGolfPage() {
     await cargarTorneos();
   }
 
-  async function actualizarTorneo(id: string, cambios: Partial<Pick<TorneoGolfLive, 'activo' | 'tour' | 'espn_event_id' | 'temporada'>>) {
+  async function actualizarTorneo(
+    id: string,
+    cambios: Partial<Pick<TorneoGolfLive, 'activo' | 'tour' | 'espn_event_id' | 'temporada' | 'fuente_datos' | 'tour_datagolf'>>
+  ) {
     setTorneos((prev) => prev.map((t) => (t.id === id ? { ...t, ...cambios } : t)));
     const { error: updateError } = await supabase.from('torneos_golf_live').update(cambios).eq('id', id);
     if (updateError) {
@@ -412,7 +455,7 @@ export default function AdminResultadosGolfPage() {
   }
 
   async function eliminarTorneo(t: TorneoGolfLive) {
-    if (!window.confirm(`¿Eliminar la conexión con ESPN de "${t.competicion}"? Los resultados ya guardados no se borran, pero dejará de actualizarse.`)) {
+    if (!window.confirm(`¿Eliminar la conexión de "${t.competicion}"? Los resultados ya guardados no se borran, pero dejará de actualizarse.`)) {
       return;
     }
     const { error: deleteError } = await supabase.from('torneos_golf_live').delete().eq('id', t.id);
@@ -595,28 +638,63 @@ export default function AdminResultadosGolfPage() {
 
             <div style={{ display: 'flex', gap: 10 }}>
               <div style={{ ...S.field, flex: 1 }}>
-                <span style={S.label}>Tour</span>
+                <span style={S.label}>Fuente de datos</span>
                 <div style={{ display: 'flex', gap: 6 }}>
-                  <button type="button" style={S.pill(tour === 'pga')} onClick={() => setTour('pga')}>
-                    PGA Tour
+                  <button type="button" style={S.pill(fuenteDatos === 'datagolf')} onClick={() => setFuenteDatos('datagolf')}>
+                    Data Golf (recomendado)
                   </button>
-                  <button type="button" style={S.pill(tour === 'eur')} onClick={() => setTour('eur')}>
-                    DP World Tour
+                  <button type="button" style={S.pill(fuenteDatos === 'espn')} onClick={() => setFuenteDatos('espn')}>
+                    ESPN (respaldo)
                   </button>
                 </div>
+                <span style={{ fontSize: 10.5, color: S.MUTED_3, lineHeight: 1.4, marginTop: 4 }}>
+                  Cada torneo usa SOLO la fuente que eliges aquí — nunca se mezclan las dos para el mismo torneo.
+                </span>
               </div>
             </div>
 
-            <div style={{ display: 'flex', gap: 10 }}>
-              <div style={{ ...S.field, flex: 1 }}>
-                <span style={S.label}>Id de evento en ESPN</span>
-                <input value={espnEventId} onChange={(e) => setEspnEventId(e.target.value)} placeholder="p.ej. 401703504" style={S.input} />
+            {fuenteDatos === 'datagolf' ? (
+              <div style={{ display: 'flex', gap: 10 }}>
+                <div style={{ ...S.field, flex: 1 }}>
+                  <span style={S.label}>Tour (Data Golf)</span>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button type="button" style={S.pill(tourDataGolf === 'pga')} onClick={() => setTourDataGolf('pga')}>
+                      PGA Tour
+                    </button>
+                    <button type="button" style={S.pill(tourDataGolf === 'euro')} onClick={() => setTourDataGolf('euro')}>
+                      DP World Tour
+                    </button>
+                  </div>
+                </div>
               </div>
-              <div style={{ ...S.field, width: 110 }}>
-                <span style={S.label}>Temporada</span>
-                <input value={temporada} onChange={(e) => setTemporada(e.target.value)} style={S.input} />
-              </div>
-            </div>
+            ) : (
+              <>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <div style={{ ...S.field, flex: 1 }}>
+                    <span style={S.label}>Tour</span>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button type="button" style={S.pill(tour === 'pga')} onClick={() => setTour('pga')}>
+                        PGA Tour
+                      </button>
+                      <button type="button" style={S.pill(tour === 'eur')} onClick={() => setTour('eur')}>
+                        DP World Tour
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <div style={{ ...S.field, flex: 1 }}>
+                    <span style={S.label}>Id de evento en ESPN</span>
+                    <input value={espnEventId} onChange={(e) => setEspnEventId(e.target.value)} placeholder="p.ej. 401703504" style={S.input} />
+                  </div>
+                  <div style={{ ...S.field, width: 110 }}>
+                    <span style={S.label}>Temporada</span>
+                    <input value={temporada} onChange={(e) => setTemporada(e.target.value)} style={S.input} />
+                  </div>
+                </div>
+              </>
+            )}
 
             {errorGuardar && <p style={S.errorText}>{errorGuardar}</p>}
 
@@ -706,7 +784,9 @@ export default function AdminResultadosGolfPage() {
                       {t.competicion}
                     </span>
                     <span style={{ fontSize: 11, color: S.MUTED_3 }}>
-                      {TOUR_LABELS[t.tour]} · ESPN #{t.espn_event_id} · temporada {t.temporada}
+                      {t.fuente_datos === 'datagolf'
+                        ? `Data Golf · ${t.tour_datagolf ? TOUR_DATAGOLF_LABELS[t.tour_datagolf] : '?'}`
+                        : `ESPN · ${t.tour ? TOUR_LABELS[t.tour] : '?'} · #${t.espn_event_id} · temporada ${t.temporada}`}
                     </span>
                     <span style={{ fontSize: 10.5, color: t.ultimo_error ? S.ERROR : S.MUTED_3 }}>
                       {t.ultimo_error

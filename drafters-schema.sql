@@ -2578,6 +2578,10 @@ alter table public.resultados_golf_hoyo add column if not exists campo_id text;
 -- número) del campo dentro del hoyo a hoyo de cada jugador, nunca el nombre;
 -- el admin lo escribe a mano una vez ve qué id corresponde a qué campo real
 -- (p.ej. comprobándolo en la propia web de ESPN), desde /admin/resultados-golf.
+-- CAMBIO 03/10: para los torneos con fuente_datos='datagolf' esto se rellena
+-- SOLO, sin que el admin tenga que escribir nada — Data Golf (field-updates)
+-- sí da el nombre real de cada campo junto a su código, a diferencia de
+-- ESPN — ver app/api/admin/actualizar-golf-en-vivo/route.ts.
 create table if not exists public.campos_golf_live (
   id uuid primary key default gen_random_uuid(),
   -- Igual que `torneos_golf_live.competicion`: tiene que coincidir exacto
@@ -2788,6 +2792,146 @@ as $$
 $$;
 revoke all on function public.pares_conocidos_campo(text, text) from public;
 grant execute on function public.pares_conocidos_campo(text, text) to authenticated;
+
+-- ============================================================================
+-- INTEGRACIÓN DATA GOLF: HOYO A HOYO CALCULADO EN VIVO (nuevo, 03/10)
+-- ============================================================================
+-- Pedido explícito de Iñi, tras confirmar probando con su clave real que
+-- NINGUNA de las dos fuentes da hoyo a hoyo de verdad en vivo por jugador:
+--   - ESPN (playersummary) solo da el resultado de cada hoyo una vez
+--     termina TODA la jornada — no sirve para "en vivo" (aviso de Iñi, ya
+--     la segunda vez que lo señala).
+--   - Data Golf (preds/live-hole-stats) da estadísticas DE TODO EL CAMPO
+--     por hoyo (media, nº de birdies...), no el resultado de un jugador
+--     concreto.
+-- Lo que SÍ da Data Golf (preds/in-play) es, por jugador, el resultado
+-- acumulado en vivo (current_score), en qué hoyo va (thru) y el resultado
+-- de SOLO la ronda de hoy (today) — con eso se puede CALCULAR el hoyo que
+-- se ha jugado entre un ciclo de sincronización y el siguiente: si entre
+-- dos ciclos "thru" ha avanzado exactamente 1, la diferencia de "today"
+-- respecto al ciclo anterior es el resultado de ESE hoyo en concreto (p.ej.
+-- si iba a -5 hoy y pasa a -6, el hoyo que se ha jugado ha sido un birdie).
+-- Ver app/api/admin/actualizar-golf-en-vivo/route.ts (rama nueva, separada
+-- por completo del camino de ESPN) para el cálculo real, y lib/dataGolf.ts
+-- para el parseo de las respuestas. El resultado calculado se guarda en la
+-- MISMA tabla `resultados_golf_hoyo` de siempre (mismas columnas, mismo
+-- `tipo_resultado` vía tipoResultadoHoyo()), así que la pantalla de
+-- clasificación (colores + par encima de cada resultado) no necesita ningún
+-- cambio: ya pinta de ahí sea el dato de ESPN o el calculado de Data Golf.
+--
+-- Cuándo NO se puede atribuir el hoyo con seguridad (se guarda igualmente
+-- el nuevo estado del jugador para el siguiente ciclo, pero sin escribir
+-- fila en resultados_golf_hoyo):
+--   - Primer ciclo en el que se ve a ese jugador en esta ronda (no hay
+--     "today" anterior con el que comparar).
+--   - Ha cambiado de ronda desde el ciclo anterior (el "today" de la ronda
+--     anterior no es comparable con el de la ronda nueva).
+--   - "thru" ha avanzado 2 o más hoyos de golpe (p.ej. el ciclo anterior
+--     falló, o el admin tardó varios minutos en activar el torneo): no se
+--     puede repartir el cambio de golpes entre varios hoyos sin inventar
+--     datos, así que se descarta ESE tramo en vez de arriesgarse a
+--     atribuir mal un hoyo.
+
+-- `torneos_golf_live` tiene que poder apuntar a Data Golf en vez de a ESPN
+-- para un torneo dado. `tour`/`espn_event_id`/`temporada` pasan a ser
+-- opcionales (solo hacen falta con fuente_datos='espn'); `tour_datagolf` es
+-- el equivalente para Data Golf ('pga' o 'euro', el slug que usa SU api,
+-- distinto del 'eur' de ESPN).
+alter table public.torneos_golf_live alter column tour drop not null;
+alter table public.torneos_golf_live alter column espn_event_id drop not null;
+alter table public.torneos_golf_live alter column temporada drop not null;
+alter table public.torneos_golf_live add column if not exists fuente_datos text not null default 'espn';
+alter table public.torneos_golf_live add column if not exists tour_datagolf text;
+
+alter table public.torneos_golf_live drop constraint if exists torneos_golf_live_tour_check;
+alter table public.torneos_golf_live add constraint torneos_golf_live_tour_check
+  check (tour is null or tour in ('pga', 'eur'));
+alter table public.torneos_golf_live drop constraint if exists torneos_golf_live_fuente_datos_check;
+alter table public.torneos_golf_live add constraint torneos_golf_live_fuente_datos_check
+  check (fuente_datos in ('espn', 'datagolf'));
+alter table public.torneos_golf_live drop constraint if exists torneos_golf_live_tour_datagolf_check;
+alter table public.torneos_golf_live add constraint torneos_golf_live_tour_datagolf_check
+  check (tour_datagolf is null or tour_datagolf in ('pga', 'euro'));
+-- Que cada torneo lleve completos los datos que le hacen falta según su
+-- fuente — evita que una fila a medio rellenar se active sin que el cron
+-- sepa qué hacer con ella.
+alter table public.torneos_golf_live drop constraint if exists torneos_golf_live_fuente_completa_check;
+alter table public.torneos_golf_live add constraint torneos_golf_live_fuente_completa_check
+  check (
+    (fuente_datos = 'espn' and tour is not null and espn_event_id is not null and temporada is not null)
+    or
+    (fuente_datos = 'datagolf' and tour_datagolf is not null)
+  );
+
+-- Resultado de SOLO la ronda de hoy (Data Golf: "today"), respecto al par —
+-- necesario además de resultado_en_vivo_total (acumulado de TODO el
+-- torneo) para poder calcular el hoyo jugado entre dos ciclos sin que el
+-- acumulado de rondas anteriores lo ensucie. No lo usa el camino de ESPN
+-- (queda null para esos torneos).
+alter table public.jugadores add column if not exists resultado_en_vivo_hoy int;
+
+-- Mismo criterio que el 'espn' de más arriba (nunca pisa un campo cargado a
+-- mano), pero para cuando el par de los 18 hoyos llega ya completo y de
+-- golpe desde Data Golf (preds/live-hole-stats da el par de cada hoyo desde
+-- el principio del torneo, no hace falta esperar a que algún jugador
+-- termine de jugarlos todos como con ESPN).
+alter table public.campos_golf_biblioteca drop constraint if exists campos_golf_biblioteca_origen_check;
+alter table public.campos_golf_biblioteca add constraint campos_golf_biblioteca_origen_check
+  check (origen in ('manual', 'espn', 'datagolf'));
+
+create or replace function public.actualizar_par_biblioteca_desde_datagolf(
+  p_nombre text,
+  p_nombre_normalizado text,
+  p_pares smallint[] -- exactamente 18 posiciones, hoyo 1 a 18; null si no se sabe todavía
+) returns void
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_origen_actual text;
+begin
+  if p_nombre_normalizado is null or btrim(p_nombre_normalizado) = '' then
+    return;
+  end if;
+  if p_pares is null or array_length(p_pares, 1) is distinct from 18 then
+    return; -- solo se guarda cuando ya se conocen los 18 hoyos
+  end if;
+
+  select origen into v_origen_actual
+  from public.campos_golf_biblioteca
+  where nombre_normalizado = p_nombre_normalizado;
+
+  if v_origen_actual = 'manual' then
+    return; -- Iñi ya lo cargó a mano — nunca se toca automáticamente
+  end if;
+
+  insert into public.campos_golf_biblioteca (
+    nombre, nombre_normalizado,
+    par_h1, par_h2, par_h3, par_h4, par_h5, par_h6, par_h7, par_h8, par_h9,
+    par_h10, par_h11, par_h12, par_h13, par_h14, par_h15, par_h16, par_h17, par_h18,
+    origen, actualizado_en
+  )
+  values (
+    p_nombre, p_nombre_normalizado,
+    p_pares[1], p_pares[2], p_pares[3], p_pares[4], p_pares[5], p_pares[6], p_pares[7], p_pares[8], p_pares[9],
+    p_pares[10], p_pares[11], p_pares[12], p_pares[13], p_pares[14], p_pares[15], p_pares[16], p_pares[17], p_pares[18],
+    'datagolf', now()
+  )
+  on conflict (nombre_normalizado) do update set
+    nombre = excluded.nombre,
+    par_h1 = excluded.par_h1, par_h2 = excluded.par_h2, par_h3 = excluded.par_h3, par_h4 = excluded.par_h4,
+    par_h5 = excluded.par_h5, par_h6 = excluded.par_h6, par_h7 = excluded.par_h7, par_h8 = excluded.par_h8,
+    par_h9 = excluded.par_h9, par_h10 = excluded.par_h10, par_h11 = excluded.par_h11, par_h12 = excluded.par_h12,
+    par_h13 = excluded.par_h13, par_h14 = excluded.par_h14, par_h15 = excluded.par_h15, par_h16 = excluded.par_h16,
+    par_h17 = excluded.par_h17, par_h18 = excluded.par_h18,
+    origen = 'datagolf',
+    actualizado_en = now();
+end;
+$$;
+revoke all on function public.actualizar_par_biblioteca_desde_datagolf(text, text, smallint[]) from public;
+-- A propósito, sin "grant execute ... to authenticated" (mismo motivo que
+-- actualizar_par_biblioteca_desde_espn): solo la llama la ruta de
+-- sincronización, con la clave de servicio.
 
 -- ============================================================================
 -- ALIAS DE NOMBRES DE JUGADOR (nuevo, 01/10)

@@ -2,15 +2,24 @@ import { NextRequest, NextResponse } from 'next/server';
 import { crearClienteAdmin } from '@/lib/server/supabaseAdmin';
 import { normalizarNombre } from '@/lib/nombreMatch';
 import { obtenerLeaderboardEspn, obtenerHoyosJugadorEspn, conConcurrenciaLimitada, type EspnTour } from '@/lib/espnGolf';
+import {
+  obtenerEnJuegoDataGolfParseado,
+  obtenerParesPorCampoDataGolf,
+  obtenerNombresCampoDataGolf,
+  startHoleDesdeEndHole,
+  type DataGolfTour,
+} from '@/lib/dataGolf';
 import { tipoResultadoHoyo } from '@/lib/golfScoring';
 
 // Biblioteca de pares de campo (01/10, pedido de Iñi: "si yo lo he puesto a
 // mano, pues coges el de a mano, y si no, cuando actualicemos la extracción
 // de ESPN, que nos traiga también los pares de cada hoyo") — ver el bloque
 // "BIBLIOTECA DE PARES DE CAMPO DE GOLF" en drafters-schema.sql para el
-// diseño completo. Aquí solo se rellena sola, nunca se lee para calcular
-// nada todavía (eso le toca a la futura integración de Data Golf, que
-// reconstruirá el hoyo a hoyo a partir del par guardado aquí).
+// diseño completo. Aquí se rellena sola a partir de lo que YA se ha
+// acumulado en resultados_golf_hoyo (hace falta que algún jugador haya
+// completado cada uno de los 18 hoyos). La rama de Data Golf (más abajo)
+// NO usa esta función: Data Golf da el par de los 18 hoyos de golpe, desde
+// el principio del torneo, sin tener que esperar a que se acumule nada.
 async function rellenarBibliotecaDesdeEspn(admin: ReturnType<typeof crearClienteAdmin>, competicion: string, campoIds: Set<string | null>) {
   for (const campoId of campoIds) {
     if (!campoId) continue; // torneo de un solo campo sin id (ESPN no siempre lo da) — nada que vincular a un nombre
@@ -94,6 +103,325 @@ async function estaAutorizado(req: NextRequest, admin: ReturnType<typeof crearCl
   return !!perfil && perfil.rol === 'admin';
 }
 
+/** Rama ESPN — lógica original de esta ruta (28/09), sin cambios de
+ * comportamiento: solo se ha movido a su propia función para poder convivir
+ * con la rama de Data Golf de más abajo. Muta `resultado` directamente (en
+ * vez de devolverlo) para que el error parcial se vea igual que antes si
+ * falla a mitad de camino. */
+async function procesarTorneoEspn(
+  admin: ReturnType<typeof crearClienteAdmin>,
+  torneo: { id: string; competicion: string; tour: EspnTour; espnEventId: string; temporada: number },
+  aliasPorNombreOrigen: Map<string, string>,
+  resultado: ResultadoTorneo
+): Promise<void> {
+  const { data: jugadoresData, error: jugadoresError } = await admin
+    .from('jugadores')
+    .select('id, nombre, resultado_en_vivo_thru')
+    .eq('deporte', 'golf')
+    .eq('competicion', torneo.competicion);
+
+  if (jugadoresError) throw new Error(`No se han podido leer los jugadores de "${torneo.competicion}": ${jugadoresError.message}`);
+
+  const jugadores = (jugadoresData as { id: string; nombre: string; resultado_en_vivo_thru: number | null }[]) ?? [];
+  resultado.jugadoresEnCampo = jugadores.length;
+
+  const jugadorPorNombre = new Map(jugadores.map((j) => [normalizarNombre(j.nombre), j]));
+
+  const competidores = await obtenerLeaderboardEspn(torneo.tour, torneo.espnEventId);
+
+  // CAMBIO 01/10 (tercera vuelta — aviso de Iñi: "null value in column
+  // 'nombre' of relation 'jugadores' violates not-null constraint"):
+  // el upsert de más abajo solo mandaba el id y los campos de
+  // resultado en vivo, dando por hecho que como el id ya existía sería
+  // un UPDATE sin más. Pero PostgREST traduce upsert(...) en
+  // "INSERT ... ON CONFLICT (id) DO UPDATE SET ...", y Postgres exige
+  // que el INSERT que construye por dentro cumpla ya las columnas
+  // obligatorias (nombre/deporte/competicion, sin valor por defecto)
+  // ANTES de llegar a comprobar el conflicto de id — aunque el
+  // resultado final vaya a ser un simple UPDATE. Es exactamente el
+  // mismo fallo, en el mismo sitio (un upsert con columnas parciales),
+  // que ya se corrigió para fútbol el 25/09 (ver sección 11.11 de
+  // DRAFTERS_Arquitectura_Tecnica.md) — aquí no se había aplicado
+  // porque esta ruta es más reciente. Arreglado incluyendo también esos
+  // tres campos (ya los teníamos en memoria, no hace falta otra
+  // consulta) en cada fila del upsert.
+  const actualizacionesJugadores: {
+    id: string;
+    nombre: string;
+    deporte: 'golf';
+    competicion: string;
+    resultado_en_vivo_total: number | null;
+    resultado_en_vivo_thru: number | null;
+    resultado_en_vivo_ronda: number | null;
+    resultado_en_vivo_posicion: string | null;
+    resultado_en_vivo_actualizado_en: string;
+  }[] = [];
+
+  const paraHoyoAHoyo: { jugadorId: string; espnPlayerId: string; thruAnterior: number | null }[] = [];
+
+  const ahora = new Date().toISOString();
+
+  for (const c of competidores) {
+    const nombreNormOrigen = normalizarNombre(c.nombre);
+    // 1. Coincidencia exacta tras normalizar. 2. Si no, alias guardado
+    // a mano por Iñi desde /admin/resultados-golf (ver más arriba).
+    const jugador = jugadorPorNombre.get(nombreNormOrigen) ?? (() => {
+      const destino = aliasPorNombreOrigen.get(nombreNormOrigen);
+      return destino ? jugadorPorNombre.get(destino) : undefined;
+    })();
+    if (!jugador) {
+      resultado.nombresSinEmparejar.push(c.nombre);
+      continue;
+    }
+    resultado.jugadoresEmparejados += 1;
+
+    actualizacionesJugadores.push({
+      id: jugador.id,
+      nombre: jugador.nombre,
+      deporte: 'golf',
+      competicion: torneo.competicion,
+      resultado_en_vivo_total: c.totalVsPar,
+      resultado_en_vivo_thru: c.thru,
+      resultado_en_vivo_ronda: c.ronda,
+      resultado_en_vivo_posicion: c.posicion,
+      resultado_en_vivo_actualizado_en: ahora,
+    });
+
+    // Solo se pide el hoyo a hoyo si ha avanzado desde la última vez
+    // (o si es la primera vez que se le ve con un "thru" real) — así
+    // no se gasta una llamada por jugador en cada ciclo, solo en los
+    // que de verdad han jugado algo nuevo desde el ciclo anterior.
+    const avanzo = c.thru !== null && (jugador.resultado_en_vivo_thru === null || c.thru > jugador.resultado_en_vivo_thru);
+    if (avanzo) {
+      paraHoyoAHoyo.push({ jugadorId: jugador.id, espnPlayerId: c.espnPlayerId, thruAnterior: jugador.resultado_en_vivo_thru });
+    }
+  }
+
+  if (actualizacionesJugadores.length > 0) {
+    const { error: upsertError } = await admin.from('jugadores').upsert(actualizacionesJugadores, { onConflict: 'id' });
+    if (upsertError) throw new Error(`No se ha podido guardar el resultado en vivo: ${upsertError.message}`);
+  }
+
+  if (paraHoyoAHoyo.length > 0) {
+    const filasHoyo = await conConcurrenciaLimitada(paraHoyoAHoyo, CONCURRENCIA_HOYOS, async (item) => {
+      try {
+        const hoyos = await obtenerHoyosJugadorEspn(torneo.tour, torneo.espnEventId, torneo.temporada, item.espnPlayerId);
+        return hoyos.map((h) => ({
+          jugador_id: item.jugadorId,
+          ronda: h.ronda,
+          hoyo: h.hoyo,
+          par: h.par,
+          golpes: h.golpes,
+          campo_id: h.campoId,
+          tipo_resultado: tipoResultadoHoyo(h.golpes, h.par),
+          actualizado_en: ahora,
+        }));
+      } catch {
+        // Un jugador suelto que falle (nombre no encontrado en
+        // playersummary, respuesta rara, etc.) no debe tirar abajo el
+        // resto del ciclo.
+        return [];
+      }
+    });
+
+    const todasLasFilas = filasHoyo.flat();
+    if (todasLasFilas.length > 0) {
+      const { error: hoyosError } = await admin
+        .from('resultados_golf_hoyo')
+        .upsert(todasLasFilas, { onConflict: 'jugador_id,ronda,hoyo' });
+      if (hoyosError) throw new Error(`No se ha podido guardar el hoyo a hoyo: ${hoyosError.message}`);
+      resultado.hoyosActualizados = todasLasFilas.length;
+
+      // Con el hoyo a hoyo ya guardado, de paso se intenta rellenar sola
+      // la biblioteca de pares de campo para los campos de este ciclo
+      // que ya tengan nombre puesto — nunca pisa un campo cargado a mano.
+      const campoIdsEsteCiclo = new Set(todasLasFilas.map((f) => f.campo_id));
+      await rellenarBibliotecaDesdeEspn(admin, torneo.competicion, campoIdsEsteCiclo);
+    }
+  }
+}
+
+// ============================================================================
+// Rama Data Golf (03/10, pedido explícito de Iñi) — el hoyo a hoyo NO viene
+// dado por la API (ver cabecera de drafters-schema.sql, bloque "INTEGRACIÓN
+// DATA GOLF"): se CALCULA a partir de cuánto cambia el resultado de SOLO la
+// ronda de hoy ("today") entre un ciclo de sincronización y el siguiente,
+// combinado con el hoyo exacto que se dedujo de "thru" + el hoyo de salida.
+// ============================================================================
+async function procesarTorneoDataGolf(
+  admin: ReturnType<typeof crearClienteAdmin>,
+  torneo: { id: string; competicion: string; tourDataGolf: DataGolfTour },
+  aliasPorNombreOrigen: Map<string, string>,
+  resultado: ResultadoTorneo
+): Promise<void> {
+  const { data: jugadoresData, error: jugadoresError } = await admin
+    .from('jugadores')
+    .select('id, nombre, resultado_en_vivo_total, resultado_en_vivo_thru, resultado_en_vivo_ronda, resultado_en_vivo_hoy')
+    .eq('deporte', 'golf')
+    .eq('competicion', torneo.competicion);
+
+  if (jugadoresError) throw new Error(`No se han podido leer los jugadores de "${torneo.competicion}": ${jugadoresError.message}`);
+
+  const jugadores =
+    (jugadoresData as {
+      id: string;
+      nombre: string;
+      resultado_en_vivo_total: number | null;
+      resultado_en_vivo_thru: number | null;
+      resultado_en_vivo_ronda: number | null;
+      resultado_en_vivo_hoy: number | null;
+    }[]) ?? [];
+  resultado.jugadoresEnCampo = jugadores.length;
+
+  const jugadorPorNombre = new Map(jugadores.map((j) => [normalizarNombre(j.nombre), j]));
+
+  const { jugadores: enJuego, rondaActual } = await obtenerEnJuegoDataGolfParseado(torneo.tourDataGolf);
+
+  // El par de cada hoyo, por campo — hace falta la ronda en curso para
+  // pedirlo (preds/live-hole-stats pide un número de ronda), pero el par en
+  // sí es fijo durante todo el torneo. Si todavía no se sabe la ronda
+  // actual (torneo recién empezado, antes del primer tee time), se pide la
+  // ronda 1 como mejor opción por defecto.
+  const paresPorCampo = await obtenerParesPorCampoDataGolf(torneo.tourDataGolf, (String(rondaActual ?? 1) as '1' | '2' | '3' | '4'));
+
+  // Nombre real de cada campo (Data Golf SÍ lo da, a diferencia de ESPN) —
+  // se guarda en campos_golf_live sin que el admin tenga que escribir nada
+  // (ver el comentario de esa tabla en drafters-schema.sql).
+  let nombresPorCampo: Map<string, string>;
+  try {
+    nombresPorCampo = await obtenerNombresCampoDataGolf(torneo.tourDataGolf);
+  } catch {
+    nombresPorCampo = new Map(); // si falla, se sigue sin nombre — nunca debe tirar abajo el resto del ciclo
+  }
+  if (nombresPorCampo.size > 0) {
+    const filasCampo = Array.from(nombresPorCampo.entries()).map(([campo_id, nombre]) => ({
+      competicion: torneo.competicion,
+      campo_id,
+      nombre,
+    }));
+    await admin.from('campos_golf_live').upsert(filasCampo, { onConflict: 'competicion,campo_id' });
+  }
+
+  const actualizacionesJugadores: {
+    id: string;
+    nombre: string;
+    deporte: 'golf';
+    competicion: string;
+    resultado_en_vivo_total: number | null;
+    resultado_en_vivo_thru: number | null;
+    resultado_en_vivo_ronda: number | null;
+    resultado_en_vivo_posicion: string | null;
+    resultado_en_vivo_hoy: number | null;
+    resultado_en_vivo_actualizado_en: string;
+  }[] = [];
+
+  const filasHoyo: {
+    jugador_id: string;
+    ronda: number;
+    hoyo: number;
+    par: number;
+    golpes: number;
+    campo_id: string | null;
+    tipo_resultado: string;
+    actualizado_en: string;
+  }[] = [];
+
+  const ahora = new Date().toISOString();
+
+  for (const c of enJuego) {
+    const nombreNormOrigen = normalizarNombre(c.nombre);
+    // 1. Coincidencia exacta tras normalizar. 2. Si no, alias guardado a
+    // mano por Iñi desde /admin/resultados-golf (misma tabla que ESPN —
+    // alias_nombres_jugador no distingue de qué fuente viene el nombre de
+    // origen).
+    const jugador = jugadorPorNombre.get(nombreNormOrigen) ?? (() => {
+      const destino = aliasPorNombreOrigen.get(nombreNormOrigen);
+      return destino ? jugadorPorNombre.get(destino) : undefined;
+    })();
+    if (!jugador) {
+      resultado.nombresSinEmparejar.push(c.nombre);
+      continue;
+    }
+    resultado.jugadoresEmparejados += 1;
+
+    actualizacionesJugadores.push({
+      id: jugador.id,
+      nombre: jugador.nombre,
+      deporte: 'golf',
+      competicion: torneo.competicion,
+      resultado_en_vivo_total: c.resultadoTotal,
+      resultado_en_vivo_thru: c.thru,
+      resultado_en_vivo_ronda: c.ronda,
+      resultado_en_vivo_posicion: c.posicion,
+      resultado_en_vivo_hoy: c.resultadoHoy,
+      resultado_en_vivo_actualizado_en: ahora,
+    });
+
+    // Intento de atribuir el hoyo jugado desde el último ciclo — ver la
+    // cabecera de esta función y el bloque "INTEGRACIÓN DATA GOLF" en
+    // drafters-schema.sql para las condiciones exactas. Cualquier cosa que
+    // no encaje EXACTAMENTE con "se ha completado un único hoyo nuevo,
+    // dentro de la misma ronda, con datos previos fiables" se descarta sin
+    // atribuir ningún hoyo (pero el estado del jugador se guarda igual,
+    // arriba, para poder comparar en el siguiente ciclo).
+    const mismaRonda = c.ronda !== null && jugador.resultado_en_vivo_ronda !== null && c.ronda === jugador.resultado_en_vivo_ronda;
+    if (!mismaRonda) continue;
+
+    const thruAnterior = jugador.resultado_en_vivo_thru;
+    const hoyAnterior = jugador.resultado_en_vivo_hoy;
+    if (c.thru === null || thruAnterior === null || c.resultadoHoy === null || hoyAnterior === null) continue;
+
+    const deltaThru = c.thru - thruAnterior;
+    if (deltaThru !== 1) continue; // 0 (nada nuevo) o 2+ (no se puede repartir sin inventar datos) — se descarta
+
+    const startHole = startHoleDesdeEndHole(c.endHole);
+    if (startHole === null) continue; // end_hole no era ni 9 ni 18 — formato inesperado, mejor no arriesgar
+
+    const hoyoCompletado = ((startHole - 1 + c.thru - 1) % 18) + 1;
+    const pares = c.courseCode ? paresPorCampo.get(c.courseCode) : undefined;
+    const par = pares ? pares[hoyoCompletado - 1] : null;
+    if (par === null || par === undefined) continue; // todavía no se sabe el par de ESE hoyo concreto
+
+    const golpes = par + (c.resultadoHoy - hoyAnterior);
+    filasHoyo.push({
+      jugador_id: jugador.id,
+      ronda: c.ronda as number,
+      hoyo: hoyoCompletado,
+      par,
+      golpes,
+      campo_id: c.courseCode,
+      tipo_resultado: tipoResultadoHoyo(golpes, par),
+      actualizado_en: ahora,
+    });
+  }
+
+  if (actualizacionesJugadores.length > 0) {
+    const { error: upsertError } = await admin.from('jugadores').upsert(actualizacionesJugadores, { onConflict: 'id' });
+    if (upsertError) throw new Error(`No se ha podido guardar el resultado en vivo: ${upsertError.message}`);
+  }
+
+  if (filasHoyo.length > 0) {
+    const { error: hoyosError } = await admin.from('resultados_golf_hoyo').upsert(filasHoyo, { onConflict: 'jugador_id,ronda,hoyo' });
+    if (hoyosError) throw new Error(`No se ha podido guardar el hoyo a hoyo calculado: ${hoyosError.message}`);
+    resultado.hoyosActualizados = filasHoyo.length;
+  }
+
+  // A diferencia de ESPN, aquí el par de los 18 hoyos de un campo puede
+  // conocerse de golpe (sin esperar a que ningún jugador los haya jugado
+  // todos) — en cuanto paresPorCampo tiene los 18 completos para un campo
+  // ya nombrado, se guarda directo en la biblioteca.
+  for (const [campoId, pares] of paresPorCampo) {
+    if (pares.length !== 18 || pares.some((p) => p === null)) continue;
+    const nombre = nombresPorCampo.get(campoId);
+    if (!nombre) continue;
+    await admin.rpc('actualizar_par_biblioteca_desde_datagolf', {
+      p_nombre: nombre,
+      p_nombre_normalizado: normalizarNombre(nombre),
+      p_pares: pares,
+    });
+  }
+}
+
 export async function POST(req: NextRequest) {
   let admin;
   try {
@@ -114,9 +442,11 @@ export async function POST(req: NextRequest) {
   const torneos = (torneosData as {
     id: string;
     competicion: string;
-    tour: EspnTour;
-    espn_event_id: string;
-    temporada: number;
+    fuente_datos: 'espn' | 'datagolf';
+    tour: EspnTour | null;
+    espn_event_id: string | null;
+    temporada: number | null;
+    tour_datagolf: DataGolfTour | null;
   }[]) ?? [];
 
   const resultados: ResultadoTorneo[] = [];
@@ -149,134 +479,31 @@ export async function POST(req: NextRequest) {
     };
 
     try {
-      const { data: jugadoresData, error: jugadoresError } = await admin
-        .from('jugadores')
-        .select('id, nombre, resultado_en_vivo_thru')
-        .eq('deporte', 'golf')
-        .eq('competicion', torneo.competicion);
-
-      if (jugadoresError) throw new Error(`No se han podido leer los jugadores de "${torneo.competicion}": ${jugadoresError.message}`);
-
-      const jugadores = (jugadoresData as { id: string; nombre: string; resultado_en_vivo_thru: number | null }[]) ?? [];
-      resultado.jugadoresEnCampo = jugadores.length;
-
-      const jugadorPorNombre = new Map(jugadores.map((j) => [normalizarNombre(j.nombre), j]));
-
-      const competidores = await obtenerLeaderboardEspn(torneo.tour, torneo.espn_event_id);
-
-      // CAMBIO 01/10 (tercera vuelta — aviso de Iñi: "null value in column
-      // 'nombre' of relation 'jugadores' violates not-null constraint"):
-      // el upsert de más abajo solo mandaba el id y los campos de
-      // resultado en vivo, dando por hecho que como el id ya existía sería
-      // un UPDATE sin más. Pero PostgREST traduce upsert(...) en
-      // "INSERT ... ON CONFLICT (id) DO UPDATE SET ...", y Postgres exige
-      // que el INSERT que construye por dentro cumpla ya las columnas
-      // obligatorias (nombre/deporte/competicion, sin valor por defecto)
-      // ANTES de llegar a comprobar el conflicto de id — aunque el
-      // resultado final vaya a ser un simple UPDATE. Es exactamente el
-      // mismo fallo, en el mismo sitio (un upsert con columnas parciales),
-      // que ya se corrigió para fútbol el 25/09 (ver sección 11.11 de
-      // DRAFTERS_Arquitectura_Tecnica.md) — aquí no se había aplicado
-      // porque esta ruta es más reciente. Arreglado incluyendo también esos
-      // tres campos (ya los teníamos en memoria, no hace falta otra
-      // consulta) en cada fila del upsert.
-      const actualizacionesJugadores: {
-        id: string;
-        nombre: string;
-        deporte: 'golf';
-        competicion: string;
-        resultado_en_vivo_total: number | null;
-        resultado_en_vivo_thru: number | null;
-        resultado_en_vivo_ronda: number | null;
-        resultado_en_vivo_posicion: string | null;
-        resultado_en_vivo_actualizado_en: string;
-      }[] = [];
-
-      const paraHoyoAHoyo: { jugadorId: string; espnPlayerId: string; thruAnterior: number | null }[] = [];
-
-      const ahora = new Date().toISOString();
-
-      for (const c of competidores) {
-        const nombreNormOrigen = normalizarNombre(c.nombre);
-        // 1. Coincidencia exacta tras normalizar. 2. Si no, alias guardado
-        // a mano por Iñi desde /admin/resultados-golf (ver más arriba).
-        const jugador = jugadorPorNombre.get(nombreNormOrigen) ?? (() => {
-          const destino = aliasPorNombreOrigen.get(nombreNormOrigen);
-          return destino ? jugadorPorNombre.get(destino) : undefined;
-        })();
-        if (!jugador) {
-          resultado.nombresSinEmparejar.push(c.nombre);
-          continue;
+      if (torneo.fuente_datos === 'datagolf') {
+        if (!torneo.tour_datagolf) throw new Error('Torneo marcado como fuente_datos=datagolf sin tour_datagolf.');
+        await procesarTorneoDataGolf(
+          admin,
+          { id: torneo.id, competicion: torneo.competicion, tourDataGolf: torneo.tour_datagolf },
+          aliasPorNombreOrigen,
+          resultado
+        );
+      } else {
+        if (!torneo.tour || !torneo.espn_event_id || torneo.temporada === null) {
+          throw new Error('Torneo marcado como fuente_datos=espn sin tour/espn_event_id/temporada.');
         }
-        resultado.jugadoresEmparejados += 1;
-
-        actualizacionesJugadores.push({
-          id: jugador.id,
-          nombre: jugador.nombre,
-          deporte: 'golf',
-          competicion: torneo.competicion,
-          resultado_en_vivo_total: c.totalVsPar,
-          resultado_en_vivo_thru: c.thru,
-          resultado_en_vivo_ronda: c.ronda,
-          resultado_en_vivo_posicion: c.posicion,
-          resultado_en_vivo_actualizado_en: ahora,
-        });
-
-        // Solo se pide el hoyo a hoyo si ha avanzado desde la última vez
-        // (o si es la primera vez que se le ve con un "thru" real) — así
-        // no se gasta una llamada por jugador en cada ciclo, solo en los
-        // que de verdad han jugado algo nuevo desde el ciclo anterior.
-        const avanzo = c.thru !== null && (jugador.resultado_en_vivo_thru === null || c.thru > jugador.resultado_en_vivo_thru);
-        if (avanzo) {
-          paraHoyoAHoyo.push({ jugadorId: jugador.id, espnPlayerId: c.espnPlayerId, thruAnterior: jugador.resultado_en_vivo_thru });
-        }
-      }
-
-      if (actualizacionesJugadores.length > 0) {
-        const { error: upsertError } = await admin.from('jugadores').upsert(actualizacionesJugadores, { onConflict: 'id' });
-        if (upsertError) throw new Error(`No se ha podido guardar el resultado en vivo: ${upsertError.message}`);
-      }
-
-      if (paraHoyoAHoyo.length > 0) {
-        const filasHoyo = await conConcurrenciaLimitada(paraHoyoAHoyo, CONCURRENCIA_HOYOS, async (item) => {
-          try {
-            const hoyos = await obtenerHoyosJugadorEspn(torneo.tour, torneo.espn_event_id, torneo.temporada, item.espnPlayerId);
-            return hoyos.map((h) => ({
-              jugador_id: item.jugadorId,
-              ronda: h.ronda,
-              hoyo: h.hoyo,
-              par: h.par,
-              golpes: h.golpes,
-              campo_id: h.campoId,
-              tipo_resultado: tipoResultadoHoyo(h.golpes, h.par),
-              actualizado_en: ahora,
-            }));
-          } catch {
-            // Un jugador suelto que falle (nombre no encontrado en
-            // playersummary, respuesta rara, etc.) no debe tirar abajo el
-            // resto del ciclo.
-            return [];
-          }
-        });
-
-        const todasLasFilas = filasHoyo.flat();
-        if (todasLasFilas.length > 0) {
-          const { error: hoyosError } = await admin
-            .from('resultados_golf_hoyo')
-            .upsert(todasLasFilas, { onConflict: 'jugador_id,ronda,hoyo' });
-          if (hoyosError) throw new Error(`No se ha podido guardar el hoyo a hoyo: ${hoyosError.message}`);
-          resultado.hoyosActualizados = todasLasFilas.length;
-
-          // Con el hoyo a hoyo ya guardado, de paso se intenta rellenar sola
-          // la biblioteca de pares de campo para los campos de este ciclo
-          // que ya tengan nombre puesto — nunca pisa un campo cargado a mano.
-          const campoIdsEsteCiclo = new Set(todasLasFilas.map((f) => f.campo_id));
-          await rellenarBibliotecaDesdeEspn(admin, torneo.competicion, campoIdsEsteCiclo);
-        }
+        await procesarTorneoEspn(
+          admin,
+          { id: torneo.id, competicion: torneo.competicion, tour: torneo.tour, espnEventId: torneo.espn_event_id, temporada: torneo.temporada },
+          aliasPorNombreOrigen,
+          resultado
+        );
       }
 
       resultado.ok = true;
-      await admin.from('torneos_golf_live').update({ ultima_actualizacion: ahora, ultimo_error: null }).eq('id', torneo.id);
+      await admin
+        .from('torneos_golf_live')
+        .update({ ultima_actualizacion: new Date().toISOString(), ultimo_error: null })
+        .eq('id', torneo.id);
     } catch (err) {
       const mensaje = (err as Error).message;
       resultado.error = mensaje;

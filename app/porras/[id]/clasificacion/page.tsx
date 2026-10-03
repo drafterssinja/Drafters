@@ -31,10 +31,14 @@ import EstrellaFavorito from '@/components/EstrellaFavorito';
 // plantilla real de 5 jugadores de cada equipo inscrito
 // (equipos_porra_clasificacion()) y — desde el 28/09 — la puntuación en
 // vivo de verdad: `jugadores.resultado_en_vivo_*` y
-// `resultados_golf_hoyo` se rellenan solos cada minuto desde ESPN (ver
+// `resultados_golf_hoyo` se rellenan solos cada minuto, desde ESPN o desde
+// Data Golf según la fuente elegida para esa competición (ver
 // app/api/admin/actualizar-golf-en-vivo/route.ts y el admin
-// /admin/resultados-golf, donde se conecta cada competición con su torneo
-// de ESPN). Mientras un jugador no tenga ningún resultado todavía
+// /admin/resultados-golf, donde se conecta cada competición con su
+// torneo — CAMBIO 03/10: con Data Golf, el hoyo a hoyo no viene dado
+// directamente, se CALCULA a partir del resultado en vivo; esta pantalla
+// no necesita saberlo, pinta igual sea cual sea el origen del dato).
+// Mientras un jugador no tenga ningún resultado todavía
 // (torneo sin empezar, o su competición sin conectar en el admin) se ve
 // como "E" (par) — mismo placeholder de antes, pero ahora es el estado
 // real de "sin datos todavía", no un valor inventado. El botón "simular
