@@ -82,7 +82,7 @@ type JugadorRow = {
 type EquipoClasif = { equipoId: string; nombreEquipo: string | null; jugadores: string[]; createdAt: string };
 type HoyoRow = { ronda: number; hoyo: number; par: number; golpes: number; campo_id: string | null; tipo_resultado: TipoResultadoHoyo };
 
-type Vista = 'porra' | 'torneo' | 'premios';
+type Vista = 'porra' | 'torneo' | 'premios' | 'informacion';
 
 // Total de un equipo: suma de los totales (respecto al par) de sus 5
 // jugadores — a los que todavía no tienen resultado (no han salido, o su
@@ -603,6 +603,12 @@ export default function PorraClasificacionPage() {
             <button type="button" onClick={() => setVista('premios')} style={vistaPillStyle(vista === 'premios')}>
               Premios
             </button>
+            {/* Pestaña Información (nueva, 03/10, pedido de Iñi: "va a haber
+                gente que entre por primera vez y quiero que sepan cómo
+                funciona") — ver más abajo, vista === 'informacion'. */}
+            <button type="button" onClick={() => setVista('informacion')} style={vistaPillStyle(vista === 'informacion')}>
+              Información
+            </button>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, alignSelf: 'flex-start', position: 'relative' }}>
@@ -1079,13 +1085,108 @@ export default function PorraClasificacionPage() {
               );
             })()}
 
+          {/* Pestaña Información (nueva, 03/10, pedido de Iñi): explica las
+              reglas para quien entra por primera vez — pensada de cara a la
+              porra grande de la semana que viene. El bono de podio (con el
+              ranking real en vivo) va al final a propósito, "para que no
+              moleste" el resto de la explicación. */}
+          {vista === 'informacion' &&
+            (() => {
+              const jugadoresPodio = jugadores
+                .filter((j) => (mapaBonosPodio.get(j.id) ?? 0) !== 0)
+                .map((j) => ({ jugador: j, bono: mapaBonosPodio.get(j.id) as number }))
+                .sort((a, b) => a.bono - b.bono);
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <div style={{ background: S.PANEL, border: `1px solid ${S.BORDER}`, borderRadius: 12, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <h2 style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 17, color: S.TEXT, margin: 0 }}>Cómo funciona esta porra</h2>
+
+                    <div>
+                      <h3 style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#3DDC84', margin: '0 0 3px' }}>
+                        Puntuación
+                      </h3>
+                      <p style={{ fontSize: 12.5, lineHeight: 1.55, color: S.MUTED_2, margin: 0 }}>
+                        El resultado de cada equipo es la suma de los golpes respecto al par de sus 5 jugadores: un birdie resta 1, un eagle resta 2, un bogey suma 1, un doble bogey
+                        o peor suma 2 — igual que en golf de toda la vida. Gana quien tenga el resultado más bajo.
+                      </p>
+                    </div>
+
+                    <div>
+                      <h3 style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#3DDC84', margin: '0 0 3px' }}>
+                        Empates entre equipos
+                      </h3>
+                      <p style={{ fontSize: 12.5, lineHeight: 1.55, color: S.MUTED_2, margin: 0 }}>
+                        Si dos o más equipos empatan en la clasificación final, <strong style={{ color: S.TEXT }}>no hay desempate</strong>: el premio de esas posiciones se reparte a
+                        partes iguales entre los equipos empatados.
+                      </p>
+                    </div>
+
+                    <div>
+                      <h3 style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#3DDC84', margin: '0 0 3px' }}>
+                        Pago de la inscripción
+                      </h3>
+                      <p style={{ fontSize: 12.5, lineHeight: 1.55, color: S.MUTED_2, margin: 0 }}>
+                        De los equipos que no se haya recibido el pago, no contarán.
+                      </p>
+                    </div>
+
+                    <div>
+                      <h3 style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#3DDC84', margin: '0 0 3px' }}>
+                        Cómo se paga el premio
+                      </h3>
+                      <p style={{ fontSize: 12.5, lineHeight: 1.55, color: S.MUTED_2, margin: 0 }}>
+                        Si tu equipo queda en un puesto premiado, el importe se refleja como saldo en tu cuenta de Drafters — es dinero ficticio, dentro de la propia plataforma. El
+                        pago real te lo hace Iñi aparte, en función de ese resultado.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Bono de podio al final, con el ranking real en vivo. */}
+                  <div style={{ background: S.PANEL, border: `1px solid ${S.BORDER}`, borderRadius: 12, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <h3 style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#3DDC84', margin: 0 }}>
+                      Bono de podio
+                    </h3>
+                    <p style={{ fontSize: 12.5, lineHeight: 1.55, color: S.MUTED_2, margin: 0 }}>
+                      Además de su propio resultado, el equipo que tenga entre sus jugadores al <strong style={{ color: S.TEXT }}>1º, 2º o 3º clasificado real del torneo</strong> (no
+                      de la porra) recibe una bonificación: <strong style={{ color: '#3DDC84' }}>−10</strong> al líder, <strong style={{ color: '#3DDC84' }}>−5</strong> al segundo y{' '}
+                      <strong style={{ color: '#3DDC84' }}>−3</strong> al tercero — se sigue un ranking real del torneo, no de la porra. En caso de empate entre jugadores del
+                      torneo, se queda con la mejor posición el de precio más bajo; si el precio también coincide, el bono se reparte entre los empatados.
+                    </p>
+                    {jugadoresPodio.length === 0 ? (
+                      <p style={{ fontSize: 11.5, color: S.MUTED_3, margin: 0 }}>Todavía no hay ningún jugador en el podio real del torneo.</p>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {jugadoresPodio.map(({ jugador, bono }) => (
+                          <div
+                            key={jugador.id}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '8px 10px',
+                              background: 'rgba(61,220,132,0.06)',
+                              border: '1px solid rgba(61,220,132,0.25)',
+                              borderRadius: 8,
+                            }}
+                          >
+                            <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 13, color: S.TEXT }}>{jugador.nombre}</span>
+                            <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 13, color: '#3DDC84' }}>{bono}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
           {/* CAMBIO 03/10 (pedido de Iñi): este bloque de abajo del todo
               solo se usa en la pestaña Porra (y Premios, por si acaso) — en
               la pestaña Torneo, los resultados del jugador con foco se
               pintan justo debajo de "equipos que lo tienen" (ver más
               arriba, tablaResultadosJugador dentro de campoOrdenado.map),
-              no aquí abajo. */}
-          {jugadorFoco && vista !== 'torneo' && (
+              y en Información no hay ningún jugador seleccionable. */}
+          {jugadorFoco && vista !== 'torneo' && vista !== 'informacion' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: 14 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, color: S.TEXT }}>{jugadorFoco.nombre} · resultados</span>

@@ -1,4 +1,3 @@
-import type { GrupoPorra } from '@/lib/porraGrupos';
 
 // ============================================================================
 // PUNTUACIÓN DE LA PORRA CLÁSICA DE GOLF — golpes respecto al par, no puntos
@@ -91,47 +90,33 @@ export function colorGolfScore(golpesVsPar: GolpesVsPar): { fondo: string; texto
 // app/admin/pagos-pendientes/[tipo]/[id]/page.tsx).
 const BONO_PODIO_POR_PUESTO: Record<number, number> = { 1: -10, 2: -5, 3: -3 };
 
-// Reglas de empate (01/10, pedido explícito de Iñi, confirmado tras
-// preguntarle directamente por la dirección): "en caso de empate de esos
-// primero, segundo y tercero... el desempate... va a ser en función de...
-// si hay un jugador azul y uno verde, siempre va a ser el azul el que gane
-// al verde, y el verde va a ganar al amarillo... en caso de que haya grupo
-// morado, también. Y en caso de que los dos empatados sean del mismo
-// grupo... la resta de golpes se reparte entre los jugadores empatados."
+// Reglas de empate — CAMBIO 03/10 (pedido explícito de Iñi): el desempate
+// ya NO se decide por grupo de color, se decide por el VALOR del jugador
+// (jugadores.precio, el mismo precio que se carga al crear la porra). Antes
+// (01/10) era por grupo (morado > azul > verde > amarillo, "se premia la
+// sorpresa"); el criterio sigue siendo exactamente el mismo espíritu, solo
+// que aplicado al precio: el jugador más BARATO de los empatados es el que
+// "menos se esperaba" llegar tan lejos, así que se queda con la posición
+// mejor, y el resto cae a la siguiente posición libre.
 //
 // Es decir: para decidir quién ocupa el 1º/2º/3er puesto de verdad cuando
 // dos o más jugadores empatan a golpes, NO se usa la posición "T1"/"T2" tal
-// cual la da ESPN (eso dejaría posiciones compartidas) — se calcula el
-// orden real a partir del resultado (resultado_en_vivo_total) y, en caso de
-// empate exacto:
-//   1. Si los empatados son de grupos de color distintos, gana el de PEOR
-//      grupo (Morado > Azul > Verde > Amarillo) — se premia la sorpresa: el
-//      que menos se esperaba llegar tan lejos se queda con la posición
-//      mejor, y el resto cae a la siguiente posición libre.
-//   2. Si los empatados son del mismo grupo de color, no hay más desempate
-//      posible: el bono de la posición (o posiciones, si el empate ocupa
-//      más de una) se reparte a partes iguales entre todos ellos — mismo
-//      criterio que ya usa el reparto de premios en euros para los empates
-//      (lib/repartoPremios.ts), aplicado aquí a golpes en vez de a euros.
-// El grupo 'espanoles' (que mezcla jugadores de cualquier tramo de ranking,
-// ver lib/porraGrupos.ts) no tiene un lugar claro en esta prioridad — Iñi
-// no lo mencionó al explicar esta regla. Mientras no se aclare, un empate
-// en el que participe un jugador 'espanoles' se trata como si fuera del
-// mismo grupo que el resto de empatados (se reparte), en vez de inventar un
-// orden de prioridad que nadie ha pedido.
-const PRIORIDAD_DESEMPATE_PODIO: Record<GrupoPorra, number> = {
-  morado: 4,
-  azul: 3,
-  verde: 2,
-  amarillo: 1,
-  espanoles: 0,
-};
-
+// cual la da la fuente de datos (eso dejaría posiciones compartidas) — se
+// calcula el orden real a partir del resultado (resultado_en_vivo_total) y,
+// en caso de empate exacto:
+//   1. Si los empatados tienen precios distintos, gana (se queda con la
+//      posición mejor) el de precio MÁS BAJO.
+//   2. Si los empatados tienen el mismo precio exacto, no hay más
+//      desempate posible: el bono de la posición (o posiciones, si el
+//      empate ocupa más de una) se reparte a partes iguales entre todos
+//      ellos — mismo criterio que ya usa el reparto de premios en euros
+//      para los empates (lib/repartoPremios.ts), aplicado aquí a golpes en
+//      vez de a euros.
 export type JugadorParaBonoPodio = {
   id: string;
   resultado_en_vivo_total: number | null;
   resultado_en_vivo_posicion: string | null;
-  grupo_porra: GrupoPorra | null;
+  precio: number;
 };
 
 // Corrección 02/10 (Iñi detectó, probando con la porra en marcha, que al
@@ -184,12 +169,16 @@ export function calcularBonosPodio(campo: JugadorParaBonoPodio[]): Map<string, n
       if (bono !== 0) bonos.set(bloque[0].id, bono);
       puesto += 1;
     } else {
-      // Empate real: se agrupa por prioridad de desempate (peor grupo
-      // primero) y se recorren los subgrupos en ese orden, consumiendo
-      // tantos puestos como jugadores tenga cada subgrupo.
+      // Empate real: se agrupa por precio (el más barato primero — "el que
+      // menos se esperaba llegar tan lejos") y se recorren los subgrupos en
+      // ese orden, consumiendo tantos puestos como jugadores tenga cada
+      // subgrupo. La clave de agrupación es el precio en negativo para
+      // poder reutilizar el mismo "de mayor a menor" de siempre: precio más
+      // bajo -> clave más alta -> se procesa primero -> se queda con la
+      // posición mejor.
       const porPrioridad = new Map<number, JugadorParaBonoPodio[]>();
       bloque.forEach((j) => {
-        const prioridad = j.grupo_porra ? PRIORIDAD_DESEMPATE_PODIO[j.grupo_porra] : 0;
+        const prioridad = -j.precio;
         const lista = porPrioridad.get(prioridad) ?? [];
         lista.push(j);
         porPrioridad.set(prioridad, lista);
