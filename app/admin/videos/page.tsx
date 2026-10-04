@@ -111,7 +111,7 @@ export default function AdminPublicidadPage() {
   const [errorSubida, setErrorSubida] = useState<string | null>(null);
 
   async function cargarVideosYEstadisticas() {
-    const [{ data: videosData, error: videosError }, { data: statsData }] = await Promise.all([
+    const [{ data: videosData, error: videosError }, { data: statsData, error: statsError }] = await Promise.all([
       supabase.from('anuncios_video').select('*').order('creado_at', { ascending: false }),
       supabase.rpc('estadisticas_anuncios_video'),
     ]);
@@ -120,6 +120,20 @@ export default function AdminPublicidadPage() {
       return;
     }
     setVideos((videosData as VideoRow[]) ?? []);
+    // FIX 03/10 (aviso de Iñi: "se han perdido las estadísticas, está todo
+    // a 0 cuando llevaban 160 visualizaciones"): este error se descartaba
+    // en silencio — si la RPC fallaba por lo que fuera (lo más probable:
+    // el SQL con los clics nuevos todavía no se había vuelto a ejecutar en
+    // Supabase, o el caché de esquema de Supabase tardó en enterarse de la
+    // función nueva), `statsData` quedaba vacío y TODAS las cifras se
+    // veían a 0 — dando la falsa impresión de que las 160 visualizaciones
+    // de antes se habían borrado, cuando en realidad las filas siguen
+    // intactas en anuncios_video_reproducciones (esta función solo LEE esa
+    // tabla, nunca la toca). Ahora, si la RPC falla, se ve un aviso real en
+    // vez de dejar las cifras a 0 sin explicación.
+    if (statsError) {
+      setError(`No se han podido cargar las estadísticas de los vídeos: ${statsError.message}`);
+    }
     setEstadisticas(new Map(((statsData as EstadisticaVideo[]) ?? []).map((s) => [s.video_id, s])));
   }
 
