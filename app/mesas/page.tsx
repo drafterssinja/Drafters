@@ -82,6 +82,10 @@ function MesasPageInner() {
   const [misMesas, setMisMesas] = useState<EquipoMesaFila[]>([]);
   const [lesionMap, setLesionMap] = useState<Map<string, { nombre: string; lesionado: boolean }>>(new Map());
   const [cargando, setCargando] = useState(true);
+  // Maratones finalizados (04/10, corrección de Iñi): no se ven de primeras
+  // al entrar — se quedan plegados detrás de un desplegable, que empieza
+  // cerrado.
+  const [mostrarMaratonesFinalizados, setMostrarMaratonesFinalizados] = useState(false);
 
   useEffect(() => {
     let activo = true;
@@ -102,11 +106,14 @@ function MesasPageInner() {
           .select('id,nombre,competicion,deporte,tipo,aforo,buy_in,estado,fecha_limite_inscripcion')
           .neq('tipo', 'maraton')
           .neq('estado', 'finalizada'),
-        supabase
-          .from('salas')
-          .select('id,nombre,competicion,deporte,buy_in,estado,fecha_limite_inscripcion')
-          .eq('tipo', 'maraton')
-          .neq('estado', 'finalizada'),
+        // CAMBIO 04/10 (pedido de Iñi): a diferencia de la consulta de
+        // arriba (salasAbiertas — esa sí sigue excluyendo las finalizadas,
+        // porque solo se usa para contar "salas abiertas" y para "cierran
+        // pronto"), aquí NO se excluyen: los Maratones finalizados se
+        // quedan accesibles detrás de un desplegable que empieza cerrado
+        // (ver mostrarMaratonesFinalizados más abajo), con el botón
+        // "Clasificación final" en vez de "Clasificación en directo".
+        supabase.from('salas').select('id,nombre,competicion,deporte,buy_in,estado,fecha_limite_inscripcion').eq('tipo', 'maraton'),
         // inscritos_por_sala() es una función de base de datos (RPC) — hace
         // falta porque equipos/inscripciones tienen RLS que solo deja ver
         // las filas propias de cada usuario, pero el número de inscritos de
@@ -170,8 +177,10 @@ function MesasPageInner() {
     conteoPorDeporte[d] = salasAbiertas.filter((s) => s.deporte === d).length;
   });
 
+  // Activos primero, finalizados aparte (ver mostrarMaratonesFinalizados) —
+  // mismo criterio que porrasActivas/porrasFinalizadas en app/porras/page.tsx.
   const maratonesDelDeporte = maratones
-    .filter((m) => m.deporte === deporte)
+    .filter((m) => m.deporte === deporte && m.estado !== 'finalizada')
     .slice()
     .sort((a, b) => {
       const da = a.fecha_limite_inscripcion ? new Date(a.fecha_limite_inscripcion).getTime() : Infinity;
@@ -179,10 +188,121 @@ function MesasPageInner() {
       return da - db;
     });
 
+  const maratonesFinalizadosDelDeporte = maratones
+    .filter((m) => m.deporte === deporte && m.estado === 'finalizada')
+    .slice()
+    .sort((a, b) => {
+      const da = a.fecha_limite_inscripcion ? new Date(a.fecha_limite_inscripcion).getTime() : 0;
+      const db = b.fecha_limite_inscripcion ? new Date(b.fecha_limite_inscripcion).getTime() : 0;
+      return db - da;
+    });
+
   const cierranPronto = salasAbiertas
     .filter((s) => s.fecha_limite_inscripcion && closesAtLabel(s.fecha_limite_inscripcion))
     .sort((a, b) => new Date(a.fecha_limite_inscripcion!).getTime() - new Date(b.fecha_limite_inscripcion!).getTime())
     .slice(0, 6);
+
+  // Tarjeta de un Maratón (extraída a función — mismo motivo que
+  // tarjetaPorra() en app/porras/page.tsx: se usa tanto en la lista de
+  // activos como en la de finalizados, con el mismo diseño, cambiando solo
+  // el botón).
+  function tarjetaMaraton(m: MaratonFila) {
+    const signedUp = inscritosPorSala.get(m.id) ?? 0;
+    const estadoInfo = estadoSalaInfo(m.estado, null, signedUp);
+    const cierra = closesAtLabel(m.fecha_limite_inscripcion);
+    // Empezada (03/10, pedido de Iñi, mismo criterio que en
+    // app/porras/page.tsx y app/salas/page.tsx): la fecha
+    // límite ya ha pasado.
+    const empezada = !!m.fecha_limite_inscripcion && new Date(m.fecha_limite_inscripcion).getTime() <= Date.now();
+    const esFinalizado = m.estado === 'finalizada';
+    const mostrarBotonClasificacion = esFinalizado || (!cierra && empezada);
+    const textoBotonClasificacion = esFinalizado ? 'Clasificación final' : 'Clasificación en directo';
+    return (
+      <div
+        key={m.id}
+        onClick={() => router.push(`/salas/${m.id}`)}
+        style={{ background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8, cursor: 'pointer' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+          <span style={{ flex: 1, minWidth: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, color: S.TEXT }}>{m.nombre}</span>
+          {cierra && (
+            <span
+              style={{
+                flexShrink: 0,
+                fontFamily: "'Manrope', sans-serif",
+                fontWeight: 700,
+                fontSize: 11,
+                color: '#FF9F6E',
+                background: 'rgba(255,159,110,0.12)',
+                padding: '4px 8px',
+                borderRadius: 999,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Cierra el {cierra}
+            </span>
+          )}
+        </div>
+        {/* FIX 04/10 (mismo aviso de Iñi que en app/porras/page.tsx
+            — el botón se salía de la pantalla con nombres
+            largos de Maratón): se mueve a su propia fila, igual
+            que ya funcionaba bien en app/salas/page.tsx. */}
+        {mostrarBotonClasificacion && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                router.push(`/salas/${m.id}/clasificacion`);
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                fontFamily: "'Barlow Condensed', sans-serif",
+                fontWeight: 700,
+                fontSize: 11,
+                textTransform: 'uppercase',
+                letterSpacing: '0.03em',
+                color: '#FF7A45',
+                background: 'rgba(255,122,69,0.14)',
+                border: '1px solid rgba(255,122,69,0.45)',
+                borderRadius: 8,
+                padding: '6px 10px',
+                whiteSpace: 'nowrap',
+                cursor: 'pointer',
+              }}
+            >
+              <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#FF7A45', flexShrink: 0 }} />
+              {textoBotonClasificacion}
+            </button>
+          </div>
+        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span
+            style={{
+              fontFamily: "'Manrope', sans-serif",
+              fontWeight: 700,
+              fontSize: 10,
+              textTransform: 'uppercase',
+              letterSpacing: '0.04em',
+              color: '#F0B94D',
+              background: 'rgba(240,185,77,0.12)',
+              border: '1px solid rgba(240,185,77,0.3)',
+              borderRadius: 6,
+              padding: '3px 7px',
+            }}
+          >
+            {m.competicion}
+          </span>
+          <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.04em', color: S.MUTED_2, background: '#1B2420', border: '1px solid #22302B', borderRadius: 6, padding: '3px 7px' }}>
+            {formatEuros(m.buy_in)}
+          </span>
+          <span style={{ fontSize: 12, color: estadoInfo.color }}>{estadoInfo.label}</span>
+        </div>
+      </div>
+    );
+  }
 
   function lesionadoDe(eq: EquipoMesaFila): string | null {
     for (const id of eq.jugadores ?? []) {
@@ -466,100 +586,39 @@ function MesasPageInner() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {maratonesDelDeporte.length === 0 && <p style={{ fontSize: 13, color: S.MUTED_2 }}>No hay ningún Maratón abierto de {DEPORTE_LABELS[deporte].toLowerCase()} ahora mismo.</p>}
-              {maratonesDelDeporte.map((m) => {
-                const signedUp = inscritosPorSala.get(m.id) ?? 0;
-                const estadoInfo = estadoSalaInfo(m.estado, null, signedUp);
-                const cierra = closesAtLabel(m.fecha_limite_inscripcion);
-                // Empezada (03/10, pedido de Iñi, mismo criterio que en
-                // app/porras/page.tsx y app/salas/page.tsx): la fecha
-                // límite ya ha pasado.
-                const empezada = !!m.fecha_limite_inscripcion && new Date(m.fecha_limite_inscripcion).getTime() <= Date.now();
-                return (
-                  <div
-                    key={m.id}
-                    onClick={() => router.push(`/salas/${m.id}`)}
-                    style={{ background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8, cursor: 'pointer' }}
+              {maratonesDelDeporte.map((m) => tarjetaMaraton(m))}
+              {/* CAMBIO 04/10 (corrección de Iñi): al entrar, los Maratones
+                  finalizados NO se ven — se quedan detrás de un desplegable
+                  que empieza cerrado, con el botón "Clasificación final" en
+                  vez de "Clasificación en directo" — ver tarjetaMaraton()
+                  más arriba. */}
+              {maratonesFinalizadosDelDeporte.length > 0 && (
+                <div style={{ marginTop: 2, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <button
+                    type="button"
+                    onClick={() => setMostrarMaratonesFinalizados((v) => !v)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      alignSelf: 'flex-start',
+                      background: 'transparent',
+                      border: 'none',
+                      padding: 0,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.05em',
+                      color: S.MUTED_3,
+                      cursor: 'pointer',
+                    }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                      <span style={{ flex: 1, minWidth: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, color: S.TEXT }}>{m.nombre}</span>
-                      {cierra && (
-                        <span
-                          style={{
-                            flexShrink: 0,
-                            fontFamily: "'Manrope', sans-serif",
-                            fontWeight: 700,
-                            fontSize: 11,
-                            color: '#FF9F6E',
-                            background: 'rgba(255,159,110,0.12)',
-                            padding: '4px 8px',
-                            borderRadius: 999,
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          Cierra el {cierra}
-                        </span>
-                      )}
-                    </div>
-                    {/* FIX 04/10 (mismo aviso de Iñi que en app/porras/page.tsx
-                        — el botón se salía de la pantalla con nombres
-                        largos de Maratón): se mueve a su propia fila, igual
-                        que ya funcionaba bien en app/salas/page.tsx. */}
-                    {!cierra && empezada && (
-                      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            router.push(`/salas/${m.id}/clasificacion`);
-                          }}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 5,
-                            fontFamily: "'Barlow Condensed', sans-serif",
-                            fontWeight: 700,
-                            fontSize: 11,
-                            textTransform: 'uppercase',
-                            letterSpacing: '0.03em',
-                            color: '#FF7A45',
-                            background: 'rgba(255,122,69,0.14)',
-                            border: '1px solid rgba(255,122,69,0.45)',
-                            borderRadius: 8,
-                            padding: '6px 10px',
-                            whiteSpace: 'nowrap',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#FF7A45', flexShrink: 0 }} />
-                          Clasificación en directo
-                        </button>
-                      </div>
-                    )}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                      <span
-                        style={{
-                          fontFamily: "'Manrope', sans-serif",
-                          fontWeight: 700,
-                          fontSize: 10,
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.04em',
-                          color: '#F0B94D',
-                          background: 'rgba(240,185,77,0.12)',
-                          border: '1px solid rgba(240,185,77,0.3)',
-                          borderRadius: 6,
-                          padding: '3px 7px',
-                        }}
-                      >
-                        {m.competicion}
-                      </span>
-                      <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.04em', color: S.MUTED_2, background: '#1B2420', border: '1px solid #22302B', borderRadius: 6, padding: '3px 7px' }}>
-                        {formatEuros(m.buy_in)}
-                      </span>
-                      <span style={{ fontSize: 12, color: estadoInfo.color }}>{estadoInfo.label}</span>
-                    </div>
-                  </div>
-                );
-              })}
+                    <span style={{ fontSize: 10, transform: mostrarMaratonesFinalizados ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▶</span>
+                    Finalizados ({maratonesFinalizadosDelDeporte.length})
+                  </button>
+                  {mostrarMaratonesFinalizados && maratonesFinalizadosDelDeporte.map((m) => tarjetaMaraton(m))}
+                </div>
+              )}
             </div>
           </div>
 

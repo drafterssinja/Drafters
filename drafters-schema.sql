@@ -2959,6 +2959,38 @@ create policy "golf_jugadores_corte_admin_todo" on public.golf_jugadores_corte
 -- nunca se lee desde ninguna pantalla de usuario — lo único que un usuario
 -- ve es el resultado ya calculado en jugadores.resultado_en_vivo_total.
 
+-- Desglose día a día de la penalización (nuevo, 04/10 — segunda vuelta):
+-- Iñi pidió, además del resultado ya sumado, "indicar cuánto suman en cada
+-- vuelta" tanto en la tarjeta del jugador como en un número al lado de su
+-- nombre (igual que el bono de podio). golf_jugadores_corte de aquí arriba
+-- solo guarda el PUNTO DE PARTIDA (total_base/ronda_corte) — a propósito no
+-- tiene política de lectura pública —, así que hace falta una tabla nueva,
+-- sí legible por cualquier usuario logueado, con una fila por jugador y por
+-- ronda penalizada, con los golpes que se le suman ESE día en concreto
+-- (vuelta_más_alta_del_día + 1). Se recalcula cada ciclo en
+-- aplicarPenalizacionCorte() (route.ts) a la vez que se recalcula el total,
+-- así que si la vuelta más alta del día sube, este número sube también.
+create table if not exists public.golf_penalizacion_corte_dia (
+  jugador_id uuid not null references public.jugadores(id) on delete cascade,
+  ronda int not null,
+  golpes_sumados numeric not null,
+  actualizado_en timestamptz not null default now(),
+  primary key (jugador_id, ronda)
+);
+
+create index if not exists golf_penalizacion_corte_dia_jugador_idx on public.golf_penalizacion_corte_dia (jugador_id);
+
+alter table public.golf_penalizacion_corte_dia enable row level security;
+drop policy if exists "golf_penalizacion_corte_dia_select_publico" on public.golf_penalizacion_corte_dia;
+create policy "golf_penalizacion_corte_dia_select_publico" on public.golf_penalizacion_corte_dia
+  -- Lectura pública, mismo criterio que resultados_golf_hoyo: cualquier
+  -- usuario logueado tiene que poder ver, desde la clasificación en
+  -- directo, cuánto se le está sumando a un jugador cortado cada día.
+  for select using (true);
+drop policy if exists "golf_penalizacion_corte_dia_admin_todo" on public.golf_penalizacion_corte_dia;
+create policy "golf_penalizacion_corte_dia_admin_todo" on public.golf_penalizacion_corte_dia
+  for all using (public.es_admin()) with check (public.es_admin());
+
 -- "La vuelta más alta que se está produciendo" ese día, entre los jugadores
 -- que siguen compitiendo (ver sigueCompitiendo() — se excluye aquí también
 -- a cualquier otro CUT/WD/DQ/DNS/MDF, no solo para no contar dos veces a un

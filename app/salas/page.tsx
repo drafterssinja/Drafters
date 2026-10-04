@@ -68,6 +68,10 @@ function SalasPageInner() {
   const [inscritosPorSala, setInscritosPorSala] = useState<Map<string, number>>(new Map());
   const [perfil, setPerfil] = useState<Perfil | null>(null);
   const [cargando, setCargando] = useState(true);
+  // Finalizadas (04/10, corrección de Iñi): no se ven de primeras al
+  // entrar — se quedan plegadas detrás de un desplegable, que empieza
+  // cerrado.
+  const [mostrarFinalizadas, setMostrarFinalizadas] = useState(false);
 
   useEffect(() => {
     let activo = true;
@@ -83,11 +87,13 @@ function SalasPageInner() {
 
       const [{ data: perfilData }, { data: salasData }, { data: inscritosData }] = await Promise.all([
         supabase.from('perfiles').select('*').eq('id', session.user.id).single(),
-        supabase
-          .from('salas')
-          .select('id,nombre,competicion,deporte,tipo,aforo,buy_in,estado,fecha_limite_inscripcion')
-          .neq('tipo', 'maraton')
-          .neq('estado', 'finalizada'),
+        // CAMBIO 04/10 (pedido de Iñi): antes esta consulta excluía del
+        // todo las salas "finalizada" — ahora se traen todas y se separan
+        // client-side (ver salasFiltradas/salasFinalizadasDelDeporte más
+        // abajo), porque las finalizadas se quedan accesibles detrás de un
+        // desplegable que empieza cerrado, con el botón "Clasificación
+        // final" en vez de "Clasificación en directo".
+        supabase.from('salas').select('id,nombre,competicion,deporte,tipo,aforo,buy_in,estado,fecha_limite_inscripcion').neq('tipo', 'maraton'),
         // RPC (no una select directa): equipos/inscripciones tienen RLS que
         // solo deja ver las filas propias — el número de inscritos de cada
         // sala es agregado y público. Ver drafters-schema.sql.
@@ -111,7 +117,7 @@ function SalasPageInner() {
   }, [router]);
 
   const salasFiltradas = useMemo(() => {
-    let lista = salas.filter((s) => s.deporte === deporte);
+    let lista = salas.filter((s) => s.deporte === deporte && s.estado !== 'finalizada');
     if (tipo !== 'todas') lista = lista.filter((s) => s.tipo === tipo);
     if (buyin !== 'cualquiera') lista = lista.filter((s) => nivelBuyIn(s.buy_in) === buyin);
     if (plazas === 'libres') lista = lista.filter((s) => s.estado === 'abierta');
@@ -147,6 +153,17 @@ function SalasPageInner() {
     return conSignedUp;
   }, [salas, deporte, tipo, buyin, plazas, sortKey, sortAsc, inscritosPorSala]);
 
+  // Finalizadas de este deporte (04/10, corrección de Iñi): aparte del todo
+  // — no entran en el orden/filtro de arriba (no tendría sentido ordenarlas
+  // por "plazas libres" o filtrarlas por buy-in), solo se listan detrás del
+  // desplegable, de la más reciente a la más antigua.
+  const salasFinalizadasDelDeporte = useMemo(() => {
+    return salas
+      .filter((s) => s.deporte === deporte && s.estado === 'finalizada')
+      .map((s) => ({ ...s, signedUp: inscritosPorSala.get(s.id) ?? 0 }))
+      .sort((a, b) => new Date(b.fecha_limite_inscripcion ?? 0).getTime() - new Date(a.fecha_limite_inscripcion ?? 0).getTime());
+  }, [salas, deporte, inscritosPorSala]);
+
   function onSort(key: SortKey) {
     if (sortKey === key) setSortAsc((v) => !v);
     else {
@@ -162,6 +179,93 @@ function SalasPageInner() {
 
   function headerColor(key: SortKey) {
     return sortKey === key ? '#F0B94D' : S.MUTED_3;
+  }
+
+  // Tarjeta de una sala (extraída a función — mismo motivo que
+  // tarjetaPorra()/tarjetaMaraton() en app/porras/page.tsx y
+  // app/mesas/page.tsx: se usa tanto en la lista filtrada de arriba como en
+  // la de finalizadas, con el mismo diseño, cambiando solo el botón).
+  function tarjetaSala(s: SalaFila & { signedUp: number }) {
+    const estadoInfo = estadoSalaInfo(s.estado, s.aforo, s.signedUp);
+    const juegoLabel = TIPO_SALA_LABELS[s.tipo as TipoSala] ?? s.tipo;
+    // Empezada (03/10, pedido de Iñi: "en las mesas y en las
+    // porras que ya están empezadas... tiene que haber un botón
+    // para ir directamente a la clasificación") — mismo criterio
+    // que salaEmpezada en app/salas/[id]/page.tsx: la fecha
+    // límite ya ha pasado (el estado no cambia solo hasta
+    // liquidarla).
+    const empezada = !!s.fecha_limite_inscripcion && new Date(s.fecha_limite_inscripcion).getTime() <= Date.now();
+    const esFinalizada = s.estado === 'finalizada';
+    const mostrarBotonClasificacion = esFinalizada || empezada;
+    const textoBotonClasificacion = esFinalizada ? 'Clasificación final' : 'Clasificación en directo';
+    return (
+      <div
+        key={s.id}
+        onClick={() => router.push(`/salas/${s.id}`)}
+        style={{ background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 6, cursor: 'pointer' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <span style={{ flex: 1, minWidth: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, color: S.TEXT }}>{s.nombre}</span>
+          <span
+            style={{
+              flexShrink: 0,
+              fontFamily: "'Manrope', sans-serif",
+              fontWeight: 700,
+              fontSize: 10,
+              textTransform: 'uppercase',
+              letterSpacing: '0.03em',
+              color: '#F0B94D',
+              background: 'rgba(240,185,77,0.12)',
+              border: '1px solid rgba(240,185,77,0.3)',
+              borderRadius: 999,
+              padding: '3px 8px',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {s.competicion}
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: estadoInfo.color }}>{estadoInfo.label}</span>
+          <span style={{ flexShrink: 0, width: 84, textAlign: 'center', fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 10.5, lineHeight: 1.2, color: S.MUTED_2 }}>{juegoLabel}</span>
+          <span style={{ flexShrink: 0, width: 42, textAlign: 'center', fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 12, color: S.MUTED }}>
+            {s.signedUp}/{capacidadLabel(s.aforo)}
+          </span>
+          <span style={{ flexShrink: 0, width: 58, textAlign: 'right', fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13, color: '#F0B94D' }}>{formatEuros(s.buy_in)}</span>
+        </div>
+        {mostrarBotonClasificacion && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                router.push(`/salas/${s.id}/clasificacion`);
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                fontFamily: "'Barlow Condensed', sans-serif",
+                fontWeight: 700,
+                fontSize: 11,
+                textTransform: 'uppercase',
+                letterSpacing: '0.03em',
+                color: '#FF7A45',
+                background: 'rgba(255,122,69,0.14)',
+                border: '1px solid rgba(255,122,69,0.45)',
+                borderRadius: 8,
+                padding: '6px 10px',
+                whiteSpace: 'nowrap',
+                cursor: 'pointer',
+              }}
+            >
+              <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#FF7A45', flexShrink: 0 }} />
+              {textoBotonClasificacion}
+            </button>
+          </div>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -244,86 +348,42 @@ function SalasPageInner() {
             {cargando && <p style={{ fontSize: 13, color: S.MUTED_2, padding: '0 14px' }}>Cargando salas...</p>}
             {!cargando && salasFiltradas.length === 0 && <p style={{ fontSize: 13, color: S.MUTED_2, padding: '0 14px' }}>No hay salas que encajen con estos filtros.</p>}
 
-            {salasFiltradas.map((s) => {
-              const estadoInfo = estadoSalaInfo(s.estado, s.aforo, s.signedUp);
-              const juegoLabel = TIPO_SALA_LABELS[s.tipo as TipoSala] ?? s.tipo;
-              // Empezada (03/10, pedido de Iñi: "en las mesas y en las
-              // porras que ya están empezadas... tiene que haber un botón
-              // para ir directamente a la clasificación") — mismo criterio
-              // que salaEmpezada en app/salas/[id]/page.tsx: la fecha
-              // límite ya ha pasado (el estado no cambia solo hasta
-              // liquidarla).
-              const empezada = !!s.fecha_limite_inscripcion && new Date(s.fecha_limite_inscripcion).getTime() <= Date.now();
-              return (
-                <div
-                  key={s.id}
-                  onClick={() => router.push(`/salas/${s.id}`)}
-                  style={{ background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 6, cursor: 'pointer' }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                    <span style={{ flex: 1, minWidth: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, color: S.TEXT }}>{s.nombre}</span>
-                    <span
-                      style={{
-                        flexShrink: 0,
-                        fontFamily: "'Manrope', sans-serif",
-                        fontWeight: 700,
-                        fontSize: 10,
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.03em',
-                        color: '#F0B94D',
-                        background: 'rgba(240,185,77,0.12)',
-                        border: '1px solid rgba(240,185,77,0.3)',
-                        borderRadius: 999,
-                        padding: '3px 8px',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {s.competicion}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: estadoInfo.color }}>{estadoInfo.label}</span>
-                    <span style={{ flexShrink: 0, width: 84, textAlign: 'center', fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 10.5, lineHeight: 1.2, color: S.MUTED_2 }}>{juegoLabel}</span>
-                    <span style={{ flexShrink: 0, width: 42, textAlign: 'center', fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 12, color: S.MUTED }}>
-                      {s.signedUp}/{capacidadLabel(s.aforo)}
-                    </span>
-                    <span style={{ flexShrink: 0, width: 58, textAlign: 'right', fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13, color: '#F0B94D' }}>{formatEuros(s.buy_in)}</span>
-                  </div>
-                  {empezada && (
-                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          router.push(`/salas/${s.id}/clasificacion`);
-                        }}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 5,
-                          fontFamily: "'Barlow Condensed', sans-serif",
-                          fontWeight: 700,
-                          fontSize: 11,
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.03em',
-                          color: '#FF7A45',
-                          background: 'rgba(255,122,69,0.14)',
-                          border: '1px solid rgba(255,122,69,0.45)',
-                          borderRadius: 8,
-                          padding: '6px 10px',
-                          whiteSpace: 'nowrap',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#FF7A45', flexShrink: 0 }} />
-                        Clasificación en directo
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {salasFiltradas.map((s) => tarjetaSala(s))}
           </div>
+
+          {/* CAMBIO 04/10 (corrección de Iñi): al entrar, las salas
+              finalizadas NO se ven — se quedan detrás de un desplegable que
+              empieza cerrado, fuera de los filtros/orden de arriba (no
+              tendría sentido filtrarlas por "plazas libres" o buy-in), con
+              el botón "Clasificación final" en vez de "Clasificación en
+              directo" — ver tarjetaSala() más arriba. */}
+          {salasFinalizadasDelDeporte.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => setMostrarFinalizadas((v) => !v)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  alignSelf: 'flex-start',
+                  background: 'transparent',
+                  border: 'none',
+                  padding: 0,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  color: S.MUTED_3,
+                  cursor: 'pointer',
+                }}
+              >
+                <span style={{ fontSize: 10, transform: mostrarFinalizadas ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▶</span>
+                Finalizadas ({salasFinalizadasDelDeporte.length})
+              </button>
+              {mostrarFinalizadas && salasFinalizadasDelDeporte.map((s) => tarjetaSala(s))}
+            </div>
+          )}
 
           <span style={{ fontSize: 11, color: S.FAINT }}>*Importes en euros — Fase 1, saldo simulado.</span>
         </div>

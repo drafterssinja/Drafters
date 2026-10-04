@@ -10,7 +10,7 @@ import AnuncioVideoInline from '@/components/AnuncioVideoInline';
 import * as S from '@/lib/mockupStyles';
 import { formatEuros, posicionLabel, parteParaPremios, DEPORTE_LABELS, type Deporte } from '@/lib/salaShared';
 import { formatGolfScore, COLOR_TIPO_RESULTADO, ETIQUETA_TIPO_RESULTADO, type TipoResultadoHoyo } from '@/lib/golfScoring';
-import { calcularReparto, type TipoSala } from '@/lib/repartoPremios';
+import { calcularReparto, repartirPremiosConEmpates, type TipoSala, type ClasificacionEntrada } from '@/lib/repartoPremios';
 import { cargarFavoritos, alternarFavoritoEquipo } from '@/lib/favoritosEquipo';
 import { cargarFavoritosJugador } from '@/lib/favoritosJugador';
 import { cargarParesBiblioteca } from '@/lib/paresBiblioteca';
@@ -66,6 +66,30 @@ type HoyoRow = { ronda: number; hoyo: number; par: number; golpes: number; campo
 
 type Vista = 'mesa' | 'torneo' | 'premios' | 'eventos';
 
+// Desglose día a día de la penalización por no pasar el corte (04/10,
+// segunda vuelta) — mismo mecanismo que en
+// app/porras/[id]/clasificacion/page.tsx, ver el comentario largo junto a
+// golf_penalizacion_corte_dia en drafters-schema.sql. La penalización en sí
+// es una regla global de golf (jugadores.resultado_en_vivo_total), no algo
+// propio de la porra clásica, así que aplica igual aquí.
+type PenalizacionCorteDia = { ronda: number; golpesSumados: number };
+
+async function cargarPenalizacionCorte(jugadorIds: string[]): Promise<Map<string, PenalizacionCorteDia[]>> {
+  if (jugadorIds.length === 0) return new Map();
+  const { data } = await supabase
+    .from('golf_penalizacion_corte_dia')
+    .select('jugador_id,ronda,golpes_sumados')
+    .in('jugador_id', jugadorIds)
+    .order('ronda', { ascending: true });
+  const mapa = new Map<string, PenalizacionCorteDia[]>();
+  ((data as { jugador_id: string; ronda: number; golpes_sumados: number }[]) ?? []).forEach((f) => {
+    const lista = mapa.get(f.jugador_id) ?? [];
+    lista.push({ ronda: f.ronda, golpesSumados: f.golpes_sumados });
+    mapa.set(f.jugador_id, lista);
+  });
+  return mapa;
+}
+
 function totalEquipo(jugadoresIds: string[], jugadoresPorId: Map<string, JugadorRow>): number {
   return jugadoresIds.reduce((acc, id) => {
     const j = jugadoresPorId.get(id);
@@ -98,6 +122,21 @@ export default function SalaClasificacionPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [vista, setVista] = useState<Vista>('mesa');
+  // Torneo terminado (04/10, segunda vuelta — pedido de Iñi, mismo
+  // mecanismo que app/porras/[id]/clasificacion/page.tsx):
+  // torneos_golf_live.finalizado_en es compartido por competición, así que
+  // sirve igual para una mesa que para una porra — en cuanto está puesto,
+  // la pestaña "Mesa" desaparece y "Premios" pasa a llamarse "Clasificación
+  // final" con el reparto real ya calculado (antes esta pantalla nunca
+  // hacía ese cambio: siempre mostraba el reparto por tramos, aunque la
+  // mesa ya hubiera terminado — aviso honesto: esto sigue siendo solo
+  // informativo, el pago real de una mesa se decide aparte, a mano, en
+  // /admin/pagos-pendientes, que puede no coincidir si hay un empate que de
+  // verdad no se resuelve con un desempate automático).
+  const [torneoFinalizado, setTorneoFinalizado] = useState(false);
+  useEffect(() => {
+    if (torneoFinalizado) setVista((v) => (v === 'mesa' ? 'premios' : v));
+  }, [torneoFinalizado]);
   const [equipoSeleccionadoId, setEquipoSeleccionadoId] = useState<string | null>(null);
   const [jugadorFocoId, setJugadorFocoId] = useState<string | null>(null);
   const [hoyosFoco, setHoyosFoco] = useState<HoyoRow[] | 'cargando' | null>(null);
@@ -128,6 +167,9 @@ export default function SalaClasificacionPage() {
   const [eventos, setEventos] = useState<
     { id: string; jugador: string; tipo: TipoResultadoHoyo; hoyo: number; ronda: number; actualizadoEn: string }[] | 'cargando' | null
   >(null);
+  // Penalización por no pasar el corte, día a día (04/10, segunda vuelta) —
+  // ver cargarPenalizacionCorte más arriba.
+  const [penalizacionCorte, setPenalizacionCorte] = useState<Map<string, PenalizacionCorteDia[]>>(new Map());
 
   useEffect(() => {
     let activo = true;
@@ -184,7 +226,7 @@ export default function SalaClasificacionPage() {
         return;
       }
 
-      const [{ data: jugData }, { data: equiposData }, { data: camposData }] = await Promise.all([
+      const [{ data: jugData }, { data: equiposData }, { data: camposData }, { data: estadoTorneoData }] = await Promise.all([
         supabase
           .from('jugadores')
           .select('id,nombre,resultado_en_vivo_total,resultado_en_vivo_thru,resultado_en_vivo_ronda,resultado_en_vivo_posicion')
@@ -197,11 +239,23 @@ export default function SalaClasificacionPage() {
         supabase.rpc('equipos_sala_clasificacion', { p_sala_id: salaId }),
         // Nombre de cada campo (01/10) — ver comentario de la constante.
         supabase.from('campos_golf_live').select('campo_id,nombre').eq('competicion', salaRow.competicion),
+        // Si el torneo ya se dio por terminado (04/10, segunda vuelta) —
+        // ver el comentario de torneoFinalizado más arriba.
+        supabase.rpc('obtener_estado_torneo_golf', { p_competicion: salaRow.competicion }),
       ]);
 
       if (!activo) return;
 
-      setJugadores((jugData as JugadorRow[]) ?? []);
+      const filaEstadoTorneo = ((estadoTorneoData as { finalizado_en: string | null }[]) ?? [])[0];
+      setTorneoFinalizado(!!filaEstadoTorneo?.finalizado_en);
+
+      const jugadoresCargados = (jugData as JugadorRow[]) ?? [];
+      setJugadores(jugadoresCargados);
+      if (jugadoresCargados.length > 0) {
+        cargarPenalizacionCorte(jugadoresCargados.map((j) => j.id)).then((mapa) => {
+          if (activo) setPenalizacionCorte(mapa);
+        });
+      }
       const camposArr = (camposData as { campo_id: string; nombre: string }[]) ?? [];
       setNombresCampo(Object.fromEntries(camposArr.map((c) => [c.campo_id, c.nombre])));
       if (camposArr.length > 0) {
@@ -419,6 +473,42 @@ export default function SalaClasificacionPage() {
     .map((eq, i) => ({ eq, rango: i + 1 }))
     .filter(({ eq }) => !esMaraton || !soloFavoritos || favoritos.has(eq.equipoId));
 
+  // Total de golpes sumados por el corte (04/10, segunda vuelta) — número
+  // rojo al lado del nombre, y desglose día a día dentro de la tarjeta del
+  // jugador — mismo mecanismo que en app/porras/[id]/clasificacion/page.tsx.
+  function totalPenalizacionCorte(jugadorId: string): number {
+    return (penalizacionCorte.get(jugadorId) ?? []).reduce((acc, d) => acc + d.golpesSumados, 0);
+  }
+
+  function desgloseCorte(jugador: JugadorRow) {
+    const dias = penalizacionCorte.get(jugador.id);
+    if (!dias || dias.length === 0) return null;
+    return (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 4,
+          padding: '8px 10px',
+          background: 'rgba(255,92,92,0.08)',
+          border: '1px solid rgba(255,92,92,0.3)',
+          borderRadius: 8,
+        }}
+      >
+        <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.ERROR }}>
+          No pasó el corte — penalización por día
+        </span>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+          {dias.map((d) => (
+            <span key={d.ronda} style={{ fontSize: 11.5, color: S.MUTED }}>
+              Ronda {d.ronda}: <strong style={{ color: S.ERROR }}>+{d.golpesSumados}</strong>
+            </span>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   // Tabla de hoyo a hoyo del jugador con el foco puesto (03/10, formato
   // nuevo — ver components/TablaHoyoAHoyo.tsx) — mismo criterio que
   // app/porras/[id]/clasificacion/page.tsx: se usa en dos sitios, debajo de
@@ -489,19 +579,29 @@ export default function SalaClasificacionPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '24px 20px 40px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#3DDC84' }}>{sala.nombre}</span>
-            <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT }}>Clasificación en directo</h1>
+            {/* CAMBIO 04/10 (pedido de Iñi, mismo criterio que
+                app/porras/[id]/clasificacion/page.tsx): en cuanto el torneo
+                termina, el título deja de decir "en directo". */}
+            <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT }}>{torneoFinalizado ? 'Clasificación final' : 'Clasificación en directo'}</h1>
             <p style={{ fontSize: 13, color: S.MUTED_2 }}>{equipos.length} equipo{equipos.length === 1 ? '' : 's'} inscrito{equipos.length === 1 ? '' : 's'}</p>
           </div>
 
-          <div style={{ display: 'flex', gap: 6, alignSelf: 'flex-start' }}>
-            <button type="button" onClick={() => setVista('mesa')} style={vistaPillStyle(vista === 'mesa')}>
-              Mesa
-            </button>
+          <div style={{ display: 'flex', gap: 6, alignSelf: 'flex-start', flexWrap: 'wrap' }}>
+            {/* CAMBIO 04/10 (pedido de Iñi, mismo criterio que
+                app/porras/[id]/clasificacion/page.tsx): en cuanto el
+                torneo termina, la pestaña "Mesa" desaparece — solo quedan
+                Clasificación final (pestaña Premios, ver abajo), Torneo y
+                Eventos. */}
+            {!torneoFinalizado && (
+              <button type="button" onClick={() => setVista('mesa')} style={vistaPillStyle(vista === 'mesa')}>
+                Mesa
+              </button>
+            )}
             <button type="button" onClick={() => setVista('torneo')} style={vistaPillStyle(vista === 'torneo')}>
               Torneo
             </button>
             <button type="button" onClick={() => setVista('premios')} style={vistaPillStyle(vista === 'premios')}>
-              Premios
+              {torneoFinalizado ? 'Clasificación final' : 'Premios'}
             </button>
             {/* Pestaña Eventos (nueva, 04/10, pedido de Iñi, mismo criterio
                 que app/porras/[id]/clasificacion/page.tsx — ver el
@@ -621,7 +721,29 @@ export default function SalaClasificacionPage() {
                     }}
                   >
                     <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
-                      <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.nombre}</span>
+                      <span style={{ display: 'flex', alignItems: 'baseline', gap: 5, minWidth: 0 }}>
+                        <span
+                          style={{
+                            minWidth: 0,
+                            flexShrink: 1,
+                            fontFamily: "'Barlow Condensed', sans-serif",
+                            fontWeight: 700,
+                            fontSize: 12.5,
+                            color: S.TEXT,
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                        >
+                          {j.nombre}
+                        </span>
+                        {/* Penalización por no pasar el corte (04/10,
+                            segunda vuelta) — mismo sitio que el bono de
+                            podio en la porra clásica (que aquí no existe). */}
+                        {totalPenalizacionCorte(j.id) > 0 && (
+                          <span style={{ flexShrink: 0, fontSize: 9.5, fontWeight: 800, color: S.ERROR }}>+{totalPenalizacionCorte(j.id)}</span>
+                        )}
+                      </span>
                       {estadoJugador(j) && <span style={{ fontSize: 9, color: S.MUTED_3 }}>{estadoJugador(j)}</span>}
                     </div>
                     <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 13, color: S.MUTED_2 }}>
@@ -664,7 +786,26 @@ export default function SalaClasificacionPage() {
                     >
                       <span style={{ flexShrink: 0, width: 20, textAlign: 'center', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 11, color: S.MUTED_2 }}>{i + 1}</span>
                       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
-                        <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.nombre}</span>
+                        <span style={{ display: 'flex', alignItems: 'baseline', gap: 5, minWidth: 0 }}>
+                          <span
+                            style={{
+                              minWidth: 0,
+                              flexShrink: 1,
+                              fontFamily: "'Barlow Condensed', sans-serif",
+                              fontWeight: 700,
+                              fontSize: 12.5,
+                              color: S.TEXT,
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                            }}
+                          >
+                            {j.nombre}
+                          </span>
+                          {totalPenalizacionCorte(j.id) > 0 && (
+                            <span style={{ flexShrink: 0, fontSize: 9.5, fontWeight: 800, color: S.ERROR }}>+{totalPenalizacionCorte(j.id)}</span>
+                          )}
+                        </span>
                         {estadoJugador(j) && <span style={{ fontSize: 9, color: S.MUTED_3 }}>{estadoJugador(j)}</span>}
                       </div>
                       <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 13, color: S.MUTED_2 }}>{formatGolfScore(j.resultado_en_vivo_total ?? 0)}</span>
@@ -682,7 +823,10 @@ export default function SalaClasificacionPage() {
                                 href="#"
                                 onClick={(e) => {
                                   e.preventDefault();
-                                  setVista('mesa');
+                                  // Si el torneo ya terminó, la pestaña
+                                  // "Mesa" ha desaparecido — se manda en su
+                                  // lugar a la clasificación final.
+                                  setVista(torneoFinalizado ? 'premios' : 'mesa');
                                   setEquipoSeleccionadoId(eq.equipoId);
                                 }}
                                 style={{ fontSize: 10.5, fontWeight: 700, color: '#3DDC84', background: 'rgba(61,220,132,0.12)', border: '1px solid rgba(61,220,132,0.3)', borderRadius: 999, padding: '4px 9px', textDecoration: 'none', whiteSpace: 'nowrap' }}
@@ -698,8 +842,9 @@ export default function SalaClasificacionPage() {
                             que tienen a este jugador, no abajo del todo de
                             la página (eso se queda solo para la pestaña
                             Mesa, ver más abajo). */}
-                        <div style={{ paddingTop: 2, borderTop: `1px solid ${S.CARD_BORDER}` }}>
-                          {estadoJugador(j) && <span style={{ fontSize: 9, color: S.MUTED_3, display: 'block', marginBottom: 5 }}>{estadoJugador(j)}</span>}
+                        <div style={{ paddingTop: 2, borderTop: `1px solid ${S.CARD_BORDER}`, display: 'flex', flexDirection: 'column', gap: 5 }}>
+                          {estadoJugador(j) && <span style={{ fontSize: 9, color: S.MUTED_3 }}>{estadoJugador(j)}</span>}
+                          {desgloseCorte(j)}
                           {tablaResultadosJugador(j)}
                         </div>
                       </div>
@@ -710,17 +855,66 @@ export default function SalaClasificacionPage() {
             </div>
           )}
 
-          {/* Pestaña Premios (nueva, 02/10) — mismo cálculo que la pestaña
-              Premios de /salas/[id] (parteParaPremios + calcularReparto),
-              con el acento verde de las pantallas de clasificación en vez
-              del dorado de esa pantalla (pedido de Iñi: "tonos negros y
-              verdes, no con los amarillos"). A estas alturas (mesa ya
-              cerrada/en juego) equipos.length es el aforo real, así que el
-              reparto que se ve aquí es ya el definitivo, no una proyección. */}
+          {/* Pestaña Premios / Clasificación final (02/10 y 04/10 segunda
+              vuelta, pedido de Iñi — mismo criterio que
+              app/porras/[id]/clasificacion/page.tsx): mientras el torneo no
+              se ha dado por terminado se ve solo el reparto por tramos,
+              igual que siempre; en cuanto termina, se ve la clasificación
+              real de cada equipo con su premio ya calculado — a partir del
+              puesto que no gana nada, solo el nombre. ÚNICA diferencia con
+              la porra: aquí esto es siempre una PROPUESTA informativa, no
+              una liquidación automática — las mesas no tienen motor de
+              puntuación automático (ver cabecera del archivo) y el pago
+              real se decide a mano en /admin/pagos-pendientes, que puede
+              resolver un empate real de otra forma. */}
           {vista === 'premios' &&
             (() => {
               const bote = parteParaPremios(sala.buy_in) * (sala.aforo ?? equipos.length);
               const tramosPremios = calcularReparto(sala.tipo as TipoSala, sala.aforo, equipos.length);
+
+              if (torneoFinalizado) {
+                const clasificacionFinal: ClasificacionEntrada[] = equiposPorPuntuacion.map((eq) => ({
+                  equipoId: eq.equipoId,
+                  valor: totalEquipo(eq.jugadores, jugadoresPorId),
+                }));
+                const repartoFinal = repartirPremiosConEmpates(clasificacionFinal, tramosPremios, bote, 'asc').sort((a, b) => a.posicion - b.posicion);
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '20px 14px', background: 'rgba(61,220,132,0.08)', border: '1px solid rgba(61,220,132,0.35)', borderRadius: 12 }}>
+                      <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#3DDC84' }}>Mesa terminada · Bote total</span>
+                      <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 30, color: '#3DDC84' }}>{formatEuros(bote)}</span>
+                    </div>
+                    {repartoFinal.map((r) => {
+                      const eq = equiposPorPuntuacion.find((e) => e.equipoId === r.equipoId);
+                      if (r.importe <= 0) {
+                        return (
+                          <div key={r.equipoId} style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
+                            <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 13, color: S.MUTED_2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {eq?.nombre ?? 'Equipo'}
+                            </span>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div key={r.equipoId} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
+                          <span style={{ flexShrink: 0, width: 32, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, color: '#F0B94D' }}>{r.posicion}º</span>
+                          <span style={{ flex: 1, minWidth: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 13, color: S.TEXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {eq?.nombre ?? 'Equipo'}
+                          </span>
+                          <span style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 700, color: S.MUTED_2 }}>{eq ? formatGolfScore(totalEquipo(eq.jugadores, jugadoresPorId)) : ''}</span>
+                          <span style={{ flexShrink: 0, width: 70, textAlign: 'right', fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13, color: '#3DDC84' }}>
+                            {formatEuros(r.importe)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                    <p style={{ fontSize: 10.5, color: S.MUTED_3, lineHeight: 1.4, margin: 0 }}>
+                      Reparto calculado a partir de la clasificación final — el pago real se confirma a mano y puede variar si hay un empate que se resuelva de otra forma.
+                    </p>
+                  </div>
+                );
+              }
+
               return (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '20px 14px', background: 'rgba(61,220,132,0.08)', border: '1px solid rgba(61,220,132,0.35)', borderRadius: 12 }}>
@@ -802,6 +996,7 @@ export default function SalaClasificacionPage() {
               </div>
               {estadoJugador(jugadorFoco) && <span style={{ fontSize: 11, color: S.MUTED_3 }}>{estadoJugador(jugadorFoco)}</span>}
 
+              {desgloseCorte(jugadorFoco)}
               {tablaResultadosJugador(jugadorFoco)}
             </div>
           )}

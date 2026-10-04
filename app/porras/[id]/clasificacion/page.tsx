@@ -81,6 +81,28 @@ type JugadorRow = {
 };
 type EquipoClasif = { equipoId: string; nombreEquipo: string | null; jugadores: string[]; createdAt: string };
 type HoyoRow = { ronda: number; hoyo: number; par: number; golpes: number; campo_id: string | null; tipo_resultado: TipoResultadoHoyo };
+// Desglose día a día de la penalización por no pasar el corte (nuevo,
+// 04/10, segunda vuelta) — ver el comentario largo junto a
+// golf_penalizacion_corte_dia en drafters-schema.sql. Una fila por ronda
+// penalizada, con los golpes que se sumaron ESE día (vuelta más alta del
+// día + 1).
+type PenalizacionCorteDia = { ronda: number; golpesSumados: number };
+
+async function cargarPenalizacionCorte(jugadorIds: string[]): Promise<Map<string, PenalizacionCorteDia[]>> {
+  if (jugadorIds.length === 0) return new Map();
+  const { data } = await supabase
+    .from('golf_penalizacion_corte_dia')
+    .select('jugador_id,ronda,golpes_sumados')
+    .in('jugador_id', jugadorIds)
+    .order('ronda', { ascending: true });
+  const mapa = new Map<string, PenalizacionCorteDia[]>();
+  ((data as { jugador_id: string; ronda: number; golpes_sumados: number }[]) ?? []).forEach((f) => {
+    const lista = mapa.get(f.jugador_id) ?? [];
+    lista.push({ ronda: f.ronda, golpesSumados: f.golpes_sumados });
+    mapa.set(f.jugador_id, lista);
+  });
+  return mapa;
+}
 
 type Vista = 'porra' | 'torneo' | 'premios' | 'informacion' | 'eventos';
 
@@ -196,6 +218,10 @@ export default function PorraClasificacionPage() {
   const [eventos, setEventos] = useState<
     { id: string; jugador: string; tipo: TipoResultadoHoyo; hoyo: number; ronda: number; actualizadoEn: string }[] | 'cargando' | null
   >(null);
+  // Penalización por no pasar el corte, día a día (04/10, segunda vuelta) —
+  // ver cargarPenalizacionCorte más arriba. Se carga junto con `jugadores`,
+  // tanto al entrar como en cada revisión periódica de más abajo.
+  const [penalizacionCorte, setPenalizacionCorte] = useState<Map<string, PenalizacionCorteDia[]>>(new Map());
   // Torneo terminado (nuevo, 03/10, pedido de Iñi): lo decide en exclusiva
   // la ruta de sincronización (ver el bloque "CIERRE AUTOMÁTICO..." en
   // drafters-schema.sql — torneos_golf_live.finalizado_en), nunca esta
@@ -203,6 +229,14 @@ export default function PorraClasificacionPage() {
   // "Clasificación final" y muestra el reparto ya calculado en vez de solo
   // los tramos — ver más abajo.
   const [torneoFinalizado, setTorneoFinalizado] = useState(false);
+  // Si el torneo se da por terminado mientras alguien tiene abierta la
+  // pestaña "Porra" (que en ese momento desaparece — pedido de Iñi, 04/10,
+  // ver más abajo donde se pinta la barra de pestañas), se le saca de ahí a
+  // la clasificación final, en vez de dejarle en una pestaña que ya no
+  // existe.
+  useEffect(() => {
+    if (torneoFinalizado) setVista((v) => (v === 'porra' ? 'premios' : v));
+  }, [torneoFinalizado]);
 
   useEffect(() => {
     let activo = true;
@@ -301,7 +335,13 @@ export default function PorraClasificacionPage() {
 
       if (!activo) return;
 
-      setJugadores(((jugData as JugadorRow[]) ?? []).filter((j) => j.grupo_porra !== null));
+      const jugadoresFiltrados = ((jugData as JugadorRow[]) ?? []).filter((j) => j.grupo_porra !== null);
+      setJugadores(jugadoresFiltrados);
+      if (jugadoresFiltrados.length > 0) {
+        cargarPenalizacionCorte(jugadoresFiltrados.map((j) => j.id)).then((mapa) => {
+          if (activo) setPenalizacionCorte(mapa);
+        });
+      }
       const filaEstadoTorneo = ((estadoTorneoData as { finalizado_en: string | null }[]) ?? [])[0];
       setTorneoFinalizado(!!filaEstadoTorneo?.finalizado_en);
       const camposArr = (camposData as { campo_id: string; nombre: string }[]) ?? [];
@@ -484,6 +524,7 @@ export default function PorraClasificacionPage() {
       if (jugadoresNuevos.length > 0) setJugadores(jugadoresNuevos);
 
       const idsActuales = jugadoresNuevos.map((j) => j.id);
+      if (idsActuales.length > 0) setPenalizacionCorte(await cargarPenalizacionCorte(idsActuales));
       const desde = ultimaRevisionRef.current;
       const ahora = new Date().toISOString();
       if (desde && idsActuales.length > 0) {
@@ -639,6 +680,45 @@ export default function PorraClasificacionPage() {
     ? (jugadoresDelEquipoSeleccionado.find((j) => j.id === jugadorFocoId) ?? campoOrdenado.find((j) => j.id === jugadorFocoId) ?? null)
     : null;
 
+  // Total de golpes sumados por el corte (04/10, segunda vuelta) — para el
+  // número rojo al lado del nombre, mismo sitio donde se ve el bono de
+  // podio en dorado.
+  function totalPenalizacionCorte(jugadorId: string): number {
+    return (penalizacionCorte.get(jugadorId) ?? []).reduce((acc, d) => acc + d.golpesSumados, 0);
+  }
+
+  // Desglose día a día, para dentro de la tarjeta del jugador — pedido
+  // explícito de Iñi: "indicar cuánto suman en cada vuelta... en cada día
+  // poner cuánto se le está sumando es suficiente".
+  function desgloseCorte(jugador: JugadorRow) {
+    const dias = penalizacionCorte.get(jugador.id);
+    if (!dias || dias.length === 0) return null;
+    return (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 4,
+          padding: '8px 10px',
+          background: 'rgba(255,92,92,0.08)',
+          border: '1px solid rgba(255,92,92,0.3)',
+          borderRadius: 8,
+        }}
+      >
+        <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.ERROR }}>
+          No pasó el corte — penalización por día
+        </span>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+          {dias.map((d) => (
+            <span key={d.ronda} style={{ fontSize: 11.5, color: S.MUTED }}>
+              Ronda {d.ronda}: <strong style={{ color: S.ERROR }}>+{d.golpesSumados}</strong>
+            </span>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   // Tabla de hoyo a hoyo del jugador con el foco puesto (03/10, formato
   // nuevo — ver components/TablaHoyoAHoyo.tsx) — extraído a su propia
   // función para poder usarse en dos sitios: debajo de todo en la pestaña
@@ -717,14 +797,26 @@ export default function PorraClasificacionPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '24px 20px 40px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#3DDC84' }}>{porra.major}</span>
-            <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT }}>Clasificación en directo</h1>
+            {/* CAMBIO 04/10 (pedido de Iñi): en cuanto el torneo se da por
+                terminado, el título deja de decir "en directo" — igual que
+                ya pasaba con la pestaña Premios → Clasificación final. */}
+            <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT }}>{torneoFinalizado ? 'Clasificación final' : 'Clasificación en directo'}</h1>
             <p style={{ fontSize: 13, color: S.MUTED_2 }}>{equipos.length} equipo{equipos.length === 1 ? '' : 's'} inscrito{equipos.length === 1 ? '' : 's'}</p>
           </div>
 
-          <div style={{ display: 'flex', gap: 6, alignSelf: 'flex-start' }}>
-            <button type="button" onClick={() => setVista('porra')} style={vistaPillStyle(vista === 'porra')}>
-              Porra
-            </button>
+          <div style={{ display: 'flex', gap: 6, alignSelf: 'flex-start', flexWrap: 'wrap' }}>
+            {/* CAMBIO 04/10 (pedido de Iñi): en cuanto el torneo termina, la
+                pestaña "Porra" desaparece del todo — ya no tiene sentido
+                seguir viendo la plantilla de cada equipo por separado,
+                justo la clasificación final (pestaña Premios, ver abajo),
+                Torneo, Información y Eventos. Ver el efecto más abajo que
+                saca de esta pestaña a quien la tuviera abierta justo cuando
+                se liquida. */}
+            {!torneoFinalizado && (
+              <button type="button" onClick={() => setVista('porra')} style={vistaPillStyle(vista === 'porra')}>
+                Porra
+              </button>
+            )}
             <button type="button" onClick={() => setVista('torneo')} style={vistaPillStyle(vista === 'torneo')}>
               Torneo
             </button>
@@ -1056,6 +1148,13 @@ export default function PorraClasificacionPage() {
                         {(bonosParaMostrar.get(j.id) ?? 0) !== 0 && (
                           <span style={{ flexShrink: 0, fontSize: 9.5, fontWeight: 800, color: '#F0B94D' }}>{bonosParaMostrar.get(j.id)}</span>
                         )}
+                        {/* Penalización por no pasar el corte (04/10,
+                            segunda vuelta): mismo sitio y mismo tamaño que
+                            el bono de podio de arriba, pero en rojo — total
+                            de golpes que se le están sumando. */}
+                        {totalPenalizacionCorte(j.id) > 0 && (
+                          <span style={{ flexShrink: 0, fontSize: 9.5, fontWeight: 800, color: S.ERROR }}>+{totalPenalizacionCorte(j.id)}</span>
+                        )}
                       </span>
                       {j.grupo_porra && <span style={{ fontSize: 9.5, fontWeight: 700, color: COLOR_GRUPO[j.grupo_porra] }}>{GRUPO_PORRA_LABELS[j.grupo_porra]}</span>}
                       {estadoJugador(j) && <span style={{ fontSize: 9, color: S.MUTED_3 }}>{estadoJugador(j)}</span>}
@@ -1140,7 +1239,29 @@ export default function PorraClasificacionPage() {
                           <span style={{ flexShrink: 0, width: 20, textAlign: 'center', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 11, color: S.MUTED_2 }}>{rango}</span>
                           <EstrellaFavorito activo={favoritosJugador.has(j.id)} onToggle={() => alternarFavoritoJug(j.id)} />
                           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
-                            <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.nombre}</span>
+                            <span style={{ display: 'flex', alignItems: 'baseline', gap: 5, minWidth: 0 }}>
+                              <span
+                                style={{
+                                  minWidth: 0,
+                                  flexShrink: 1,
+                                  fontFamily: "'Barlow Condensed', sans-serif",
+                                  fontWeight: 700,
+                                  fontSize: 12.5,
+                                  color: S.TEXT,
+                                  whiteSpace: 'nowrap',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                }}
+                              >
+                                {j.nombre}
+                              </span>
+                              {/* Penalización por no pasar el corte (04/10,
+                                  segunda vuelta) — mismo sitio y color que en
+                                  la pestaña Porra. */}
+                              {totalPenalizacionCorte(j.id) > 0 && (
+                                <span style={{ flexShrink: 0, fontSize: 9.5, fontWeight: 800, color: S.ERROR }}>+{totalPenalizacionCorte(j.id)}</span>
+                              )}
+                            </span>
                             {j.grupo_porra && <span style={{ fontSize: 9.5, fontWeight: 700, color: COLOR_GRUPO[j.grupo_porra] }}>{GRUPO_PORRA_LABELS[j.grupo_porra]}</span>}
                             {estadoJugador(j) && <span style={{ fontSize: 9, color: S.MUTED_3 }}>{estadoJugador(j)}</span>}
                           </div>
@@ -1159,7 +1280,13 @@ export default function PorraClasificacionPage() {
                                     href="#"
                                     onClick={(e) => {
                                       e.preventDefault();
-                                      setVista('porra');
+                                      // Si el torneo ya terminó, la pestaña
+                                      // "Porra" ha desaparecido (ver la
+                                      // barra de pestañas más arriba) — se
+                                      // manda en su lugar a la
+                                      // clasificación final, donde ese
+                                      // equipo también se puede consultar.
+                                      setVista(torneoFinalizado ? 'premios' : 'porra');
                                       setEquipoSeleccionadoId(eq.equipoId);
                                     }}
                                     style={{ fontSize: 10.5, fontWeight: 700, color: '#3DDC84', background: 'rgba(61,220,132,0.12)', border: '1px solid rgba(61,220,132,0.3)', borderRadius: 999, padding: '4px 9px', textDecoration: 'none', whiteSpace: 'nowrap' }}
@@ -1175,8 +1302,9 @@ export default function PorraClasificacionPage() {
                                 los equipos que tienen a este jugador, no
                                 abajo del todo de la página (eso se queda
                                 solo para la pestaña Porra, ver más abajo). */}
-                            <div style={{ paddingTop: 2, borderTop: `1px solid ${S.CARD_BORDER}` }}>
-                              {estadoJugador(j) && <span style={{ fontSize: 9, color: S.MUTED_3, display: 'block', marginBottom: 5 }}>{estadoJugador(j)}</span>}
+                            <div style={{ paddingTop: 2, borderTop: `1px solid ${S.CARD_BORDER}`, display: 'flex', flexDirection: 'column', gap: 5 }}>
+                              {estadoJugador(j) && <span style={{ fontSize: 9, color: S.MUTED_3 }}>{estadoJugador(j)}</span>}
+                              {desgloseCorte(j)}
                               {tablaResultadosJugador(j)}
                             </div>
                           </div>
@@ -1224,18 +1352,32 @@ export default function PorraClasificacionPage() {
                       <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#3DDC84' }}>Torneo terminado · Bote total</span>
                       <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 30, color: '#3DDC84' }}>{formatEuros(bote)}</span>
                     </div>
+                    {/* Pedido de Iñi (04/10, segunda vuelta): a partir del
+                        puesto que no gana nada, la fila se simplifica a
+                        solo el nombre — nada de posición, resultado ni
+                        "0,00 €" ocupando sitio junto a quienes sí han
+                        ganado dinero. */}
                     {repartoFinal.map((r) => {
                       const eq = equiposOrdenados.find((e) => e.equipoId === r.equipoId);
+                      if (r.importe <= 0) {
+                        return (
+                          <div key={r.equipoId} style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
+                            <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 13, color: S.MUTED_2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {eq?.nombreEquipo ?? 'Equipo'}
+                            </span>
+                          </div>
+                        );
+                      }
                       return (
                         <div key={r.equipoId} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
-                          <span style={{ flexShrink: 0, width: 32, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, color: r.importe > 0 ? '#F0B94D' : S.MUTED_3 }}>{r.posicion}º</span>
+                          <span style={{ flexShrink: 0, width: 32, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, color: '#F0B94D' }}>{r.posicion}º</span>
                           <span style={{ flex: 1, minWidth: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 13, color: S.TEXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {eq?.nombreEquipo ?? 'Equipo'}
                           </span>
                           <span style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 700, color: S.MUTED_2 }}>
                             {eq ? formatGolfScore(totalEquipo(eq.jugadores, jugadoresPorId, mapaBonosPodio)) : ''}
                           </span>
-                          <span style={{ flexShrink: 0, width: 70, textAlign: 'right', fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13, color: r.importe > 0 ? '#3DDC84' : S.MUTED_3 }}>
+                          <span style={{ flexShrink: 0, width: 70, textAlign: 'right', fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13, color: '#3DDC84' }}>
                             {formatEuros(r.importe)}
                           </span>
                         </div>
@@ -1422,6 +1564,7 @@ export default function PorraClasificacionPage() {
               </div>
               {estadoJugador(jugadorFoco) && <span style={{ fontSize: 11, color: S.MUTED_3 }}>{estadoJugador(jugadorFoco)}</span>}
 
+              {desgloseCorte(jugadorFoco)}
               {tablaResultadosJugador(jugadorFoco)}
             </div>
           )}

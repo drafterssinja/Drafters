@@ -369,6 +369,15 @@ async function aplicarPenalizacionCorte(
   if (nombresError) throw new Error(`No se han podido leer los nombres de los jugadores con corte: ${nombresError.message}`);
   const nombrePorId = new Map(((nombresData ?? []) as { id: string; nombre: string }[]).map((j) => [j.id, j.nombre]));
 
+  // 5. Desglose día a día (04/10, segunda vuelta — pedido de Iñi: "indicar
+  //    cuánto suman en cada vuelta", tanto en la tarjeta del jugador como en
+  //    un número al lado de su nombre). Se construye a la vez que el total,
+  //    con los mismos maxPorRonda ya calculados arriba, y se guarda en
+  //    golf_penalizacion_corte_dia (sí con lectura pública, a diferencia de
+  //    golf_jugadores_corte) para que la pantalla de clasificación lo pueda
+  //    leer directamente.
+  const desgloseDias: { jugador_id: string; ronda: number; golpes_sumados: number; actualizado_en: string }[] = [];
+
   const actualizaciones = cortes
     .map((c) => {
       const nombre = nombrePorId.get(c.jugador_id);
@@ -379,7 +388,9 @@ async function aplicarPenalizacionCorte(
         // Esa ronda concreta todavía no tiene ni un hoyo jugado por nadie —
         // se penaliza en cuanto lo tenga, en un ciclo posterior.
         if (maxDia === undefined) continue;
-        penalizacion += maxDia + 1;
+        const golpesEseDia = maxDia + 1;
+        penalizacion += golpesEseDia;
+        desgloseDias.push({ jugador_id: c.jugador_id, ronda: r, golpes_sumados: golpesEseDia, actualizado_en: ahora });
       }
       return {
         id: c.jugador_id,
@@ -395,6 +406,11 @@ async function aplicarPenalizacionCorte(
   if (actualizaciones.length > 0) {
     const { error: aplicarError } = await admin.from('jugadores').upsert(actualizaciones, { onConflict: 'id' });
     if (aplicarError) throw new Error(`No se ha podido aplicar la penalización de corte: ${aplicarError.message}`);
+  }
+
+  if (desgloseDias.length > 0) {
+    const { error: desgloseError } = await admin.from('golf_penalizacion_corte_dia').upsert(desgloseDias, { onConflict: 'jugador_id,ronda' });
+    if (desgloseError) throw new Error(`No se ha podido guardar el desglose día a día de la penalización de corte: ${desgloseError.message}`);
   }
 }
 
