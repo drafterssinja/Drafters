@@ -8,6 +8,7 @@ import {
   obtenerInfoCampoDataGolf,
   startHoleDesdeEndHole,
   type DataGolfTour,
+  type EnJuegoDataGolf,
 } from '@/lib/dataGolf';
 import { tipoResultadoHoyo, sigueCompitiendo } from '@/lib/golfScoring';
 import { liquidarPorrasGolfDeCompeticion } from '@/lib/liquidacionGolfAutomatica';
@@ -262,6 +263,142 @@ async function procesarTorneoEspn(
 }
 
 // ============================================================================
+// PENALIZACIÓN DE JUGADORES QUE NO PASAN EL CORTE (04/10, pedido de Iñi) —
+// ver el comentario completo junto a golf_jugadores_corte/golf_max_vuelta_dia
+// en drafters-schema.sql para el diseño entero. Resumen: en cuanto un
+// jugador aparece con posición 'CUT', se guarda UNA VEZ su resultado real
+// hasta ese momento; a partir de ahí, cada ciclo, su resultado en vivo pasa
+// a ser ese valor guardado más, por cada ronda que no juega, "la vuelta más
+// alta que se está produciendo ese día" + 1 golpe — recalculado en cada
+// ciclo, también con la ronda todavía sin terminar.
+// ============================================================================
+async function aplicarPenalizacionCorte(
+  admin: ReturnType<typeof crearClienteAdmin>,
+  competicion: string,
+  enJuego: EnJuegoDataGolf[],
+  rondaActual: number | null,
+  jugadores: {
+    id: string;
+    nombre: string;
+    resultado_en_vivo_total: number | null;
+    resultado_en_vivo_ronda: number | null;
+    resultado_en_vivo_posicion: string | null;
+  }[],
+  aliasPorNombreOrigen: Map<string, string>,
+  ahora: string
+): Promise<void> {
+  const jugadorPorNombre = new Map(jugadores.map((j) => [normalizarNombre(j.nombre), j]));
+  const yaCapturados = new Set<string>();
+
+  // 1. Capturar, solo la primera vez que se ve a cada jugador con posición
+  //    'CUT', su resultado real hasta ese momento (total_base) y en qué
+  //    ronda se quedó (ronda_corte). Dos fuentes, por este orden:
+  //      a) Este ciclo, en vivo (enJuego) — la más fiable, si todavía está.
+  //      b) Lo último guardado en la base de datos (jugadores, leído al
+  //         principio de procesarTorneoDataGolf, ANTES de los cambios de
+  //         este ciclo) — necesaria porque Data Golf puede dejar de mandar
+  //         a un jugador cortado en `in-play` según avanza el torneo (muy
+  //         probable en rondas ya avanzadas): si ya se le vio 'CUT' en
+  //         algún ciclo anterior y quedó guardado, no hace falta volver a
+  //         verlo en vivo para empezar a aplicarle la penalización.
+  //    `ignoreDuplicates` hace que, si ya existe una fila para ese jugador,
+  //    esta llamada no la toque — así el valor capturado nunca se
+  //    contamina con la propia penalización de ciclos posteriores.
+  const capturas: { jugador_id: string; competicion: string; ronda_corte: number; total_base: number }[] = [];
+  for (const c of enJuego) {
+    if (!c.posicion || c.posicion.trim().toUpperCase() !== 'CUT') continue;
+    if (c.resultadoTotal === null || c.ronda === null) continue; // todavía sin datos fiables de ese jugador — se captura en un ciclo posterior
+    const nombreNorm = normalizarNombre(c.nombre);
+    const jugador =
+      jugadorPorNombre.get(nombreNorm) ??
+      (() => {
+        const destino = aliasPorNombreOrigen.get(nombreNorm);
+        return destino ? jugadorPorNombre.get(destino) : undefined;
+      })();
+    if (!jugador) continue; // nombre sin emparejar — ya se reporta en resultado.nombresSinEmparejar desde el bucle principal
+    capturas.push({ jugador_id: jugador.id, competicion, ronda_corte: c.ronda, total_base: c.resultadoTotal });
+    yaCapturados.add(jugador.id);
+  }
+  for (const j of jugadores) {
+    if (yaCapturados.has(j.id)) continue; // ya capturado en vivo arriba, en este mismo ciclo
+    if (!j.resultado_en_vivo_posicion || j.resultado_en_vivo_posicion.trim().toUpperCase() !== 'CUT') continue;
+    if (j.resultado_en_vivo_total === null || j.resultado_en_vivo_ronda === null) continue;
+    capturas.push({ jugador_id: j.id, competicion, ronda_corte: j.resultado_en_vivo_ronda, total_base: j.resultado_en_vivo_total });
+  }
+  if (capturas.length > 0) {
+    const { error: capturaError } = await admin
+      .from('golf_jugadores_corte')
+      .upsert(capturas, { onConflict: 'jugador_id', ignoreDuplicates: true });
+    if (capturaError) throw new Error(`No se ha podido guardar la base de corte: ${capturaError.message}`);
+  }
+
+  // 2. Releer TODOS los jugadores con corte ya conocido de esta competición
+  //    — no solo los vistos en este ciclo: Data Golf puede dejar de mandar
+  //    a un jugador cortado en ciclos siguientes, pero su penalización
+  //    tiene que seguir actualizándose igual mientras el torneo avanza.
+  const { data: cortesData, error: cortesError } = await admin
+    .from('golf_jugadores_corte')
+    .select('jugador_id, ronda_corte, total_base')
+    .eq('competicion', competicion);
+  if (cortesError) throw new Error(`No se han podido leer los jugadores con corte: ${cortesError.message}`);
+  const cortes = (cortesData ?? []) as { jugador_id: string; ronda_corte: number; total_base: number }[];
+  if (cortes.length === 0 || rondaActual === null) return;
+
+  // 3. Qué rondas hacen falta en total (unión de todas las rondas
+  //    posteriores al corte de cada jugador, hasta la ronda actual del
+  //    torneo) — una sola consulta por ronda distinta, nunca una por
+  //    jugador, aunque haya decenas de jugadores cortados.
+  const rondasNecesarias = new Set<number>();
+  for (const c of cortes) {
+    for (let r = c.ronda_corte + 1; r <= rondaActual; r++) rondasNecesarias.add(r);
+  }
+  if (rondasNecesarias.size === 0) return;
+
+  const maxPorRonda = new Map<number, number>();
+  for (const r of rondasNecesarias) {
+    const { data: maxData, error: maxError } = await admin.rpc('golf_max_vuelta_dia', { p_competicion: competicion, p_ronda: r });
+    if (maxError) throw new Error(`No se ha podido calcular la vuelta más alta de la ronda ${r}: ${maxError.message}`);
+    if (typeof maxData === 'number') maxPorRonda.set(r, maxData);
+  }
+
+  // 4. jugadores.nombre/deporte/competicion son NOT NULL — el upsert de
+  //    abajo necesita mandarlos aunque no cambien, igual que ya hace el
+  //    resto de esta ruta.
+  const idsConCorte = cortes.map((c) => c.jugador_id);
+  const { data: nombresData, error: nombresError } = await admin.from('jugadores').select('id, nombre').in('id', idsConCorte);
+  if (nombresError) throw new Error(`No se han podido leer los nombres de los jugadores con corte: ${nombresError.message}`);
+  const nombrePorId = new Map(((nombresData ?? []) as { id: string; nombre: string }[]).map((j) => [j.id, j.nombre]));
+
+  const actualizaciones = cortes
+    .map((c) => {
+      const nombre = nombrePorId.get(c.jugador_id);
+      if (!nombre) return null; // no debería pasar nunca (clave foránea a jugadores) — red de seguridad
+      let penalizacion = 0;
+      for (let r = c.ronda_corte + 1; r <= rondaActual; r++) {
+        const maxDia = maxPorRonda.get(r);
+        // Esa ronda concreta todavía no tiene ni un hoyo jugado por nadie —
+        // se penaliza en cuanto lo tenga, en un ciclo posterior.
+        if (maxDia === undefined) continue;
+        penalizacion += maxDia + 1;
+      }
+      return {
+        id: c.jugador_id,
+        nombre,
+        deporte: 'golf' as const,
+        competicion,
+        resultado_en_vivo_total: c.total_base + penalizacion,
+        resultado_en_vivo_actualizado_en: ahora,
+      };
+    })
+    .filter((fila): fila is NonNullable<typeof fila> => fila !== null);
+
+  if (actualizaciones.length > 0) {
+    const { error: aplicarError } = await admin.from('jugadores').upsert(actualizaciones, { onConflict: 'id' });
+    if (aplicarError) throw new Error(`No se ha podido aplicar la penalización de corte: ${aplicarError.message}`);
+  }
+}
+
+// ============================================================================
 // Rama Data Golf (03/10, pedido explícito de Iñi) — el hoyo a hoyo NO viene
 // dado por la API (ver cabecera de drafters-schema.sql, bloque "INTEGRACIÓN
 // DATA GOLF"): se CALCULA a partir de cuánto cambia el resultado de SOLO la
@@ -284,7 +421,13 @@ async function procesarTorneoDataGolf(
 ): Promise<void> {
   const { data: jugadoresData, error: jugadoresError } = await admin
     .from('jugadores')
-    .select('id, nombre, resultado_en_vivo_total, resultado_en_vivo_thru, resultado_en_vivo_ronda, resultado_en_vivo_hoy')
+    // resultado_en_vivo_posicion (04/10) se añade aquí para poder detectar
+    // jugadores con corte directamente desde lo último guardado en la base
+    // de datos (ver aplicarPenalizacionCorte) — hace falta por si Data Golf
+    // deja de mandar a un jugador cortado en el ciclo de `in-play` de este
+    // ciclo (lo cual es bastante probable en rondas avanzadas): su último
+    // 'CUT' guardado sigue aquí aunque ya no venga en la respuesta en vivo.
+    .select('id, nombre, resultado_en_vivo_total, resultado_en_vivo_thru, resultado_en_vivo_ronda, resultado_en_vivo_hoy, resultado_en_vivo_posicion')
     .eq('deporte', 'golf')
     .eq('competicion', torneo.competicion);
 
@@ -298,6 +441,7 @@ async function procesarTorneoDataGolf(
       resultado_en_vivo_thru: number | null;
       resultado_en_vivo_ronda: number | null;
       resultado_en_vivo_hoy: number | null;
+      resultado_en_vivo_posicion: string | null;
     }[]) ?? [];
   resultado.jugadoresEnCampo = jugadores.length;
 
@@ -441,6 +585,16 @@ async function procesarTorneoDataGolf(
     if (hoyosError) throw new Error(`No se ha podido guardar el hoyo a hoyo calculado: ${hoyosError.message}`);
     resultado.hoyosActualizados = filasHoyo.length;
   }
+
+  // ==========================================================================
+  // PENALIZACIÓN DE JUGADORES QUE NO PASAN EL CORTE (04/10, pedido de Iñi —
+  // ver el comentario largo junto a golf_jugadores_corte/golf_max_vuelta_dia
+  // en drafters-schema.sql para el diseño completo). Va DESPUÉS de guardar
+  // filasHoyo de arriba a propósito, para que golf_max_vuelta_dia() vea ya
+  // el hoyo a hoyo de este mismo ciclo al calcular la vuelta más alta de la
+  // ronda en curso.
+  // ==========================================================================
+  await aplicarPenalizacionCorte(admin, torneo.competicion, enJuego, rondaActual, jugadores, aliasPorNombreOrigen, ahora);
 
   // A diferencia de ESPN, aquí el par de los 18 hoyos de un campo puede
   // conocerse de golpe (sin esperar a que ningún jugador los haya jugado

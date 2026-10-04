@@ -127,13 +127,25 @@ export default function PorrasIndexPage() {
                   style={{ background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8, cursor: 'pointer' }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                    <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, color: S.TEXT }}>{p.major}</span>
+                    <span style={{ flex: 1, minWidth: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, color: S.TEXT }}>{p.major}</span>
                     {cierra && (
                       <span style={{ flexShrink: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: '#FF9F6E', background: 'rgba(255,159,110,0.12)', padding: '4px 8px', borderRadius: 999, whiteSpace: 'nowrap' }}>
                         Cierra el {cierra}
                       </span>
                     )}
-                    {!cierra && empezada && (
+                  </div>
+                  {/* FIX 04/10 (aviso de Iñi, con captura: el botón se salía
+                      de la pantalla en títulos largos — "Alfred Dunhill
+                      Links Championship") — antes este botón competía por
+                      sitio con el título en la misma fila (misma fila con
+                      `justify-content: space-between` y el botón con
+                      `white-space: nowrap` + `flex-shrink: 0`, así que no
+                      podía encogerse y se salía del recuadro). Se mueve a su
+                      propia fila, igual que ya funcionaba bien en
+                      app/salas/page.tsx — así nunca compite por ancho con el
+                      título, sea cual sea su longitud. */}
+                  {!cierra && empezada && (
+                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                       <button
                         type="button"
                         onClick={(e) => {
@@ -141,7 +153,6 @@ export default function PorrasIndexPage() {
                           router.push(`/porras/${p.id}/clasificacion`);
                         }}
                         style={{
-                          flexShrink: 0,
                           display: 'flex',
                           alignItems: 'center',
                           gap: 5,
@@ -162,8 +173,8 @@ export default function PorrasIndexPage() {
                         <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#FF7A45', flexShrink: 0 }} />
                         Clasificación en directo
                       </button>
-                    )}
-                  </div>
+                    </div>
+                  )}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     <span
                       style={{

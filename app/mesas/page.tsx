@@ -481,7 +481,7 @@ function MesasPageInner() {
                     style={{ background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8, cursor: 'pointer' }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                      <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, color: S.TEXT }}>{m.nombre}</span>
+                      <span style={{ flex: 1, minWidth: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, color: S.TEXT }}>{m.nombre}</span>
                       {cierra && (
                         <span
                           style={{
@@ -499,7 +499,13 @@ function MesasPageInner() {
                           Cierra el {cierra}
                         </span>
                       )}
-                      {!cierra && empezada && (
+                    </div>
+                    {/* FIX 04/10 (mismo aviso de Iñi que en app/porras/page.tsx
+                        — el botón se salía de la pantalla con nombres
+                        largos de Maratón): se mueve a su propia fila, igual
+                        que ya funcionaba bien en app/salas/page.tsx. */}
+                    {!cierra && empezada && (
+                      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                         <button
                           type="button"
                           onClick={(e) => {
@@ -507,7 +513,6 @@ function MesasPageInner() {
                             router.push(`/salas/${m.id}/clasificacion`);
                           }}
                           style={{
-                            flexShrink: 0,
                             display: 'flex',
                             alignItems: 'center',
                             gap: 5,
@@ -528,8 +533,8 @@ function MesasPageInner() {
                           <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#FF7A45', flexShrink: 0 }} />
                           Clasificación en directo
                         </button>
-                      )}
-                    </div>
+                      </div>
+                    )}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                       <span
                         style={{

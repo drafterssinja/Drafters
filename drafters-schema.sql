@@ -2422,6 +2422,20 @@ grant execute on function public.registrar_clic_anuncio(uuid, text) to authentic
 -- 03/10: se añade `clics` (cuántas veces se ha pulsado el vídeo para
 -- visitar al anunciante, ver anuncios_video_clics más arriba) — mismo
 -- motivo, hay que borrarla primero.
+--
+-- FIX 04/10 (aviso de Iñi: "No se han podido cargar las estadísticas de los
+-- vídeos: column reference "video_id" is ambiguous"): esta función declara
+-- `returns table (video_id uuid, ...)`, y en PL/pgSQL eso crea una variable
+-- de salida llamada `video_id` visible en TODO el cuerpo de la función. La
+-- subconsulta de más abajo hacía `select video_id, ... group by video_id`
+-- SIN prefijo de tabla — Postgres no podía saber si ese `video_id` se
+-- refería a la columna de `anuncios_video_clics` o a esa variable de
+-- salida, y fallaba con ese error cada vez que se llamaba. No era un
+-- problema de datos (las 160 visualizaciones de antes nunca se tocaron,
+-- solo esta función fallaba al leerlas) — con el aviso real activado ayer
+-- (ver el fix en app/admin/videos/page.tsx) por fin se vio el error de
+-- verdad en vez de mostrar todo a 0 en silencio. Se arregla poniendo
+-- siempre el alias de la tabla delante de `video_id` en la subconsulta.
 drop function if exists public.estadisticas_anuncios_video();
 
 create or replace function public.estadisticas_anuncios_video()
@@ -2443,7 +2457,7 @@ begin
       coalesce(max(c.clics), 0) as clics
     from public.anuncios_video_reproducciones r
     left join (
-      select video_id, count(*) as clics from public.anuncios_video_clics group by video_id
+      select avc.video_id, count(*) as clics from public.anuncios_video_clics avc group by avc.video_id
     ) c on c.video_id = r.video_id
     group by r.video_id;
 end;
@@ -2893,6 +2907,90 @@ create policy "resultados_golf_hoyo_admin_todo" on public.resultados_golf_hoyo
 -- La ruta de sincronización escribe con la clave de servicio (sin pasar
 -- por RLS) — la política de admin de aquí arriba es solo por si algún día
 -- hiciera falta corregir un dato a mano desde el propio SQL Editor.
+
+-- ============================================================================
+-- PENALIZACIÓN DE JUGADORES QUE NO PASAN EL CORTE (nuevo, 04/10)
+-- ============================================================================
+-- Pedido explícito de Iñi: "los jugadores que no pasan el corte... cada uno
+-- de los días que no juegan [p.ej. sábado y domingo, si el corte es tras el
+-- viernes] hay que establecerle el resultado de un golpe más de la vuelta
+-- más alta que se haya hecho ese día. Si la vuelta más alta es +7, se les
+-- pone +8... y eso hay que mirarlo continuamente, aunque la vuelta más alta
+-- todavía esté sin acabar, para que si sube a +9, se les ponga +10." El
+-- criterio para saber quién no ha pasado el corte es la posición que da
+-- Data Golf: 'CUT' tal cual (ver sigueCompitiendo() en lib/golfScoring.ts,
+-- que ya trataba 'CUT' como "fuera de juego" para el bono de podio — esto
+-- es una regla nueva y distinta, para el RESULTADO del jugador, no para el
+-- bono).
+--
+-- Cómo funciona (ver app/api/admin/actualizar-golf-en-vivo/route.ts,
+-- función procesarTorneoDataGolf — solo para torneos con fuente_datos =
+-- 'datagolf', que es la fuente en uso hoy):
+--   1. En cuanto un jugador aparece con posición 'CUT' por primera vez, se
+--      guarda UNA VEZ su resultado real hasta ese momento (total_base) y en
+--      qué ronda se quedó (ronda_corte) — aquí abajo, en
+--      golf_jugadores_corte. No se vuelve a tocar nunca más, aunque Data
+--      Golf deje de mandar a ese jugador en ciclos siguientes.
+--   2. Cada ciclo (cada minuto), para cada ronda posterior a ronda_corte
+--      hasta la ronda actual del torneo, se calcula "la vuelta más alta que
+--      se está produciendo" con golf_max_vuelta_dia() de aquí abajo — que
+--      mira resultados_golf_hoyo (el hoyo a hoyo YA se está guardando en
+--      vivo, hoyo a hoyo, así que esto se actualiza solo, sin esperar a que
+--      acabe la ronda, y además sirve igual de bien para una ronda que ya
+--      terminó, como la de ayer).
+--   3. El resultado final del jugador con corte = total_base + suma, por
+--      cada una de esas rondas, de (vuelta_más_alta_de_ese_día + 1).
+create table if not exists public.golf_jugadores_corte (
+  jugador_id uuid primary key references public.jugadores(id) on delete cascade,
+  competicion text not null,
+  ronda_corte int not null,
+  total_base numeric not null,
+  creado_en timestamptz not null default now()
+);
+
+create index if not exists golf_jugadores_corte_competicion_idx on public.golf_jugadores_corte (competicion);
+
+alter table public.golf_jugadores_corte enable row level security;
+drop policy if exists "golf_jugadores_corte_admin_todo" on public.golf_jugadores_corte;
+create policy "golf_jugadores_corte_admin_todo" on public.golf_jugadores_corte
+  for all using (public.es_admin()) with check (public.es_admin());
+-- Sin política de lectura pública a propósito: esta tabla es solo
+-- contabilidad interna de la sincronización (igual que torneos_golf_live),
+-- nunca se lee desde ninguna pantalla de usuario — lo único que un usuario
+-- ve es el resultado ya calculado en jugadores.resultado_en_vivo_total.
+
+-- "La vuelta más alta que se está produciendo" ese día, entre los jugadores
+-- que siguen compitiendo (ver sigueCompitiendo() — se excluye aquí también
+-- a cualquier otro CUT/WD/DQ/DNS/MDF, no solo para no contar dos veces a un
+-- jugador con corte, sino porque un WD/DQ a mitad de ronda no debería
+-- "contar" como su vuelta real). Cuenta también una ronda a medio jugar
+-- (suma los hoyos completados hasta ahora de cada jugador) — exactamente lo
+-- que pidió Iñi ("aunque esté todavía sin acabar"). Devuelve null si nadie
+-- que siga compitiendo tiene todavía ningún hoyo guardado de esa ronda (p.ej.
+-- la ronda todavía no ha empezado a jugarse).
+create or replace function public.golf_max_vuelta_dia(p_competicion text, p_ronda int)
+returns numeric
+language sql
+security definer set search_path = public
+stable
+as $$
+  select max(por_jugador.suma_golpes - por_jugador.suma_par)
+  from (
+    select h.jugador_id, sum(h.golpes) as suma_golpes, sum(h.par) as suma_par
+    from public.resultados_golf_hoyo h
+    join public.jugadores j on j.id = h.jugador_id
+    where j.competicion = p_competicion
+      and h.ronda = p_ronda
+      and (
+        j.resultado_en_vivo_posicion is null
+        or upper(trim(j.resultado_en_vivo_posicion)) not in ('CUT', 'WD', 'DQ', 'DNS', 'MDF')
+      )
+    group by h.jugador_id
+  ) por_jugador;
+$$;
+
+revoke all on function public.golf_max_vuelta_dia(text, int) from public;
+grant execute on function public.golf_max_vuelta_dia(text, int) to authenticated;
 
 -- ============================================================================
 -- CAMPO DE CADA RONDA, PARA TORNEOS CON VARIOS CAMPOS (nuevo, 01/10)

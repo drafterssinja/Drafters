@@ -12,6 +12,7 @@ import { formatEuros, posicionLabel, parteParaPremios, DEPORTE_LABELS, type Depo
 import { formatGolfScore, COLOR_TIPO_RESULTADO, ETIQUETA_TIPO_RESULTADO, type TipoResultadoHoyo } from '@/lib/golfScoring';
 import { calcularReparto, type TipoSala } from '@/lib/repartoPremios';
 import { cargarFavoritos, alternarFavoritoEquipo } from '@/lib/favoritosEquipo';
+import { cargarFavoritosJugador } from '@/lib/favoritosJugador';
 import { cargarParesBiblioteca } from '@/lib/paresBiblioteca';
 import EstrellaFavorito from '@/components/EstrellaFavorito';
 import TablaHoyoAHoyo, { type CasillaHoyo, type FilaRondaTabla } from '@/components/TablaHoyoAHoyo';
@@ -63,7 +64,7 @@ type JugadorRow = {
 type EquipoClasif = { equipoId: string; nombre: string; jugadores: string[]; createdAt: string };
 type HoyoRow = { ronda: number; hoyo: number; par: number; golpes: number; campo_id: string | null; tipo_resultado: TipoResultadoHoyo };
 
-type Vista = 'mesa' | 'torneo' | 'premios';
+type Vista = 'mesa' | 'torneo' | 'premios' | 'eventos';
 
 function totalEquipo(jugadoresIds: string[], jugadoresPorId: Map<string, JugadorRow>): number {
   return jugadoresIds.reduce((acc, id) => {
@@ -112,6 +113,21 @@ export default function SalaClasificacionPage() {
   // comentario de cabecera del archivo.
   const [favoritos, setFavoritos] = useState<Set<string>>(new Set());
   const [soloFavoritos, setSoloFavoritos] = useState(false);
+  // Favoritos de JUGADOR (04/10, pedido de Iñi: "esto ya va para todo, para
+  // las porras y para las mesas drafters") — hasta ahora esta pantalla no
+  // los leía para nada; hace falta para la pestaña "Eventos" nueva (ver más
+  // abajo). No hay estrellita propia todavía en esta pantalla para
+  // marcarlos a mano (eso solo existe hoy en la clasificación de porras) —
+  // lo que sí llega ya marcado de serie son los 5 jugadores de tu propio
+  // equipo (marcarFavoritosPorDefecto() al crear el equipo, ver
+  // app/salas/[id]/crear-equipo).
+  const [favoritosJugador, setFavoritosJugador] = useState<Set<string>>(new Set());
+  // Historial de eventos de MIS jugadores (04/10) — mismo mecanismo que
+  // app/porras/[id]/clasificacion/page.tsx: resultados_golf_hoyo ya es un
+  // historial permanente, esta pestaña solo lo lee filtrado a favoritos.
+  const [eventos, setEventos] = useState<
+    { id: string; jugador: string; tipo: TipoResultadoHoyo; hoyo: number; ronda: number; actualizadoEn: string }[] | 'cargando' | null
+  >(null);
 
   useEffect(() => {
     let activo = true;
@@ -125,15 +141,17 @@ export default function SalaClasificacionPage() {
         return;
       }
 
-      const [{ data: perfilData }, { data: salaData }, favoritosSet] = await Promise.all([
+      const [{ data: perfilData }, { data: salaData }, favoritosSet, favoritosJugadorSet] = await Promise.all([
         supabase.from('perfiles').select('*').eq('id', session.user.id).single(),
         supabase.from('salas').select('id,nombre,competicion,deporte,tipo,estado,fecha_limite_inscripcion,buy_in,aforo').eq('id', salaId).single(),
         cargarFavoritos(session.user.id),
+        cargarFavoritosJugador(session.user.id),
       ]);
 
       if (!activo) return;
       if (perfilData) setPerfil(perfilData as Perfil);
       setFavoritos(favoritosSet);
+      setFavoritosJugador(favoritosJugadorSet);
 
       if (!salaData) {
         setError('No se ha encontrado esta mesa.');
@@ -148,10 +166,16 @@ export default function SalaClasificacionPage() {
       // alguien abre la clasificación en directo de una mesa drafter,
       // participe o no en ella. Fire-and-forget: no debe retrasar ni poder
       // romper la carga de la clasificación.
-      supabase.rpc('registrar_evento_actividad', { p_tipo: 'clasificacion', p_detalle: { modo: 'sala', nombre: salaRow.nombre } }).then(
-        () => {},
-        () => {}
-      );
+      //
+      // FIX 04/10 (mismo aviso de Iñi que en app/porras/[id]/clasificacion —
+      // ver el comentario completo ahí): se cambia a comprobar el error en
+      // vez de descartarlo en silencio, por si está fallando de verdad.
+      supabase.rpc('registrar_evento_actividad', { p_tipo: 'clasificacion', p_detalle: { modo: 'sala', nombre: salaRow.nombre } }).then(({ error }) => {
+        if (error) {
+          // eslint-disable-next-line no-console
+          console.error('No se ha podido registrar la visita a la clasificación:', error.message);
+        }
+      });
 
       if (salaRow.deporte !== 'golf') {
         // Fútbol/tenis: sin motor de resultados en directo todavía — no hace
@@ -231,7 +255,56 @@ export default function SalaClasificacionPage() {
     return () => {
       activo = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jugadorFocoId]);
+
+  // Carga del historial de eventos (04/10) — mismo criterio que
+  // app/porras/[id]/clasificacion/page.tsx: solo se pide cuando se está
+  // mirando la pestaña, y se refresca sola cada minuto mientras siga
+  // abierta.
+  useEffect(() => {
+    if (vista !== 'eventos') return;
+    const competicion = sala?.competicion;
+    if (!competicion) return;
+
+    let activo = true;
+
+    async function cargarEventos() {
+      setEventos((prev) => (prev === null ? 'cargando' : prev));
+      const idsFavoritos = Array.from(favoritosJugador).filter((id) => jugadoresPorId.has(id));
+      if (idsFavoritos.length === 0) {
+        if (activo) setEventos([]);
+        return;
+      }
+      const { data } = await supabase
+        .from('resultados_golf_hoyo')
+        .select('jugador_id,ronda,hoyo,tipo_resultado,actualizado_en')
+        .in('jugador_id', idsFavoritos)
+        .neq('tipo_resultado', 'par')
+        .order('actualizado_en', { ascending: false })
+        .limit(150);
+      if (!activo) return;
+      const filas = (data as { jugador_id: string; ronda: number; hoyo: number; tipo_resultado: TipoResultadoHoyo; actualizado_en: string }[]) ?? [];
+      setEventos(
+        filas.map((f) => ({
+          id: `${f.jugador_id}:::${f.ronda}:::${f.hoyo}`,
+          jugador: jugadoresPorId.get(f.jugador_id)?.nombre ?? '?',
+          tipo: f.tipo_resultado,
+          hoyo: f.hoyo,
+          ronda: f.ronda,
+          actualizadoEn: f.actualizado_en,
+        }))
+      );
+    }
+
+    cargarEventos();
+    const intervalo = setInterval(cargarEventos, 60000);
+    return () => {
+      activo = false;
+      clearInterval(intervalo);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vista, sala?.competicion, favoritosJugador, jugadoresPorId]);
 
   // Marca/desmarca un equipo como favorito (02/10) — ver comentario de
   // cabecera del archivo y lib/favoritosEquipo.ts.
@@ -429,6 +502,12 @@ export default function SalaClasificacionPage() {
             </button>
             <button type="button" onClick={() => setVista('premios')} style={vistaPillStyle(vista === 'premios')}>
               Premios
+            </button>
+            {/* Pestaña Eventos (nueva, 04/10, pedido de Iñi, mismo criterio
+                que app/porras/[id]/clasificacion/page.tsx — ver el
+                comentario completo ahí). */}
+            <button type="button" onClick={() => setVista('eventos')} style={vistaPillStyle(vista === 'eventos')}>
+              Eventos
             </button>
           </div>
 
@@ -659,12 +738,54 @@ export default function SalaClasificacionPage() {
               );
             })()}
 
+          {/* Pestaña Eventos (nueva, 04/10) — mismo diseño que
+              app/porras/[id]/clasificacion/page.tsx. */}
+          {vista === 'eventos' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <p style={{ fontSize: 12.5, color: S.MUTED_2, margin: 0 }}>
+                Lo último que ha pasado con tus jugadores favoritos de esta mesa — los 5 de tu propio equipo ya vienen marcados de serie.
+              </p>
+              {eventos === null || eventos === 'cargando' ? (
+                <p style={{ fontSize: 13, color: S.MUTED_2 }}>Cargando...</p>
+              ) : eventos.length === 0 ? (
+                <p style={{ fontSize: 13, color: S.MUTED_2 }}>
+                  Todavía no hay ningún evento que mostrar — o no tienes ningún jugador marcado como favorito en esta mesa.
+                </p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {eventos.map((e) => (
+                    <div
+                      key={e.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        padding: '9px 10px',
+                        background: S.PANEL,
+                        border: '1px solid #1E2723',
+                        borderRadius: 9,
+                      }}
+                    >
+                      <span style={{ width: 9, height: 9, borderRadius: '50%', flexShrink: 0, background: COLOR_TIPO_RESULTADO[e.tipo].fondo }} />
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: S.TEXT }}>
+                        <strong>{e.jugador}</strong> ha hecho {ETIQUETA_TIPO_RESULTADO[e.tipo].toLowerCase()} · Hoyo {e.hoyo} · Ronda {e.ronda}
+                      </span>
+                      <span style={{ flexShrink: 0, fontSize: 10.5, color: S.MUTED_3 }}>
+                        {new Date(e.actualizadoEn).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* CAMBIO 03/10 (pedido de Iñi): este bloque de abajo del todo
               solo se usa en la pestaña Mesa (y Premios, por si acaso) — en
               la pestaña Torneo, los resultados del jugador con foco se
               pintan justo debajo de "equipos que lo tienen" (ver más
               arriba), no aquí abajo. */}
-          {jugadorFoco && vista !== 'torneo' && (
+          {jugadorFoco && vista !== 'torneo' && vista !== 'eventos' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: 14 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, color: S.TEXT }}>{jugadorFoco.nombre} · resultados</span>

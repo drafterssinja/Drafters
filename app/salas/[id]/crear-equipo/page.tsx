@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { supabase, Perfil } from '@/lib/supabaseClient';
+import { marcarFavoritosPorDefecto } from '@/lib/favoritosJugador';
 import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
 import { EQUIPO_PRESUPUESTO, TAMANO_EQUIPO_GOLF_TENIS, FORMACIONES_FUTBOL, colorPresupuesto } from '@/lib/draftConfig';
@@ -491,6 +492,13 @@ export default function CrearEquipoPage() {
     // nueva, no al editar un equipo ya inscrito.
     if (!modoEdicion && sala) {
       await supabase.rpc('registrar_evento_actividad', { p_tipo: 'inscripcion', p_detalle: { modo: 'sala', nombre: sala.nombre } });
+    }
+    // Favoritos por defecto (04/10, pedido de Iñi, mismo criterio que
+    // app/porras/[id]/crear-equipo — ver el comentario largo en
+    // lib/favoritosJugador.ts): solo al crear, nunca al editar, y SOLO en
+    // golf y tenis — pedido explícito de Iñi, excluyendo fútbol a propósito.
+    if (!modoEdicion && perfil && !isFutbol) {
+      marcarFavoritosPorDefecto(perfil.id, selected);
     }
     // replace: al confirmar, esta pantalla de crear equipo deja de tener
     // sentido en el historial (si vuelves a ella, redirige otra vez a la

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { supabase, Perfil } from '@/lib/supabaseClient';
+import { marcarFavoritosPorDefecto } from '@/lib/favoritosJugador';
 import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
 import { formatEuros, inicialesJugador } from '@/lib/salaShared';
@@ -392,6 +393,14 @@ export default function CrearEquipoPorraPage() {
     // nueva, no al editar un equipo ya inscrito.
     if (!modoEdicion && porra) {
       await supabase.rpc('registrar_evento_actividad', { p_tipo: 'inscripcion', p_detalle: { modo: 'porra', nombre: porra.major } });
+    }
+    // Favoritos por defecto (04/10, pedido de Iñi): los jugadores de un
+    // equipo recién creado se marcan solos como favoritos — ver el
+    // comentario largo en lib/favoritosJugador.ts (solo al crear, nunca al
+    // editar). No bloquea el redirect aunque tarde o falle: ya se ha
+    // confirmado la inscripción, que es lo que de verdad importa aquí.
+    if (!modoEdicion && perfil) {
+      marcarFavoritosPorDefecto(perfil.id, jugadoresElegidos);
     }
     // replace, no push — ver el mismo comentario en salas/[id]/crear-equipo (bug de la flecha de volver, 23/09).
     router.replace(`/porras/${porraId}`);

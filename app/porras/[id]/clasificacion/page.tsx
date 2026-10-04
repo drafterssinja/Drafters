@@ -82,7 +82,7 @@ type JugadorRow = {
 type EquipoClasif = { equipoId: string; nombreEquipo: string | null; jugadores: string[]; createdAt: string };
 type HoyoRow = { ronda: number; hoyo: number; par: number; golpes: number; campo_id: string | null; tipo_resultado: TipoResultadoHoyo };
 
-type Vista = 'porra' | 'torneo' | 'premios' | 'informacion';
+type Vista = 'porra' | 'torneo' | 'premios' | 'informacion' | 'eventos';
 
 // Total de un equipo: suma de los totales (respecto al par) de sus 5
 // jugadores — a los que todavía no tienen resultado (no han salido, o su
@@ -144,6 +144,18 @@ export default function PorraClasificacionPage() {
   const [mostrarInfoBono, setMostrarInfoBono] = useState(false);
   const [equipoSeleccionadoId, setEquipoSeleccionadoId] = useState<string | null>(null);
   const [jugadorFocoId, setJugadorFocoId] = useState<string | null>(null);
+  // Scroll automático a los resultados hoyo a hoyo (04/10, pedido de Iñi:
+  // "si yo entro a un equipo y pulso sobre un jugador, que la pantalla se
+  // deslice hasta la parte de sus resultados hoyo a hoyo") — el bloque de
+  // resultados del jugador con foco se pinta al final del todo (ver más
+  // abajo, "jugadorFoco && vista !== 'torneo' ..."), bastante lejos de la
+  // lista de jugadores del equipo donde se pulsa, así que sin esto no se
+  // nota que ha pasado nada hasta que el usuario baja él mismo. El ref solo
+  // apunta a algo cuando ese bloque está pintado (pestaña Porra/Premios con
+  // un jugador seleccionado) — en la pestaña Torneo los resultados se
+  // pintan en el sitio, así que el ref se queda a null y este efecto no
+  // hace nada, que es justo lo que queremos ahí.
+  const resultadosJugadorRef = useRef<HTMLDivElement | null>(null);
   const [hoyosFoco, setHoyosFoco] = useState<HoyoRow[] | 'cargando' | null>(null);
   // Nombre de cada campo, solo para torneos con más de uno (01/10, pedido de
   // Iñi) — competicion -> campo_id -> nombre. Vacío en el 99% de los
@@ -174,6 +186,16 @@ export default function PorraClasificacionPage() {
   const [sonidoActivado, setSonidoActivado] = useState(true);
   // Cola de avisos de resultado no-par (03/10) — ver el efecto de más abajo.
   const [avisos, setAvisos] = useState<{ id: string; jugador: string; tipo: TipoResultadoHoyo }[]>([]);
+  // Historial de eventos de MIS jugadores (favoritos) — nuevo, 04/10, pedido
+  // de Iñi: "que se tiene que quedar guardado un historial de los eventos",
+  // consultable desde un botón propio ("Eventos"), a diferencia del aviso
+  // de arriba que solo se ve 5 segundos. No hace falta ninguna tabla nueva:
+  // resultados_golf_hoyo YA es un historial permanente — esta pestaña solo
+  // lo lee, filtrado a los jugadores que el usuario tiene como favoritos en
+  // esta porra. Ver el efecto de carga más abajo.
+  const [eventos, setEventos] = useState<
+    { id: string; jugador: string; tipo: TipoResultadoHoyo; hoyo: number; ronda: number; actualizadoEn: string }[] | 'cargando' | null
+  >(null);
   // Torneo terminado (nuevo, 03/10, pedido de Iñi): lo decide en exclusiva
   // la ruta de sincronización (ver el bloque "CIERRE AUTOMÁTICO..." en
   // drafters-schema.sql — torneos_golf_live.finalizado_en), nunca esta
@@ -227,13 +249,29 @@ export default function PorraClasificacionPage() {
       // quién va entrando también en la clasificación de la porra" — un
       // evento por cada vez que alguien abre esta pantalla, participe o no
       // en la porra (ver comentario de 'clasificacion' en
-      // drafters-schema.sql). Fire-and-forget, igual que
-      // registrar_intento_mesa_sin_acceso en crear-equipo: no debe
-      // retrasar ni poder romper la carga de la clasificación.
-      supabase.rpc('registrar_evento_actividad', { p_tipo: 'clasificacion', p_detalle: { modo: 'porra', nombre: porraRow.major } }).then(
-        () => {},
-        () => {}
-      );
+      // drafters-schema.sql). Fire-and-forget: no debe retrasar ni poder
+      // romper la carga de la clasificación.
+      //
+      // FIX 04/10 (aviso de Iñi: "sé que alguno está entrando y no se está
+      // guardando"): igual que con el registro de visualización del vídeo
+      // publicitario (ver AnuncioVideoInline.tsx), esta llamada no
+      // comprobaba el resultado — si fallaba por lo que fuera (el caso más
+      // probable: la base de datos de Supabase todavía no tiene el SQL del
+      // 03/10 que añadió 'clasificacion' como tipo válido), no quedaba
+      // ningún rastro en ningún sitio, así que era imposible saber si
+      // estaba fallando de verdad o si simplemente nadie había entrado.
+      // Revisado también el resto del código de esta pantalla y de la del
+      // botón nuevo "Clasificación en directo" (app/porras/page.tsx,
+      // app/mesas/page.tsx): ambos navegan a esta misma pantalla y este
+      // registro se dispara siempre, sea cual sea la puerta de entrada — no
+      // hay ninguna rama de código que lo salte. Ahora, si falla, al menos
+      // queda un error real en la consola del navegador (F12 → Console).
+      supabase.rpc('registrar_evento_actividad', { p_tipo: 'clasificacion', p_detalle: { modo: 'porra', nombre: porraRow.major } }).then(({ error }) => {
+        if (error) {
+          // eslint-disable-next-line no-console
+          console.error('No se ha podido registrar la visita a la clasificación:', error.message);
+        }
+      });
 
       const [{ data: jugData }, { data: equiposData }, { data: camposData }, { data: estadoTorneoData }] = await Promise.all([
         porraRow.competicion
@@ -371,6 +409,17 @@ export default function PorraClasificacionPage() {
     };
   }, [jugadorFocoId]);
 
+  // Scroll automático a los resultados del jugador con foco (04/10, ver el
+  // comentario junto a resultadosJugadorRef más arriba). Se dispara justo
+  // después de que React haya pintado el bloque de resultados (si está
+  // pintado — el ref se queda a null si no, y entonces no hace nada), con
+  // scroll suave y centrado en pantalla en vez de pegado arriba del todo,
+  // para que se note bien que "algo ha pasado" sin resultar brusco.
+  useEffect(() => {
+    if (!jugadorFocoId) return;
+    resultadosJugadorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [jugadorFocoId]);
+
   // Marca/desmarca un equipo como favorito (02/10) — actualización
   // optimista en pantalla, igual se guarda en segundo plano en
   // equipos_favoritos (ver lib/favoritosEquipo.ts).
@@ -479,6 +528,59 @@ export default function PorraClasificacionPage() {
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [avisos.length > 0 ? avisos[0].id : null]);
+
+  // Carga del historial de eventos de MIS jugadores (04/10, ver el
+  // comentario junto al estado `eventos` más arriba) — solo se pide cuando
+  // de verdad se está mirando esa pestaña (no de golpe al entrar en la
+  // pantalla, como el resto de pestañas), y se refresca sola cada minuto
+  // mientras siga abierta, al mismo ritmo que la sincronización en vivo.
+  useEffect(() => {
+    if (vista !== 'eventos') return;
+    const competicion = porra?.competicion;
+    if (!competicion) return;
+
+    let activo = true;
+
+    async function cargarEventos() {
+      setEventos((prev) => (prev === null ? 'cargando' : prev));
+      // Favoritos de ESTA competición únicamente (favoritosJugador puede
+      // traer ids de otras porras si el usuario ha marcado jugadores en
+      // más de una) — jugadoresPorId ya es el campo completo de esta
+      // porra, así que filtrar por ahí basta.
+      const idsFavoritos = Array.from(favoritosJugador).filter((id) => jugadoresPorId.has(id));
+      if (idsFavoritos.length === 0) {
+        if (activo) setEventos([]);
+        return;
+      }
+      const { data } = await supabase
+        .from('resultados_golf_hoyo')
+        .select('jugador_id,ronda,hoyo,tipo_resultado,actualizado_en')
+        .in('jugador_id', idsFavoritos)
+        .neq('tipo_resultado', 'par')
+        .order('actualizado_en', { ascending: false })
+        .limit(150);
+      if (!activo) return;
+      const filas = (data as { jugador_id: string; ronda: number; hoyo: number; tipo_resultado: TipoResultadoHoyo; actualizado_en: string }[]) ?? [];
+      setEventos(
+        filas.map((f) => ({
+          id: `${f.jugador_id}:::${f.ronda}:::${f.hoyo}`,
+          jugador: jugadoresPorId.get(f.jugador_id)?.nombre ?? '?',
+          tipo: f.tipo_resultado,
+          hoyo: f.hoyo,
+          ronda: f.ronda,
+          actualizadoEn: f.actualizado_en,
+        }))
+      );
+    }
+
+    cargarEventos();
+    const intervalo = setInterval(cargarEventos, 60000);
+    return () => {
+      activo = false;
+      clearInterval(intervalo);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vista, porra?.competicion, favoritosJugador, jugadoresPorId]);
 
   if (cargando || !perfil) {
     return (
@@ -634,6 +736,15 @@ export default function PorraClasificacionPage() {
                 funciona") — ver más abajo, vista === 'informacion'. */}
             <button type="button" onClick={() => setVista('informacion')} style={vistaPillStyle(vista === 'informacion')}>
               Información
+            </button>
+            {/* Pestaña Eventos (nueva, 04/10, pedido de Iñi: "quiero poder
+                ver cuáles son las últimas cosas que han pasado" en mis
+                jugadores — el popup de avisos de más abajo es solo un aviso
+                de 5 segundos que desaparece; esto es el mismo tipo de
+                evento, pero como lista permanente y consultable). Ver más
+                abajo, vista === 'eventos'. */}
+            <button type="button" onClick={() => setVista('eventos')} style={vistaPillStyle(vista === 'eventos')}>
+              Eventos
             </button>
           </div>
 
@@ -1151,6 +1262,48 @@ export default function PorraClasificacionPage() {
               );
             })()}
 
+          {/* Pestaña Eventos (nueva, 04/10, ver el comentario junto al
+              estado `eventos` y su efecto de carga más arriba). */}
+          {vista === 'eventos' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <p style={{ fontSize: 12.5, color: S.MUTED_2, margin: 0 }}>
+                Lo último que ha pasado con tus jugadores favoritos de esta porra — márcalos con la estrellita en la pestaña Torneo para que aparezcan aquí.
+              </p>
+              {eventos === null || eventos === 'cargando' ? (
+                <p style={{ fontSize: 13, color: S.MUTED_2 }}>Cargando...</p>
+              ) : eventos.length === 0 ? (
+                <p style={{ fontSize: 13, color: S.MUTED_2 }}>
+                  Todavía no hay ningún evento que mostrar — o no tienes ningún jugador marcado como favorito en esta porra.
+                </p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {eventos.map((e) => (
+                    <div
+                      key={e.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        padding: '9px 10px',
+                        background: S.PANEL,
+                        border: '1px solid #1E2723',
+                        borderRadius: 9,
+                      }}
+                    >
+                      <span style={{ width: 9, height: 9, borderRadius: '50%', flexShrink: 0, background: COLOR_TIPO_RESULTADO[e.tipo].fondo }} />
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: S.TEXT }}>
+                        <strong>{e.jugador}</strong> ha hecho {ETIQUETA_TIPO_RESULTADO[e.tipo].toLowerCase()} · Hoyo {e.hoyo} · Ronda {e.ronda}
+                      </span>
+                      <span style={{ flexShrink: 0, fontSize: 10.5, color: S.MUTED_3 }}>
+                        {new Date(e.actualizadoEn).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Pestaña Información (nueva, 03/10, pedido de Iñi): explica las
               reglas para quien entra por primera vez — pensada de cara a la
               porra grande de la semana que viene. El bono de podio (con el
@@ -1252,8 +1405,8 @@ export default function PorraClasificacionPage() {
               pintan justo debajo de "equipos que lo tienen" (ver más
               arriba, tablaResultadosJugador dentro de campoOrdenado.map),
               y en Información no hay ningún jugador seleccionable. */}
-          {jugadorFoco && vista !== 'torneo' && vista !== 'informacion' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: 14 }}>
+          {jugadorFoco && vista !== 'torneo' && vista !== 'informacion' && vista !== 'eventos' && (
+            <div ref={resultadosJugadorRef} style={{ display: 'flex', flexDirection: 'column', gap: 8, background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: 14 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, color: S.TEXT }}>{jugadorFoco.nombre} · resultados</span>
                 <a
