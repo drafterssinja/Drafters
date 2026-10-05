@@ -201,6 +201,39 @@ async function crearBorrador(
   return `${filas.length} jugadores (${numEspanoles} marcados como españoles por su país, ${filas.filter((_, i) => jugadoresCampo[i].cuota === null).length} sin cuota).${avisoSync}${fechaLimiteIso ? '' : ' Sin fecha límite todavía: se pondrá sola 5 minutos antes de la primera salida en cuanto Data Golf publique las horas.'}`;
 }
 
+/** Nombres de torneo ya existentes en la app (porras y mesas) que son el MISMO
+ * torneo que `nombreTorneo` aunque estén escritos distinto — p.ej. Iñi crea a
+ * mano "Open de España" y Data Golf lo llama "Open de España presented by
+ * Madrid". Se consideran el mismo si, ya normalizados, uno contiene al otro
+ * (y el más corto tiene al menos 8 caracteres, para no emparejar nombres
+ * genéricos por casualidad). Incluye siempre el nombre exacto de Data Golf. */
+async function nombresEquivalentesExistentes(admin: Admin, nombreTorneo: string): Promise<string[]> {
+  const objetivo = normalizarNombre(nombreTorneo);
+  const encontrados = new Set<string>();
+
+  const { data: porras } = await admin.from('porras').select('competicion, major');
+  const { data: salas } = await admin.from('salas').select('competicion').eq('deporte', 'golf');
+  const candidatos: string[] = [];
+  for (const p of (porras as { competicion: string | null; major: string | null }[] | null) ?? []) {
+    if (p.competicion) candidatos.push(p.competicion);
+    else if (p.major) candidatos.push(p.major);
+  }
+  for (const sala of (salas as { competicion: string | null }[] | null) ?? []) {
+    if (sala.competicion) candidatos.push(sala.competicion);
+  }
+
+  for (const c of candidatos) {
+    const n = normalizarNombre(c);
+    const corto = n.length <= objetivo.length ? n : objetivo;
+    if (corto.length < 8) {
+      if (n === objetivo) encontrados.add(c);
+      continue;
+    }
+    if (n === objetivo || n.includes(objetivo) || objetivo.includes(n)) encontrados.add(c);
+  }
+  return Array.from(encontrados);
+}
+
 async function procesarTour(admin: Admin, tour: DataGolfTour): Promise<ResultadoCreacionTour> {
   const base = { tour, evento: null as string | null };
 
@@ -229,11 +262,17 @@ async function procesarTour(admin: Admin, tour: DataGolfTour): Promise<Resultado
   // fecha_limite_inscripcion todavía vacía, así que nunca pisa una fecha
   // puesta a mano) y si todavía no existe porra/mesas no hace nada — al
   // crearlas más abajo ya llevan la fecha si se conoce.
+  // Torneos ya existentes que son este mismo (aunque Iñi los haya llamado
+  // distinto, p.ej. "Open de España" a secas): el cierre se aplica a todos, y
+  // más abajo su existencia impide crear nada encima (nunca se sobrescribe lo
+  // cargado a mano).
+  const nombresEquivalentes = await nombresEquivalentesExistentes(admin, nombreTorneo);
+
   if (primeraSalida) {
-    await admin.rpc('aplicar_cierre_automatico_inscripciones', {
-      p_competicion: nombreTorneo,
-      p_cierre: new Date(primeraSalida.getTime() - 5 * 60 * 1000).toISOString(),
-    });
+    const cierreIso = new Date(primeraSalida.getTime() - 5 * 60 * 1000).toISOString();
+    for (const nombre of new Set([nombreTorneo, ...nombresEquivalentes])) {
+      await admin.rpc('aplicar_cierre_automatico_inscripciones', { p_competicion: nombre, p_cierre: cierreIso });
+    }
   }
 
   // 2. No crear nada de un torneo que ya ha empezado.
@@ -264,15 +303,18 @@ async function procesarTour(admin: Admin, tour: DataGolfTour): Promise<Resultado
   const { data: yaProcesado } = await admin.from('golf_autocreacion_torneos').select('clave').eq('clave', clave).maybeSingle();
   if (yaProcesado) return { ...base, estado: 'ya_existe', detalle: 'Ya procesado en un ciclo anterior.' };
 
-  const { count: porrasExistentes } = await admin.from('porras').select('id', { count: 'exact', head: true }).eq('competicion', nombreTorneo);
+  // Ya hay porra/mesas de este torneo (con el nombre de Data Golf o con otro
+  // equivalente cargado a mano) o jugadores con ese nombre: NO se crea nada
+  // ni se toca nada — pedido de Iñi (05/10): las cuotas reales de Data Golf
+  // nunca deben sobrescribir lo que ya se publicó a mano.
   const { count: jugadoresExistentes } = await admin
     .from('jugadores')
     .select('id', { count: 'exact', head: true })
     .eq('deporte', 'golf')
     .eq('competicion', nombreTorneo);
-  if ((porrasExistentes ?? 0) > 0 || (jugadoresExistentes ?? 0) > 0) {
+  if (nombresEquivalentes.length > 0 || (jugadoresExistentes ?? 0) > 0) {
     await admin.from('golf_autocreacion_torneos').upsert({ clave, tour, nombre: nombreTorneo }, { onConflict: 'clave' });
-    return { ...base, estado: 'ya_existe', detalle: 'Ya había porra o jugadores con ese nombre de torneo — no se toca.' };
+    return { ...base, estado: 'ya_existe', detalle: `Ya existe este torneo en la app${nombresEquivalentes.length > 0 ? ` ("${nombresEquivalentes[0]}")` : ''} — no se crea ni se modifica nada.` };
   }
 
   // Se reserva la clave ANTES de crear, para que dos ciclos solapados no

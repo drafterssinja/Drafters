@@ -1,5 +1,6 @@
 'use client';
 
+import FechaNacimientoSelect, { fechaNacimientoCompleta } from '@/components/FechaNacimientoSelect';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -153,6 +154,10 @@ export default function CuentaPage() {
     }
     if (usuarioDisponible === false) {
       setError('Ese nombre de usuario ya está en uso. Elige otro.');
+      return;
+    }
+    if (fechaNacimiento && !fechaNacimientoCompleta(fechaNacimiento)) {
+      setError('La fecha de nacimiento está incompleta: elige día, mes y año.');
       return;
     }
 
@@ -411,7 +416,7 @@ export default function CuentaPage() {
             </div>
             <div style={S.field}>
               <span style={S.label}>Fecha de nacimiento</span>
-              <input type="date" value={fechaNacimiento ?? ''} onChange={(e) => setFechaNacimiento(e.target.value)} style={S.input} />
+              <FechaNacimientoSelect value={fechaNacimiento ?? ''} onChange={setFechaNacimiento} />
             </div>
             <div style={S.field}>
               <span style={S.label}>Cambiar contraseña</span>

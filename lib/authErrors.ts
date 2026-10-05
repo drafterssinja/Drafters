@@ -7,7 +7,7 @@ export function traducirErrorAuth(mensaje: string | null | undefined): string {
   const m = (mensaje ?? '').trim();
 
   const mapaExacto: Record<string, string> = {
-    'Invalid login credentials': 'Email o contraseña incorrectos.',
+    'Invalid login credentials': 'Usuario o email, o contraseña, incorrectos.',
     'Email not confirmed': 'Todavía no has verificado tu email. Revisa tu bandeja de entrada.',
     'User already registered': 'Ya existe una cuenta registrada con este email.',
     'Unable to validate email address: invalid format': 'El formato del email no es válido.',

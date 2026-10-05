@@ -22,10 +22,34 @@ export default function LoginPage() {
     setNecesitaVerificar(false);
     setCargando(true);
 
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    // Acepta email O nombre de usuario (05/10). Con "@" va directo a Supabase;
+    // sin "@" se resuelve en servidor (/api/login) y se instala la sesión.
+    const identificador = email.trim();
+    let signInError: { message: string } | null = null;
+    if (identificador.includes('@')) {
+      const r = await supabase.auth.signInWithPassword({ email: identificador, password });
+      signInError = r.error;
+    } else {
+      try {
+        const resp = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ identificador, password }),
+        });
+        const json = await resp.json();
+        if (!resp.ok || !json.access_token) {
+          signInError = { message: json.error ?? 'Invalid login credentials' };
+        } else {
+          const { error: sesionError } = await supabase.auth.setSession({
+            access_token: json.access_token,
+            refresh_token: json.refresh_token,
+          });
+          if (sesionError) signInError = sesionError;
+        }
+      } catch {
+        signInError = { message: 'Failed to fetch' };
+      }
+    }
 
     setCargando(false);
 
@@ -64,10 +88,13 @@ export default function LoginPage() {
             <div style={S.field}>
               <span style={S.label}>Usuario o email</span>
               <input
-                type="email"
+                type="text"
                 required
-                autoComplete="email"
-                placeholder="tucorreo@email.com"
+                autoComplete="username"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                placeholder="Tu usuario o tucorreo@email.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 style={S.input}
@@ -94,7 +121,7 @@ export default function LoginPage() {
             {error && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <p style={S.errorText}>{error}</p>
-                {necesitaVerificar && (
+                {necesitaVerificar && email.includes('@') && (
                   <Link
                     href={`/verificar?email=${encodeURIComponent(email)}`}
                     style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 12.5, color: S.ACCENT }}

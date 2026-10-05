@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import { traducirErrorAuth } from '@/lib/authErrors';
 import DraftersHeader from '@/components/DraftersHeader';
+import FechaNacimientoSelect, { fechaNacimientoCompleta, esMayorDeEdad } from '@/components/FechaNacimientoSelect';
 import * as S from '@/lib/mockupStyles';
 
 // Solo letras/números/guion bajo/punto, sin espacios — es el nombre que
@@ -75,6 +76,14 @@ export default function RegistroPage() {
     }
     if (!terminos) {
       setError('Tienes que aceptar los términos para continuar.');
+      return;
+    }
+    if (!fechaNacimientoCompleta(fechaNacimiento)) {
+      setError('Indica tu fecha de nacimiento completa (día, mes y año).');
+      return;
+    }
+    if (!esMayorDeEdad(fechaNacimiento)) {
+      setError('Debes ser mayor de 18 años para registrarte.');
       return;
     }
     if (!NOMBRE_USUARIO_REGEX.test(nombreUsuario.trim())) {
@@ -240,13 +249,7 @@ export default function RegistroPage() {
 
             <div style={S.field}>
               <span style={S.label}>Fecha de nacimiento</span>
-              <input
-                type="date"
-                required
-                value={fechaNacimiento}
-                onChange={(e) => setFechaNacimiento(e.target.value)}
-                style={S.input}
-              />
+              <FechaNacimientoSelect value={fechaNacimiento} onChange={setFechaNacimiento} />
               <span style={{ fontSize: 11, color: S.MUTED_3 }}>Debes ser mayor de 18 años para jugar.</span>
             </div>
 
