@@ -635,10 +635,40 @@ async function procesarTorneoDataGolf(
   // ciclo que haya primeraSalidaDetectada — es idempotente (la función SQL
   // solo toca filas con fecha_limite_inscripcion todavía null), así que no
   // hace falta guardar un "ya se aplicó" aparte.
-  if (primeraSalidaDetectada) {
+  // BUG encontrado el 04/10 (Iñi: "el torneo de la dunhill ya ha acabado
+  // hace horas" y seguía sin marcarse finalizado): `field-updates` está
+  // pedido por TOUR (p.ej. "euro"), no por torneo concreto — Data Golf no
+  // tiene forma de pedirle "el campo DE ESTE torneo", así que en cuanto el
+  // torneo en curso termina, esa misma llamada puede empezar a devolver el
+  // campo del SIGUIENTE torneo del tour (con sus propios teetimes, casi
+  // siempre arrancando solo con la ronda 1 publicada). Si eso pasa,
+  // `rondasTotalesDetectadas` de ESTE ciclo deja de ser 4 (las rondas del
+  // torneo que nos importa) y pasa a ser 1 (las del torneo que viene) —
+  // y como antes se usaba "lo detectado ahora, o si no lo guardado"
+  // (`rondasTotalesDetectadas ?? torneo.rondasTotales`), ese 1 contaminado
+  // ganaba y el check de "todos a thru 18 en la última ronda" dejaba de
+  // cumplirse para siempre (nadie va a estar en "ronda 1" si ya jugaron
+  // las 4), reseteando además el reloj de la espera de liquidación cada
+  // ciclo. Arreglo: una vez que se conoce el nº de rondas de ESTE torneo no
+  // se vuelve a bajar nunca — ni al guardarlo en la base de datos ni al
+  // usarlo aquí mismo — solo puede confirmarse o subir (torneos con
+  // amateurs, tipo Dunhill, donde se va descubriendo poco a poco quién
+  // juega 4 rondas y quién menos).
+  const rondasTotalesParaGuardar =
+    rondasTotalesDetectadas !== null && (torneo.rondasTotales === null || rondasTotalesDetectadas > torneo.rondasTotales)
+      ? rondasTotalesDetectadas
+      : torneo.rondasTotales;
+
+  if (primeraSalidaDetectada && torneo.rondasTotales === null) {
+    // La hora de la primera salida, en cambio, solo hace falta fijarla UNA
+    // vez (se usa solo para calcular el cierre automático de inscripciones,
+    // que ya es idempotente en la propia función SQL) — en cuanto ya se
+    // conocen las rondas de este torneo, no hay que seguir recalculándola
+    // ciclo a ciclo (y así tampoco se arriesga a que un field-updates ya
+    // contaminado con el torneo siguiente la pise).
     await admin
       .from('torneos_golf_live')
-      .update({ primera_salida_en: primeraSalidaDetectada.toISOString(), rondas_totales: rondasTotalesDetectadas })
+      .update({ primera_salida_en: primeraSalidaDetectada.toISOString(), rondas_totales: rondasTotalesParaGuardar })
       .eq('id', torneo.id);
 
     const cierre = new Date(primeraSalidaDetectada.getTime() - 5 * 60 * 1000);
@@ -646,13 +676,17 @@ async function procesarTorneoDataGolf(
       p_competicion: torneo.competicion,
       p_cierre: cierre.toISOString(),
     });
+  } else if (rondasTotalesParaGuardar !== torneo.rondasTotales) {
+    // Solo ha cambiado (subido) el nº de rondas detectadas — no hace falta
+    // tocar primera_salida_en, que ya está fijada.
+    await admin.from('torneos_golf_live').update({ rondas_totales: rondasTotalesParaGuardar }).eq('id', torneo.id);
   }
 
   // ==========================================================================
   // DETECCIÓN DE "TORNEO TERMINADO" Y LIQUIDACIÓN AUTOMÁTICA (solo porras
   // de golf — ver lib/liquidacionGolfAutomatica.ts y el comentario largo de
   // ESPERA_LIQUIDACION_MS, arriba del todo de este archivo).
-  const rondasTotalesEfectivo = rondasTotalesDetectadas ?? torneo.rondasTotales;
+  const rondasTotalesEfectivo = rondasTotalesParaGuardar;
   if (rondasTotalesEfectivo !== null && torneo.finalizadoEn === null) {
     // Estado de cada jugador tras ESTE ciclo: el de la base de datos, con
     // los que se han actualizado ahora mismo (actualizacionesJugadores) por

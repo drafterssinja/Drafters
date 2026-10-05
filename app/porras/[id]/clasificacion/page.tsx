@@ -804,7 +804,7 @@ export default function PorraClasificacionPage() {
             <p style={{ fontSize: 13, color: S.MUTED_2 }}>{equipos.length} equipo{equipos.length === 1 ? '' : 's'} inscrito{equipos.length === 1 ? '' : 's'}</p>
           </div>
 
-          <div style={{ display: 'flex', gap: 6, alignSelf: 'flex-start', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 6, alignSelf: 'flex-start' }}>
             {/* CAMBIO 04/10 (pedido de Iñi): en cuanto el torneo termina, la
                 pestaña "Porra" desaparece del todo — ya no tiene sentido
                 seguir viendo la plantilla de cada equipo por separado,

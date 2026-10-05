@@ -586,7 +586,7 @@ export default function SalaClasificacionPage() {
             <p style={{ fontSize: 13, color: S.MUTED_2 }}>{equipos.length} equipo{equipos.length === 1 ? '' : 's'} inscrito{equipos.length === 1 ? '' : 's'}</p>
           </div>
 
-          <div style={{ display: 'flex', gap: 6, alignSelf: 'flex-start', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 6, alignSelf: 'flex-start' }}>
             {/* CAMBIO 04/10 (pedido de Iñi, mismo criterio que
                 app/porras/[id]/clasificacion/page.tsx): en cuanto el
                 torneo termina, la pestaña "Mesa" desaparece — solo quedan

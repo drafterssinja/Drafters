@@ -86,8 +86,21 @@ export default function AdminPagosPendientesPage() {
       const salasLiquidadas = new Set(liquidadas.filter((l) => l.tipo === 'sala').map((l) => l.sala_id));
       const porrasLiquidadas = new Set(liquidadas.filter((l) => l.tipo === 'porra').map((l) => l.porra_id));
 
-      setSalas(((salasData as SalaFila[]) ?? []).filter((s) => !salasLiquidadas.has(s.id)));
-      setPorras(((porrasData as PorraFila[]) ?? []).filter((p2) => !porrasLiquidadas.has(p2.id)));
+      // 04/10, pedido de Iñi: las que ya están finalizadas (el torneo ha
+      // terminado) y pendientes de liquidar tienen que verse las primeras —
+      // son las urgentes, frente a las que todavía están en juego y a las
+      // que todavía les queda esperar. Orden estable: dentro de cada grupo
+      // (finalizadas / no finalizadas) se mantiene el orden ya traído de la
+      // consulta (created_at descendente).
+      const porPrioridadFinalizada = <T extends { estado: string }>(a: T, b: T) =>
+        Number(b.estado === 'finalizada') - Number(a.estado === 'finalizada');
+
+      setSalas(
+        ((salasData as SalaFila[]) ?? []).filter((s) => !salasLiquidadas.has(s.id)).sort(porPrioridadFinalizada)
+      );
+      setPorras(
+        ((porrasData as PorraFila[]) ?? []).filter((p2) => !porrasLiquidadas.has(p2.id)).sort(porPrioridadFinalizada)
+      );
     }
 
     cargar();
