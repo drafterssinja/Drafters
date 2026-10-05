@@ -7,6 +7,7 @@ import {
   obtenerEnJuegoDataGolf,
   obtenerEstadisticasHoyoDataGolf,
   obtenerListaJugadoresDataGolf,
+  obtenerCuotasOutrightsDataGolf,
   type DataGolfTour,
 } from '@/lib/dataGolf';
 
@@ -38,7 +39,7 @@ async function estaAutorizado(req: NextRequest, admin: ReturnType<typeof crearCl
   return !!perfil && perfil.rol === 'admin';
 }
 
-const ENDPOINTS = ['get-schedule', 'field-updates', 'live-tournament-stats', 'in-play', 'live-hole-stats', 'get-player-list'] as const;
+const ENDPOINTS = ['get-schedule', 'field-updates', 'live-tournament-stats', 'in-play', 'live-hole-stats', 'get-player-list', 'outrights'] as const;
 type Endpoint = (typeof ENDPOINTS)[number];
 
 export async function POST(req: NextRequest) {
@@ -53,7 +54,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'No autorizado.' }, { status: 401 });
   }
 
-  let body: { endpoint?: string; tour?: string } = {};
+  let body: { endpoint?: string; tour?: string; market?: string } = {};
   try {
     body = await req.json();
   } catch {
@@ -88,6 +89,12 @@ export async function POST(req: NextRequest) {
       case 'get-player-list':
         data = await obtenerListaJugadoresDataGolf();
         break;
+      case 'outrights': {
+        const mercadosValidos = ['win', 'top_5', 'top_10', 'top_20', 'mc', 'make_cut', 'frl'] as const;
+        const mercado = (mercadosValidos as readonly string[]).includes(body.market ?? '') ? (body.market as (typeof mercadosValidos)[number]) : 'win';
+        data = await obtenerCuotasOutrightsDataGolf(tour, mercado);
+        break;
+      }
     }
     return NextResponse.json({ endpoint, tour, data });
   } catch (err) {

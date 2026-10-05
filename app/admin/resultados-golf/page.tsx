@@ -149,8 +149,10 @@ export default function AdminResultadosGolfPage() {
   // respuesta cruda tal cual, para copiarla y mandármela en cuanto haya una
   // clave de API real.
   const [dgEndpoint, setDgEndpoint] = useState<
-    'get-schedule' | 'field-updates' | 'live-tournament-stats' | 'in-play' | 'live-hole-stats' | 'get-player-list'
+    'get-schedule' | 'field-updates' | 'live-tournament-stats' | 'in-play' | 'live-hole-stats' | 'get-player-list' | 'outrights'
   >('get-schedule');
+  // Mercado de cuotas (solo se usa con el endpoint 'outrights', 05/10).
+  const [dgMercado, setDgMercado] = useState<'win' | 'top_5' | 'top_10' | 'top_20' | 'make_cut'>('win');
   const [dgTour, setDgTour] = useState<'pga' | 'euro'>('euro');
   const [dgProbando, setDgProbando] = useState(false);
   const [dgResultado, setDgResultado] = useState<unknown | null>(null);
@@ -544,7 +546,7 @@ export default function AdminResultadosGolfPage() {
       const res = await fetch('/api/admin/probar-data-golf', {
         method: 'POST',
         headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint: dgEndpoint, tour: dgTour }),
+        body: JSON.stringify({ endpoint: dgEndpoint, tour: dgTour, market: dgMercado }),
       });
       const body = await res.json();
       if (!res.ok) {
@@ -942,14 +944,27 @@ export default function AdminResultadosGolfPage() {
               <div style={S.field}>
                 <span style={S.label}>Endpoint</span>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  {(['get-schedule', 'field-updates', 'live-tournament-stats', 'in-play', 'live-hole-stats', 'get-player-list'] as const).map((ep) => (
+                  {(['get-schedule', 'field-updates', 'live-tournament-stats', 'in-play', 'live-hole-stats', 'get-player-list', 'outrights'] as const).map((ep) => (
                     <button key={ep} type="button" style={S.pill(dgEndpoint === ep)} onClick={() => setDgEndpoint(ep)}>
-                      {ep}
+                      {ep === 'outrights' ? 'cuotas (outrights)' : ep}
                     </button>
                   ))}
                 </div>
               </div>
             </div>
+
+            {dgEndpoint === 'outrights' && (
+              <div style={S.field}>
+                <span style={S.label}>Mercado de cuotas</span>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {(['win', 'top_5', 'top_10', 'top_20', 'make_cut'] as const).map((m) => (
+                    <button key={m} type="button" style={S.pill(dgMercado === m)} onClick={() => setDgMercado(m)}>
+                      {m}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div style={S.field}>
               <span style={S.label}>Tour</span>

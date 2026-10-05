@@ -111,6 +111,18 @@ export async function obtenerEstadisticasHoyoDataGolf(tour: DataGolfTour, ronda:
   return pedirJson(construirUrl('preds/live-hole-stats', { tour, round: ronda }));
 }
 
+/** Cuotas de las casas de apuestas para el torneo en curso/próximo del tour
+ * (documentado el 05/10: betting-tools/outrights, tours pga/euro/kft/opp/alt,
+ * mercados win/top_5/top_10/top_20/mc/make_cut/frl). Pedido de Iñi: probar si
+ * ya hay cuotas del Open de España. Requiere plan Scratch Plus. */
+export async function obtenerCuotasOutrightsDataGolf(
+  tour: DataGolfTour,
+  mercado: 'win' | 'top_5' | 'top_10' | 'top_20' | 'mc' | 'make_cut' | 'frl' = 'win',
+  formatoCuota = 'decimal'
+): Promise<unknown> {
+  return pedirJson(construirUrl('betting-tools/outrights', { tour, market: mercado, odds_format: formatoCuota }));
+}
+
 /** Listado completo de jugadores conocidos por Data Golf (ids propios, útil si hiciera falta emparejar por id en vez de por nombre). */
 export async function obtenerListaJugadoresDataGolf(): Promise<unknown> {
   return pedirJson(construirUrl('get-player-list', {}));
