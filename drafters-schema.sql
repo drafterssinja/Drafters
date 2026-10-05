@@ -4146,3 +4146,12 @@ select cron.schedule(
   ) as request_id;
   $cron$
 );
+
+-- Aviso en la zona de notificaciones para el/los admin cuando la creación
+-- automática deja un torneo de golf nuevo en borrador (pedido de Iñi, 05/10:
+-- "¿cómo me puedo avisar a mí que se ha creado las porras y mesas de un
+-- torneo nuevo?"). Lo inserta la ruta de servidor (crear-golf-desde-datagolf),
+-- una fila por admin, con link a /admin/porras-golf. Nuevo tipo 'borrador_golf'.
+alter table public.notificaciones drop constraint if exists notificaciones_tipo_check;
+alter table public.notificaciones add constraint notificaciones_tipo_check
+  check (tipo in ('trasladado', 'reembolsado', 'eliminado', 'resultado', 'nuevo_usuario', 'borrador_golf'));

@@ -30,4 +30,4 @@ Misma causa raíz que el bug de la Dunhill sin finalizar (ver `DRAFTERS_Cambios_
 ## Lo que sigue manual
 - Revisar españoles y publicar cada borrador.
 - Activar en `/admin/resultados-golf` el torneo de resultados en vivo si se creó desactivado.
-- Fecha límite de inscripción: queda vacía hasta que Data Golf publique horas de salida; entonces la rellena el cierre automático (si la fila de resultados en vivo está activa).
+- Fecha límite de inscripción: queda vacía hasta que Data Golf publique horas de salida; en cuanto las publica, el propio cron de creación (cada 10 min) la fija 5 minutos antes de la primera salida en la porra y las mesas, SIN depender de que la fila de resultados en vivo esté activa (`aplicar_cierre_automatico_inscripciones`, idempotente: nunca pisa una fecha puesta a mano).

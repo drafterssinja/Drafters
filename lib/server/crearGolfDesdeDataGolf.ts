@@ -282,6 +282,27 @@ async function procesarTour(admin: Admin, tour: DataGolfTour): Promise<Resultado
 
   try {
     const resumen = await crearBorrador(admin, tour, nombreTorneo, campo, cuotas.jugadores, primeraSalida);
+
+    // Aviso en la zona de notificaciones para cada admin (pedido de Iñi,
+    // 05/10). Si falla, NO se deshace nada: el borrador ya está creado y el
+    // aviso es solo un extra.
+    try {
+      const { data: admins } = await admin.from('perfiles').select('id').eq('rol', 'admin');
+      if (admins && admins.length > 0) {
+        await admin.from('notificaciones').insert(
+          admins.map((a: { id: string }) => ({
+            usuario_id: a.id,
+            tipo: 'borrador_golf',
+            titulo: 'Nuevo torneo de golf listo para revisar',
+            mensaje: `Se han creado en borrador la porra y las mesas de "${nombreTorneo}". ${resumen} Revisa los españoles y publícalo cuando quieras: hasta entonces está oculto y no se manda ningún correo.`,
+            link: '/admin/porras-golf',
+          }))
+        );
+      }
+    } catch {
+      // el aviso es opcional
+    }
+
     return { ...base, estado: 'creado', detalle: `Borrador creado: ${resumen} Pendiente de revisar y publicar.` };
   } catch (err) {
     // Se deshace lo que se haya podido crear y se libera la clave, para que

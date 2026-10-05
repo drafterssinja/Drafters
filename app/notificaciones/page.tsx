@@ -34,6 +34,7 @@ const ICONO_TIPO: Record<string, string> = {
   eliminado: '⚠',
   resultado: '🏆',
   nuevo_usuario: '👤',
+  borrador_golf: '⛳',
 };
 
 export default function NotificacionesPage() {
