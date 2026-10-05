@@ -198,7 +198,7 @@ async function crearBorrador(
   if (liveError) avisoSync = ` (no se ha podido conectar a resultados en vivo: ${liveError.message})`;
   else if (hayOtroActivo) avisoSync = ' Resultados en vivo creado DESACTIVADO: hay otro torneo de este tour todavía activo — actívalo cuando termine.';
 
-  return `${filas.length} jugadores (${numEspanoles} marcados como españoles por su país, ${filas.filter((_, i) => jugadoresCampo[i].cuota === null).length} sin cuota).${avisoSync}${fechaLimiteIso ? '' : ' Sin fecha límite todavía (no hay horas de salida).'}`;
+  return `${filas.length} jugadores (${numEspanoles} marcados como españoles por su país, ${filas.filter((_, i) => jugadoresCampo[i].cuota === null).length} sin cuota).${avisoSync}${fechaLimiteIso ? '' : ' Sin fecha límite todavía: se pondrá sola 5 minutos antes de la primera salida en cuanto Data Golf publique las horas.'}`;
 }
 
 async function procesarTour(admin: Admin, tour: DataGolfTour): Promise<ResultadoCreacionTour> {
@@ -219,6 +219,22 @@ async function procesarTour(admin: Admin, tour: DataGolfTour): Promise<Resultado
   }
   const nombreTorneo = campo.eventName;
   base.evento = nombreTorneo;
+
+  // 1b. CIERRE AUTOMÁTICO DE INSCRIPCIONES (pedido de Iñi, 05/10): en cuanto
+  // Data Golf publica la hora de la primera salida, se fija la fecha límite de
+  // inscripción de la porra y de las mesas de este torneo 5 minutos antes —
+  // sin depender de que la fila de resultados en vivo esté activa. Se hace en
+  // cada ciclo, antes de nada y aunque el torneo ya exista o ya esté
+  // publicado: la función SQL es idempotente (solo toca filas con
+  // fecha_limite_inscripcion todavía vacía, así que nunca pisa una fecha
+  // puesta a mano) y si todavía no existe porra/mesas no hace nada — al
+  // crearlas más abajo ya llevan la fecha si se conoce.
+  if (primeraSalida) {
+    await admin.rpc('aplicar_cierre_automatico_inscripciones', {
+      p_competicion: nombreTorneo,
+      p_cierre: new Date(primeraSalida.getTime() - 5 * 60 * 1000).toISOString(),
+    });
+  }
 
   // 2. No crear nada de un torneo que ya ha empezado.
   const hoy = new Date().toISOString().slice(0, 10);
