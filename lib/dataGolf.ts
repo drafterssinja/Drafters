@@ -325,7 +325,13 @@ function parsearTeetimeUtc(teetime: unknown, tzOffsetSegundos: number): Date | n
  * saca la hora de la primera salida del torneo y su nº de rondas — ver
  * InfoCampoDataGolf de arriba. */
 export async function obtenerInfoCampoDataGolf(tour: DataGolfTour): Promise<InfoCampoDataGolf> {
-  const data = (await obtenerCampoDataGolf(tour)) as any;
+  return infoCampoDesdeRespuesta(await obtenerCampoDataGolf(tour));
+}
+
+/** Misma lógica que obtenerInfoCampoDataGolf, pero sobre una respuesta de
+ * field-updates que ya se tiene (para no pedirla dos veces por ciclo). */
+export function infoCampoDesdeRespuesta(respuesta: unknown): InfoCampoDataGolf {
+  const data = respuesta as any;
   const field: any[] = Array.isArray(data?.field) ? data.field : [];
   const tzOffsetSegundos = typeof data?.tz_offset === 'number' ? data.tz_offset : 0;
 
@@ -357,4 +363,57 @@ export async function obtenerInfoCampoDataGolf(tour: DataGolfTour): Promise<Info
   }
 
   return { nombresPorCampo, primeraSalida, rondasTotales };
+}
+
+
+// ============================================================================
+// CAMPO DEL TORNEO CON PAÍS (05/10 — forma CONFIRMADA contra una respuesta
+// real de field-updates del Open de España presented by Madrid)
+// ============================================================================
+// Además de `field` y `tz_offset`, la respuesta trae a nivel raíz: event_name,
+// event_id, date_start, date_end, course_name, current_round, multi_course,
+// tour y last_updated. Cada jugador de `field` trae: player_name ("Apellido,
+// Nombre"), dg_id, country (código de 3 letras: "ESP", "ENG"...), am (1 si es
+// aficionado), dg_rank, owgr_rank, teetimes (vacío hasta que se publican).
+// OJO: el país no es 100% fiable para la nacionalidad (p.ej. Adrián Otaegui,
+// español, sale con "UAE") — por eso Iñi revisa siempre los españoles antes
+// de publicar.
+
+export type JugadorCampoDataGolf = {
+  dgId: number | null;
+  /** Ya reordenado a "Nombre Apellido". */
+  nombre: string;
+  pais: string | null;
+  esAficionado: boolean;
+};
+
+export type CampoDataGolf = {
+  eventName: string | null;
+  eventId: number | null;
+  fechaInicio: string | null;
+  fechaFin: string | null;
+  jugadores: JugadorCampoDataGolf[];
+};
+
+export function campoDesdeRespuesta(respuesta: unknown): CampoDataGolf {
+  const data = respuesta as any;
+  const field: any[] = Array.isArray(data?.field) ? data.field : [];
+  const jugadores: JugadorCampoDataGolf[] = [];
+  for (const j of field) {
+    const nombreRaw = j?.player_name;
+    if (typeof nombreRaw !== 'string' || !nombreRaw.trim()) continue;
+    jugadores.push({
+      dgId: parsearEntero(j?.dg_id),
+      nombre: reordenarNombreDataGolf(nombreRaw),
+      pais: typeof j?.country === 'string' && j.country.trim() ? j.country.trim().toUpperCase() : null,
+      esAficionado: j?.am === 1 || j?.am === true,
+    });
+  }
+  return {
+    eventName: typeof data?.event_name === 'string' && data.event_name.trim() ? data.event_name.trim() : null,
+    eventId: parsearEntero(data?.event_id),
+    fechaInicio: typeof data?.date_start === 'string' ? data.date_start : null,
+    fechaFin: typeof data?.date_end === 'string' ? data.date_end : null,
+    jugadores,
+  };
 }

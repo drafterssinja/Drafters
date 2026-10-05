@@ -59,7 +59,12 @@ type PorraGolfAdmin = {
   precio: number;
   fecha_limite_inscripcion: string | null;
   formato: PorraFormato;
+  // 05/10: false = borrador creado solo desde Data Golf (oculto y sin correos
+  // hasta que el admin lo publique) — ver drafters-schema.sql.
+  publicada: boolean;
 };
+
+type JugadorRevision = { id: string; nombre: string; precio: number; es_espanol: boolean };
 
 export default function AdminPorrasGolfPage() {
   const router = useRouter();
@@ -87,10 +92,17 @@ export default function AdminPorrasGolfPage() {
   const [guardandoFecha, setGuardandoFecha] = useState(false);
   const [eliminandoId, setEliminandoId] = useState<string | null>(null);
 
+  // Revisión y publicación de borradores creados automáticamente (05/10).
+  const [revisandoId, setRevisandoId] = useState<string | null>(null);
+  const [jugadoresRevision, setJugadoresRevision] = useState<JugadorRevision[]>([]);
+  const [cargandoRevision, setCargandoRevision] = useState(false);
+  const [guardandoRevision, setGuardandoRevision] = useState(false);
+  const [publicandoId, setPublicandoId] = useState<string | null>(null);
+
   async function cargarPorras() {
     const { data } = await supabase
       .from('porras')
-      .select('id, major, competicion, estado, precio, fecha_limite_inscripcion, formato')
+      .select('id, major, competicion, estado, precio, fecha_limite_inscripcion, formato, publicada')
       .order('created_at', { ascending: false });
     setPorras((data as PorraGolfAdmin[]) ?? []);
   }
@@ -305,6 +317,77 @@ export default function AdminPorrasGolfPage() {
     await cargarPorras();
   }
 
+  async function abrirRevision(p: PorraGolfAdmin) {
+    if (revisandoId === p.id) {
+      setRevisandoId(null);
+      return;
+    }
+    setRevisandoId(p.id);
+    setJugadoresRevision([]);
+    setCargandoRevision(true);
+    const { data } = await supabase
+      .from('jugadores')
+      .select('id, nombre, precio, es_espanol')
+      .eq('deporte', 'golf')
+      .eq('competicion', p.competicion ?? '')
+      .order('precio', { ascending: false });
+    setJugadoresRevision((data as JugadorRevision[]) ?? []);
+    setCargandoRevision(false);
+  }
+
+  function toggleEspanolRevision(id: string) {
+    setJugadoresRevision((prev) => prev.map((j) => (j.id === id ? { ...j, es_espanol: !j.es_espanol } : j)));
+  }
+
+  // Guarda los españoles marcados y recalcula el grupo de color de todos
+  // (mismo cálculo que al crear a mano: puesto = orden por precio, que sale
+  // de la cuota; con 3 o más españoles se crea la lista aparte).
+  async function guardarRevision(p: PorraGolfAdmin) {
+    setGuardandoRevision(true);
+    setError(null);
+    const numEspanoles = p.formato === 'clasica' ? jugadoresRevision.filter((j) => j.es_espanol).length : 0;
+    const resultados = await Promise.all(
+      jugadoresRevision.map((j, idx) =>
+        supabase
+          .from('jugadores')
+          .update({
+            es_espanol: p.formato === 'clasica' ? j.es_espanol : false,
+            grupo_porra: p.formato === 'clasica' ? calcularGrupoPorra(idx + 1, j.es_espanol, numEspanoles) : null,
+          })
+          .eq('id', j.id)
+      )
+    );
+    setGuardandoRevision(false);
+    if (resultados.some((r) => r.error)) {
+      setError('No se han podido guardar todos los cambios. Inténtalo de nuevo.');
+      return;
+    }
+    setResultado(`Españoles guardados (${numEspanoles}) y grupos recalculados para "${p.major}".`);
+  }
+
+  async function publicarBorrador(p: PorraGolfAdmin) {
+    if (!window.confirm(`¿Publicar "${p.major}"? Pasará a ser visible para todos los usuarios y se enviarán los avisos por correo.`)) return;
+    setPublicandoId(p.id);
+    setError(null);
+    // Primero las mesas y después la porra: el aviso por correo se dispara al
+    // publicar la porra, y para entonces las mesas ya deben estar visibles.
+    const { error: salasError } = await supabase.from('salas').update({ publicada: true }).eq('deporte', 'golf').eq('competicion', p.competicion ?? '');
+    if (salasError) {
+      setPublicandoId(null);
+      setError('No se han podido publicar las mesas. Inténtalo de nuevo.');
+      return;
+    }
+    const { error: porraError } = await supabase.from('porras').update({ publicada: true }).eq('id', p.id);
+    setPublicandoId(null);
+    if (porraError) {
+      setError('No se ha podido publicar la porra. Inténtalo de nuevo.');
+      return;
+    }
+    setRevisandoId(null);
+    setResultado(`"${p.major}" publicada (porra y mesas).`);
+    await cargarPorras();
+  }
+
   function empezarEdicionFecha(p: PorraGolfAdmin) {
     setEditandoFechaId(p.id);
     setFechaEditada(p.fecha_limite_inscripcion ? p.fecha_limite_inscripcion.slice(0, 16) : '');
@@ -486,8 +569,32 @@ export default function AdminPorrasGolfPage() {
                           {p.major || p.competicion || '(sin nombre de torneo)'}
                         </span>
                         <span style={{ fontSize: 11, color: S.FAINT }}>{p.estado} · {p.precio.toFixed(2)} €</span>
+                        {!p.publicada && (
+                          <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10, color: '#F0B94D' }}>
+                            BORRADOR — oculta para los usuarios y sin correos hasta que la publiques
+                          </span>
+                        )}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                        {!p.publicada && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => abrirRevision(p)}
+                              style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: '#F0B94D', background: 'transparent', border: '1px solid #F0B94D', borderRadius: 8, padding: '6px 10px', cursor: 'pointer' }}
+                            >
+                              {revisandoId === p.id ? 'Cerrar' : 'Revisar'}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={publicandoId === p.id}
+                              onClick={() => publicarBorrador(p)}
+                              style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: '#04140B', background: '#3DDC84', border: 'none', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', opacity: publicandoId === p.id ? 0.7 : 1 }}
+                            >
+                              {publicandoId === p.id ? 'Publicando...' : 'Publicar'}
+                            </button>
+                          </>
+                        )}
                         <Link
                           href={`/porras/${p.id}`}
                           style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: S.ACCENT, background: 'transparent', border: `1px solid rgba(61,220,132,0.4)`, borderRadius: 8, padding: '6px 10px', textDecoration: 'none' }}
@@ -511,6 +618,44 @@ export default function AdminPorrasGolfPage() {
                         </button>
                       </div>
                     </div>
+                    {revisandoId === p.id && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, borderTop: `1px solid ${S.CARD_BORDER}`, paddingTop: 10 }}>
+                        <p style={{ fontSize: 12, color: S.MUTED_2, margin: 0, lineHeight: 1.5 }}>
+                          {p.formato === 'clasica'
+                            ? `Marca "ES" en los jugadores españoles (con ${UMBRAL_MINIMO_ESPANOLES} o más se les crea una lista aparte) y pulsa Guardar. Después, Publicar.`
+                            : 'Esta porra es de presupuesto: no usa listas por color, no hace falta marcar españoles.'}
+                        </p>
+                        {cargandoRevision && <p style={{ fontSize: 12, color: S.MUTED_3, margin: 0 }}>Cargando jugadores...</p>}
+                        {p.formato === 'clasica' && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 320, overflowY: 'auto' }}>
+                            {jugadoresRevision.map((j, idx) => (
+                              <div key={j.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: 12.5, color: S.TEXT }}>
+                                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  <span style={{ color: S.MUTED_3 }}>{idx + 1}.</span> {j.nombre}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleEspanolRevision(j.id)}
+                                  style={{ ...S.pill(j.es_espanol), padding: '3px 10px', fontSize: 11, flexShrink: 0 }}
+                                >
+                                  ES
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {p.formato === 'clasica' && jugadoresRevision.length > 0 && (
+                          <button
+                            type="button"
+                            disabled={guardandoRevision}
+                            onClick={() => guardarRevision(p)}
+                            style={{ alignSelf: 'flex-start', fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: '#04140B', background: '#3DDC84', border: 'none', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', opacity: guardandoRevision ? 0.7 : 1 }}
+                          >
+                            {guardandoRevision ? 'Guardando...' : 'Guardar españoles'}
+                          </button>
+                        )}
+                      </div>
+                    )}
                     {editando && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, borderTop: `1px solid ${S.CARD_BORDER}`, paddingTop: 10 }}>
                         <input type="datetime-local" value={fechaEditada} onChange={(e) => setFechaEditada(e.target.value)} style={{ ...S.input, padding: '8px 10px', fontSize: 12.5 }} />

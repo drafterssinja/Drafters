@@ -736,7 +736,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'No autorizado.' }, { status: 401 });
   }
 
-  const { data: torneosData, error: torneosError } = await admin.from('torneos_golf_live').select('*').eq('activo', true);
+  // 05/10: un torneo ya finalizado (finalizado_en puesto) NO se vuelve a
+  // sincronizar. Las llamadas de Data Golf son por TOUR: en cuanto empieza el
+  // torneo siguiente, seguir sincronizando el anterior le pisaría su
+  // clasificación final con los resultados del nuevo (los jugadores que
+  // repiten se emparejan por nombre).
+  const { data: torneosData, error: torneosError } = await admin.from('torneos_golf_live').select('*').eq('activo', true).is('finalizado_en', null);
   if (torneosError) {
     return NextResponse.json({ error: `No se han podido leer los torneos activos: ${torneosError.message}` }, { status: 500 });
   }

@@ -4055,3 +4055,94 @@ select cron.schedule(
   '*/5 * * * *',
   $$select public.consolidar_salas_incompletas();$$
 );
+
+-- ============================================================================
+-- CREACIÓN AUTOMÁTICA DE PORRAS Y MESAS DE GOLF DESDE DATA GOLF (05/10)
+-- ============================================================================
+-- Pedido de Iñi: en cuanto Data Golf publique las cuotas de un torneo (DP
+-- World Tour o PGA Tour), que se creen solas la porra y las mesas Drafters
+-- de ese torneo, SIN que él tenga que pulsar nada — él solo revisa (marca a
+-- los españoles) y publica. Mientras no se publique, el torneo está OCULTO
+-- para todos los usuarios, y NO se manda ningún correo ("que no genere
+-- correos hasta que sea definitiva").
+--
+-- Cómo se oculta: columna `publicada` (por defecto TRUE, así que todo lo que
+-- ya existe sigue visible exactamente igual) + la política de lectura pública
+-- de porras y salas pasa a exigir `publicada` — salvo para el admin, que
+-- siempre lo ve todo (mismo criterio que el resto de este archivo).
+alter table public.porras add column if not exists publicada boolean not null default true;
+alter table public.salas  add column if not exists publicada boolean not null default true;
+
+drop policy if exists "salas_select_publico" on public.salas;
+create policy "salas_select_publico" on public.salas
+  for select using (publicada or public.es_admin());
+
+drop policy if exists "porras_select_publico" on public.porras;
+create policy "porras_select_publico" on public.porras
+  for select using (publicada or public.es_admin());
+
+-- Correo de "nueva porra": antes se disparaba al insertar CUALQUIER porra.
+-- Ahora la función solo avisa si la porra ya nace publicada, y hay un segundo
+-- disparador que avisa en el momento en que un borrador pasa de oculto a
+-- publicado (nunca antes).
+create or replace function public.notificar_nueva_porra_creada()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if new.publicada then
+    perform net.http_post(
+      url := 'https://drafters-rho.vercel.app/api/notificaciones/nueva-porra',
+      headers := jsonb_build_object('Content-Type', 'application/json', 'x-cron-secret', 'hasiygqef1ojipcs332pj'),
+      body := jsonb_build_object('porra_id', new.id),
+      timeout_milliseconds := 55000
+    );
+  end if;
+  return new;
+exception when others then
+  return new;
+end;
+$$;
+
+drop trigger if exists on_porra_publicada_notificar on public.porras;
+create trigger on_porra_publicada_notificar
+  after update of publicada on public.porras
+  for each row
+  when (old.publicada = false and new.publicada = true)
+  execute function public.notificar_nueva_porra_creada();
+
+-- Torneos que la creación automática ya ha procesado alguna vez. Sirve para
+-- no volver a crear un torneo que el admin haya borrado a propósito (sin
+-- esto, el siguiente ciclo del cron lo regeneraría sin parar).
+create table if not exists public.golf_autocreacion_torneos (
+  clave text primary key,              -- "<tour>|<nombre del torneo en Data Golf>"
+  tour text not null,
+  nombre text not null,
+  creado_en timestamptz not null default now()
+);
+alter table public.golf_autocreacion_torneos enable row level security;
+drop policy if exists "golf_autocreacion_torneos_admin_todo" on public.golf_autocreacion_torneos;
+create policy "golf_autocreacion_torneos_admin_todo" on public.golf_autocreacion_torneos
+  for all using (public.es_admin()) with check (public.es_admin());
+
+-- Cron: cada 10 minutos pregunta a Data Golf si hay cuotas nuevas (DP World
+-- Tour y PGA Tour). Igual que el cron de resultados en vivo: usa el mismo
+-- CRON_SECRET que ya está en Vercel — no hay que crear nada nuevo.
+-- Para comprobarlo: select * from cron.job; — para quitarlo:
+-- select cron.unschedule('crear-golf-desde-datagolf');
+create extension if not exists pg_cron;
+create extension if not exists pg_net;
+
+select cron.schedule(
+  'crear-golf-desde-datagolf',
+  '*/10 * * * *',
+  $cron$
+  select net.http_post(
+    url := 'https://drafters-rho.vercel.app/api/admin/crear-golf-desde-datagolf',
+    headers := jsonb_build_object('Content-Type', 'application/json', 'x-cron-secret', 'hasiygqef1ojipcs332pj'),
+    body := '{}'::jsonb,
+    timeout_milliseconds := 55000
+  ) as request_id;
+  $cron$
+);
