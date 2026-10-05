@@ -34,9 +34,6 @@ export default function PorrasIndexPage() {
   const [porras, setPorras] = useState<PorraFila[]>([]);
   const [inscritosPorPorra, setInscritosPorPorra] = useState<Map<string, number>>(new Map());
   const [cargando, setCargando] = useState(true);
-  // Finalizadas (04/10, corrección de Iñi): no se ven de primeras al entrar
-  // — se quedan plegadas detrás de un desplegable, que empieza cerrado.
-  const [mostrarFinalizadas, setMostrarFinalizadas] = useState(false);
 
   useEffect(() => {
     let activo = true;
@@ -113,6 +110,14 @@ export default function PorrasIndexPage() {
   const porrasFinalizadas = porras
     .filter((p) => p.estado === 'finalizada')
     .sort((a, b) => new Date(b.fecha_limite_inscripcion ?? 0).getTime() - new Date(a.fecha_limite_inscripcion ?? 0).getTime());
+
+  // AVISO "PRÓXIMAMENTE" (05/10, pedido de Iñi): mientras la porra del Open
+  // de España no esté publicada, cualquiera que entre aquí ve una tarjeta
+  // informativa (no se puede pulsar, no lleva a ninguna parte). En cuanto
+  // aparece en la lista una porra de ese torneo (publicada, o la que sea),
+  // la tarjeta desaparece sola — no hay que quitarla a mano.
+  const hayPorraOpenEspana = porras.some((p) => /open de espa/i.test(`${p.major} ${p.competicion ?? ''}`));
+  const mostrarProximamenteOpenEspana = !hayPorraOpenEspana;
 
   // Tarjeta de una porra (extraída a función para poder usarse tanto en la
   // lista de activas como en la de finalizadas, con el mismo diseño —
@@ -229,38 +234,54 @@ export default function PorrasIndexPage() {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {porras.length === 0 && <p style={{ fontSize: 13, color: S.MUTED_2 }}>No hay ninguna porra clásica disponible ahora mismo.</p>}
+            {mostrarProximamenteOpenEspana && (
+              <div
+                style={{
+                  background: S.PANEL,
+                  border: '1px dashed rgba(240,185,77,0.55)',
+                  borderRadius: 12,
+                  padding: '14px 16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                  cursor: 'default',
+                  userSelect: 'none',
+                }}
+              >
+                <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, color: S.TEXT }}>Open de España</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span
+                    style={{
+                      fontFamily: "'Manrope', sans-serif",
+                      fontWeight: 700,
+                      fontSize: 9.5,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
+                      color: '#F0B94D',
+                      background: 'rgba(240,185,77,0.12)',
+                      border: '1px solid rgba(240,185,77,0.4)',
+                      borderRadius: 999,
+                      padding: '3px 8px',
+                    }}
+                  >
+                    Próximamente
+                  </span>
+                  <span style={{ fontSize: 12, color: S.MUTED_2 }}>Hoy lunes estará abierta</span>
+                </div>
+              </div>
+            )}
+            {porras.length === 0 && !mostrarProximamenteOpenEspana && <p style={{ fontSize: 13, color: S.MUTED_2 }}>No hay ninguna porra clásica disponible ahora mismo.</p>}
             {porrasActivas.map((p) => tarjetaPorra(p))}
-            {/* CAMBIO 04/10 (corrección de Iñi): al entrar, las finalizadas
-                NO se ven — se quedan detrás de un desplegable que empieza
-                cerrado; hay que pulsarlo a propósito para verlas, con el
-                botón "Clasificación final" en vez de "Clasificación en
-                directo" — ver tarjetaPorra() más arriba. */}
+            {/* CAMBIO 05/10 (nueva corrección de Iñi, sustituye a la del
+                04/10): las finalizadas YA NO van ocultas tras un desplegable —
+                se ven siempre, debajo de todas las abiertas, con el botón
+                "Clasificación final" (ver tarjetaPorra() más arriba). */}
             {porrasFinalizadas.length > 0 && (
               <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <button
-                  type="button"
-                  onClick={() => setMostrarFinalizadas((v) => !v)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    alignSelf: 'flex-start',
-                    background: 'transparent',
-                    border: 'none',
-                    padding: 0,
-                    fontSize: 11,
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em',
-                    color: S.MUTED_3,
-                    cursor: 'pointer',
-                  }}
-                >
-                  <span style={{ fontSize: 10, transform: mostrarFinalizadas ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▶</span>
+                <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>
                   Finalizadas ({porrasFinalizadas.length})
-                </button>
-                {mostrarFinalizadas && porrasFinalizadas.map((p) => tarjetaPorra(p))}
+                </span>
+                {porrasFinalizadas.map((p) => tarjetaPorra(p))}
               </div>
             )}
           </div>

@@ -85,7 +85,6 @@ function MesasPageInner() {
   // Maratones finalizados (04/10, corrección de Iñi): no se ven de primeras
   // al entrar — se quedan plegados detrás de un desplegable, que empieza
   // cerrado.
-  const [mostrarMaratonesFinalizados, setMostrarMaratonesFinalizados] = useState(false);
 
   useEffect(() => {
     let activo = true;
@@ -594,29 +593,13 @@ function MesasPageInner() {
                   más arriba. */}
               {maratonesFinalizadosDelDeporte.length > 0 && (
                 <div style={{ marginTop: 2, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <button
-                    type="button"
-                    onClick={() => setMostrarMaratonesFinalizados((v) => !v)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      alignSelf: 'flex-start',
-                      background: 'transparent',
-                      border: 'none',
-                      padding: 0,
-                      fontSize: 11,
-                      fontWeight: 700,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.05em',
-                      color: S.MUTED_3,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <span style={{ fontSize: 10, transform: mostrarMaratonesFinalizados ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▶</span>
+                  {/* 05/10 (corrección de Iñi): los finalizados ya no van
+                      ocultos tras un desplegable — se ven siempre, debajo
+                      de todos los abiertos. */}
+                  <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>
                     Finalizados ({maratonesFinalizadosDelDeporte.length})
-                  </button>
-                  {mostrarMaratonesFinalizados && maratonesFinalizadosDelDeporte.map((m) => tarjetaMaraton(m))}
+                  </span>
+                  {maratonesFinalizadosDelDeporte.map((m) => tarjetaMaraton(m))}
                 </div>
               )}
             </div>

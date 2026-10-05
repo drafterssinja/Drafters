@@ -10,6 +10,9 @@ Todo nace como **BORRADOR** (`publicada = false` en porras y salas): oculto para
 
 Iñi revisa en **Admin → Porras de golf**: botón *Revisar* (marcar/desmarcar españoles y *Guardar españoles*, que recalcula los grupos de color) y botón *Publicar* (publica mesas y después la porra).
 
+## Aviso al admin
+Cuando se crea un borrador, la ruta inserta una notificación (tipo nuevo `borrador_golf`, icono ⛳) para cada admin en la zona de Notificaciones, con enlace a `/admin/porras-golf`. Sale con el punto rojo de la cabecera como cualquier otra. SQL: amplía el check de `notificaciones.tipo` (final de `drafters-schema.sql`).
+
 ## Decisiones
 - **Cuota = bet365** (pedido de Iñi). Jugador sin cuota de bet365 → precio mínimo.
 - **Españoles** marcados solos por `country = "ESP"` de `field-updates`. El país no es del todo fiable (Adrián Otaegui sale como "UAE"), por eso se revisa siempre antes de publicar.

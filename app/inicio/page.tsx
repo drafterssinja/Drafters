@@ -58,6 +58,10 @@ export default function InicioPage() {
   // volver a colapsar la lista.
   const [mostrarTodos, setMostrarTodos] = useState(false);
   const LIMITE_EQUIPOS_VISIBLE = 3;
+  // Pestañas "Finalizadas" / "En juego" encima de la lista (05/10, pedido de
+  // Iñi): primera pestaña (izquierda) = porras y mesas finalizadas, segunda =
+  // en juego, y por defecto se ve "En juego".
+  const [pestanaEquipos, setPestanaEquipos] = useState<'finalizadas' | 'en_juego'>('en_juego');
 
   useEffect(() => {
     let activo = true;
@@ -133,6 +137,11 @@ export default function InicioPage() {
     return null;
   }
 
+  const estaFinalizado = (eq: EquipoFila) => eq.salas?.estado === 'finalizada' || eq.porras?.estado === 'finalizada';
+  const equiposFinalizados = equipos.filter(estaFinalizado);
+  const equiposEnJuego = equipos.filter((eq) => !estaFinalizado(eq));
+  const equiposPestana = pestanaEquipos === 'finalizadas' ? equiposFinalizados : equiposEnJuego;
+
   return (
     <main style={S.mainReset}>
       <div style={S.pageFrame}>
@@ -180,7 +189,20 @@ export default function InicioPage() {
 
           {equipos.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {(mostrarTodos ? equipos : equipos.slice(0, LIMITE_EQUIPOS_VISIBLE)).map((eq) => {
+              <div style={{ display: 'flex', gap: 6, alignSelf: 'flex-start' }}>
+                <button type="button" onClick={() => { setPestanaEquipos('finalizadas'); setMostrarTodos(false); }} style={S.pill(pestanaEquipos === 'finalizadas')}>
+                  Finalizadas ({equiposFinalizados.length})
+                </button>
+                <button type="button" onClick={() => { setPestanaEquipos('en_juego'); setMostrarTodos(false); }} style={S.pill(pestanaEquipos === 'en_juego')}>
+                  En juego ({equiposEnJuego.length})
+                </button>
+              </div>
+              {equiposPestana.length === 0 && (
+                <p style={{ fontSize: 12.5, color: S.MUTED_3, margin: 0 }}>
+                  {pestanaEquipos === 'finalizadas' ? 'Todavía no tienes ninguna porra ni mesa finalizada.' : 'No tienes ninguna porra ni mesa en juego ahora mismo.'}
+                </p>
+              )}
+              {(mostrarTodos ? equiposPestana : equiposPestana.slice(0, LIMITE_EQUIPOS_VISIBLE)).map((eq) => {
                 const competicionLabel = eq.salas?.competicion ?? eq.porras?.competicion ?? eq.porras?.major ?? '';
                 const salaNombre = eq.salas?.nombre ?? (eq.porras ? `Porra · ${eq.porras.major}` : eq.nombre_equipo ?? 'Mi equipo');
                 const href = eq.salas ? `/salas/${eq.sala_id}` : eq.porras ? `/porras/${eq.porra_id}` : '#';
@@ -189,6 +211,7 @@ export default function InicioPage() {
                   (eq.porras.estado === 'finalizada' ||
                     (!!eq.porras.fecha_limite_inscripcion && new Date(eq.porras.fecha_limite_inscripcion).getTime() <= Date.now()));
                 const clasificacionHref = eq.salas ? `/salas/${eq.sala_id}/clasificacion` : eq.porras ? `/porras/${eq.porra_id}/clasificacion` : '#';
+                const esFinalizadoEq = estaFinalizado(eq);
                 const enDirecto = eq.salas?.estado === 'completa' || porraEmpezada;
                 const lesionado = lesionadoDe(eq);
                 return (
@@ -232,7 +255,7 @@ export default function InicioPage() {
                         >
                           Ver mi equipo
                         </Link>
-                        {enDirecto && (
+                        {(enDirecto || esFinalizadoEq) && (
                           <Link
                             href={clasificacionHref}
                             style={{
@@ -254,12 +277,12 @@ export default function InicioPage() {
                             }}
                           >
                             <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#FF7A45', flexShrink: 0 }} />
-                            Clasificación en directo
+                            {esFinalizadoEq ? 'Clasificación final' : 'Clasificación en directo'}
                           </Link>
                         )}
                       </div>
                     </div>
-                    {lesionado && (
+                    {lesionado && !esFinalizadoEq && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 4px' }}>
                         <span style={{ flexShrink: 0, width: 13, height: 13, borderRadius: '50%', background: '#FF5C5C' }} />
                         <span style={{ fontSize: 11, color: '#FF5C5C', fontWeight: 600 }}>{lesionado} está lesionado. Haz un cambio.</span>
@@ -268,7 +291,7 @@ export default function InicioPage() {
                   </div>
                 );
               })}
-              {equipos.length > LIMITE_EQUIPOS_VISIBLE && (
+              {equiposPestana.length > LIMITE_EQUIPOS_VISIBLE && (
                 <button
                   type="button"
                   onClick={() => setMostrarTodos((v) => !v)}
@@ -285,7 +308,7 @@ export default function InicioPage() {
                     padding: '6px 10px',
                   }}
                 >
-                  {mostrarTodos ? 'Mostrar menos ▴' : `Mostrar más (${equipos.length - LIMITE_EQUIPOS_VISIBLE}) ▾`}
+                  {mostrarTodos ? 'Mostrar menos ▴' : `Mostrar más (${equiposPestana.length - LIMITE_EQUIPOS_VISIBLE}) ▾`}
                 </button>
               )}
             </div>

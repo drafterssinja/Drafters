@@ -71,7 +71,6 @@ function SalasPageInner() {
   // Finalizadas (04/10, corrección de Iñi): no se ven de primeras al
   // entrar — se quedan plegadas detrás de un desplegable, que empieza
   // cerrado.
-  const [mostrarFinalizadas, setMostrarFinalizadas] = useState(false);
 
   useEffect(() => {
     let activo = true;
@@ -359,29 +358,13 @@ function SalasPageInner() {
               directo" — ver tarjetaSala() más arriba. */}
           {salasFinalizadasDelDeporte.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <button
-                type="button"
-                onClick={() => setMostrarFinalizadas((v) => !v)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  alignSelf: 'flex-start',
-                  background: 'transparent',
-                  border: 'none',
-                  padding: 0,
-                  fontSize: 11,
-                  fontWeight: 700,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                  color: S.MUTED_3,
-                  cursor: 'pointer',
-                }}
-              >
-                <span style={{ fontSize: 10, transform: mostrarFinalizadas ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▶</span>
+              {/* 05/10 (corrección de Iñi): las finalizadas ya no van ocultas
+                  tras un desplegable — se ven siempre, debajo de todas las
+                  abiertas. */}
+              <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>
                 Finalizadas ({salasFinalizadasDelDeporte.length})
-              </button>
-              {mostrarFinalizadas && salasFinalizadasDelDeporte.map((s) => tarjetaSala(s))}
+              </span>
+              {salasFinalizadasDelDeporte.map((s) => tarjetaSala(s))}
             </div>
           )}
 
