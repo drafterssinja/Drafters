@@ -220,6 +220,44 @@ async function plantillaDeLaLiga(admin: Admin, prefijo: string): Promise<FichaJu
 
 type Ancla = { numero: number; primer_partido: string; creada: boolean };
 
+/** Número de jornada de cada ventana contando los partidos de cada equipo desde
+ * el inicio de temporada: en una liga todos los equipos juegan UN partido por
+ * jornada, así que el partido nº N de un equipo es de la jornada N. Se toma el
+ * valor más repetido entre los equipos de la ventana (así un aplazado suelto no
+ * descuadra el número). Necesita los partidos desde el inicio de temporada. */
+function numerarPorPartidosDeEquipo(eventos: EventoLiga[], ventanas: Ventana[], esperados: number): (number | null)[] {
+  const minimo = Math.ceil(esperados * 0.6);
+  const ordenados = [...eventos].sort((a, b) => a.kickoff.getTime() - b.kickoff.getTime());
+  const nDePartido = new Map<string, number>(); // `${idEvento}|${equipo}` → nº de partido del equipo
+  const contador = new Map<string, number>();
+  for (const e of ordenados) {
+    for (const eq of [e.local, e.visitante]) {
+      const n = (contador.get(eq) ?? 0) + 1;
+      contador.set(eq, n);
+      nDePartido.set(`${e.id}|${eq}`, n);
+    }
+  }
+  return ventanas.map((v) => {
+    if (v.eventos.length < minimo) return null;
+    const votos = new Map<number, number>();
+    for (const e of v.eventos) {
+      for (const eq of [e.local, e.visitante]) {
+        const n = nDePartido.get(`${e.id}|${eq}`);
+        if (n !== undefined) votos.set(n, (votos.get(n) ?? 0) + 1);
+      }
+    }
+    let mejor: number | null = null;
+    let mejorVotos = 0;
+    votos.forEach((c, n) => {
+      if (c > mejorVotos) {
+        mejor = n;
+        mejorVotos = c;
+      }
+    });
+    return mejor;
+  });
+}
+
 /** Número de jornada de cada ventana (null = no es una jornada, p.ej. un aplazado suelto). */
 function numerarVentanas(ventanas: Ventana[], esperados: number, anclas: Ancla[], numeroInicialSinAncla: number): (number | null)[] {
   const minimo = Math.ceil(esperados * 0.6);
@@ -281,8 +319,19 @@ async function crearUnaLiga(admin: Admin, liga: (typeof LIGAS_AUTO)[number], aho
   // ya empezadas + 1.
   const minimo = Math.ceil(liga.partidosPorJornada * 0.6);
   const yaJugadas = ventanas.filter((v) => v.eventos.length >= minimo && v.inicio.getTime() < ahora.getTime()).length;
-  const numeros = numerarVentanas(ventanas, liga.partidosPorJornada, anclas, 1);
   void yaJugadas;
+  // Sin anclas se cuenta partidos por equipo desde el inicio de temporada (ver
+  // numerarPorPartidosDeEquipo); con anclas, se numera a partir de ellas.
+  const numeros = anclas.length > 0 ? numerarVentanas(ventanas, liga.partidosPorJornada, anclas, 1) : numerarPorPartidosDeEquipo(eventos, ventanas, liga.partidosPorJornada);
+  if (anclas.length === 0) {
+    // Se guardan como ancla (sin marcar como creada) para no volver a recorrer
+    // toda la temporada en cada ejecución.
+    const filasAncla = ventanas
+      .map((v, i) => ({ v, n: numeros[i] }))
+      .filter(({ v, n }) => n !== null && v.inicio.getTime() > ahora.getTime())
+      .map(({ v, n }) => ({ liga: liga.prefijo, numero: n as number, primer_partido: v.inicio.toISOString(), competicion: `${liga.prefijo} - Jornada ${n}`, creada: false }));
+    if (filasAncla.length > 0) await admin.from('futbol_jornadas_auto').upsert(filasAncla, { onConflict: 'liga,numero', ignoreDuplicates: true });
+  }
 
   const futuras = ventanas.map((v, i) => ({ v, i })).filter(({ v, i }) => numeros[i] !== null && v.inicio.getTime() > ahora.getTime());
   if (futuras.length === 0) {
