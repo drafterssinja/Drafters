@@ -4155,3 +4155,15 @@ select cron.schedule(
 alter table public.notificaciones drop constraint if exists notificaciones_tipo_check;
 alter table public.notificaciones add constraint notificaciones_tipo_check
   check (tipo in ('trasladado', 'reembolsado', 'eliminado', 'resultado', 'nuevo_usuario', 'borrador_golf'));
+
+-- ============================================================================
+-- BAJAS DE JUGADORES EN PORRAS/MESAS DE GOLF (06/10, urgente, pedido de Iñi)
+-- ============================================================================
+-- Un jugador que causa baja (no va a jugar el torneo) se marca baja=true
+-- desde /admin/porras-golf. Los equipos que ya lo tenían se quedan con él
+-- (verán el aviso "no va a jugar. Haz un cambio" en Inicio/Mesas y pueden
+-- cambiarlo hasta el cierre); si empieza el torneo sin cambiarlo, ese
+-- jugador no suma puntos porque no juega. Nadie más puede fichar a una baja
+-- (las pantallas de crear/editar equipo la ocultan). Si ningún equipo lo ha
+-- fichado, el admin lo borra directamente en vez de marcarlo.
+alter table public.jugadores add column if not exists baja boolean not null default false;
