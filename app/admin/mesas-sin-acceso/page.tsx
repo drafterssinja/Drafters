@@ -142,7 +142,7 @@ export default function AdminMesasSinAccesoPage() {
     return (
       <main style={S.mainReset}>
         <div style={S.pageFrame}>
-          <DraftersHeader />
+          <DraftersHeader sinVolver />
           <div style={S.accountSection}>
             <p style={S.errorText}>{errorAcceso}</p>
             <button
@@ -166,7 +166,7 @@ export default function AdminMesasSinAccesoPage() {
     return (
       <main style={S.mainReset}>
         <div style={S.pageFrame}>
-          <DraftersHeader />
+          <DraftersHeader sinVolver />
           <div style={S.accountSection}>
             <p style={{ fontSize: 14, color: S.MUTED_2 }}>Comprobando acceso...</p>
           </div>
@@ -186,7 +186,7 @@ export default function AdminMesasSinAccesoPage() {
   return (
     <main style={S.mainReset}>
       <div style={S.pageFrame}>
-        <DraftersHeader saldoLabel={saldoLabel} accountInitials={initials} />
+        <DraftersHeader sinVolver saldoLabel={saldoLabel} accountInitials={initials} />
         <div style={S.accountSection}>
           <a href="/admin" style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 12.5, color: S.ACCENT, textDecoration: 'none' }}>
             ← Panel de administración

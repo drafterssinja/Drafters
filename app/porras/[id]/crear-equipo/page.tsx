@@ -469,7 +469,7 @@ export default function CrearEquipoPorraPage() {
   return (
     <main style={S.mainReset}>
       <div style={S.pageFrame}>
-        <DraftersHeader saldoLabel={saldoLabel} accountInitials={initials} />
+        <DraftersHeader sinVolver saldoLabel={saldoLabel} accountInitials={initials} />
 
         {step === 'info' ? (
           <PorraModoInfoScreen porra={porra} hayListaEspanoles={hayListaEspanoles} onEntendido={() => avanzarPaso('draft')} onVolver={() => router.back()} />

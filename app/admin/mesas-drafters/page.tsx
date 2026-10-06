@@ -1096,7 +1096,7 @@ export default function AdminMesasDraftersPage() {
     return (
       <main style={S.mainReset}>
         <div style={S.pageFrame}>
-          <DraftersHeader />
+          <DraftersHeader sinVolver />
           <div style={S.accountSection}>
             <p style={{ fontSize: 14, color: S.MUTED }}>Comprobando acceso...</p>
           </div>
@@ -1128,7 +1128,7 @@ export default function AdminMesasDraftersPage() {
   return (
     <main style={S.mainReset}>
       <div style={S.pageFrame}>
-        <DraftersHeader saldoLabel={saldoLabel} accountInitials={initials} />
+        <DraftersHeader sinVolver saldoLabel={saldoLabel} accountInitials={initials} />
         <div style={S.accountSection}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <Link href="/admin" style={{ fontSize: 12, color: S.MUTED_2, textDecoration: 'none' }}>

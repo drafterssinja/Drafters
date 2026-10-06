@@ -176,7 +176,7 @@ export default function AdminGestionarPartidosPage() {
     return (
       <main style={S.mainReset}>
         <div style={S.pageFrame}>
-          <DraftersHeader />
+          <DraftersHeader sinVolver />
           <div style={{ padding: '40px 20px' }}>
             <p style={{ fontSize: 14, color: S.MUTED }}>Cargando...</p>
           </div>
@@ -191,7 +191,7 @@ export default function AdminGestionarPartidosPage() {
   return (
     <main style={S.mainReset}>
       <div style={S.pageFrame}>
-        <DraftersHeader saldoLabel={`${perfil.saldo_simulado.toFixed(2)} €`} accountInitials={S.iniciales(perfil.nombre, perfil.apellido)} />
+        <DraftersHeader sinVolver saldoLabel={`${perfil.saldo_simulado.toFixed(2)} €`} accountInitials={S.iniciales(perfil.nombre, perfil.apellido)} />
         <div style={S.accountSection}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <Link href="/admin/porras-futbol" style={{ fontSize: 12, color: S.MUTED_2, textDecoration: 'none' }}>

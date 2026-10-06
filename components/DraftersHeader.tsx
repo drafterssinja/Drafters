@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -19,14 +19,21 @@ type Props = {
   // maqueta), y a la portada pública "/" si no (login/registro/verificación,
   // todavía sin sesión).
   homeHref?: string;
+  // 06/10 (Iñi): la flecha de volver ya NO va junto a "DRAFTERS" en la
+  // cabecera, sino en una fila propia justo debajo, en todas las pantallas
+  // salvo /inicio. Se oculta con sinVolver en las pantallas que ya traen su
+  // propia flecha (elección de equipo, enlaces "← Panel de administración").
+  sinVolver?: boolean;
 };
 
 // Cabecera reutilizada en todas las pantallas salvo la portada — misma
 // estructura exacta que la maqueta visual (Main.dc.html): flecha de
 // "volver" (usa el historial del navegador) + wordmark "DRAFTERS" que
 // lleva a la portada.
-export default function DraftersHeader({ saldoLabel, accountInitials, homeHref }: Props) {
+export default function DraftersHeader({ saldoLabel, accountInitials, homeHref, sinVolver }: Props) {
   const router = useRouter();
+  const pathname = usePathname();
+  const mostrarVolver = !sinVolver && pathname !== '/inicio';
   const destino = homeHref ?? (saldoLabel && accountInitials ? '/inicio' : '/');
   const enAreaDeCuenta = !!(saldoLabel && accountInitials);
 
@@ -53,6 +60,7 @@ export default function DraftersHeader({ saldoLabel, accountInitials, homeHref }
   }, [enAreaDeCuenta]);
 
   return (
+    <>
     <div
       style={{
         display: 'flex',
@@ -63,28 +71,6 @@ export default function DraftersHeader({ saldoLabel, accountInitials, homeHref }
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <button
-          type="button"
-          onClick={() => router.back()}
-          aria-label="Volver"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 30,
-            height: 30,
-            color: ACCENT,
-            flexShrink: 0,
-            background: 'transparent',
-            border: 'none',
-            padding: 0,
-            cursor: 'pointer',
-          }}
-        >
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M15 18l-6-6 6-6" />
-          </svg>
-        </button>
         <Link
           href={destino}
           style={{
@@ -191,5 +177,18 @@ export default function DraftersHeader({ saldoLabel, accountInitials, homeHref }
         </div>
       )}
     </div>
+    {mostrarVolver && (
+      <div style={{ padding: '6px 20px 0' }}>
+        <button
+          type="button"
+          onClick={() => router.back()}
+          aria-label="Volver"
+          style={{ width: 34, height: 34, padding: 0, border: 'none', background: 'transparent', color: ACCENT, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 20 }}
+        >
+          ←
+        </button>
+      </div>
+    )}
+    </>
   );
 }
