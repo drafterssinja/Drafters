@@ -437,7 +437,7 @@ export default function CrearEquipoPage() {
   // inferior (abajo) — se mide la altura real de esa barra (en vez de un
   // número fijo a ojo) para que el cálculo se ajuste solo si cambia.
   const barraInferiorRef = useRef<HTMLDivElement | null>(null);
-  const [altoBarraInferior, setAltoBarraInferior] = useState(230);
+  const [altoBarraInferior, setAltoBarraInferior] = useState(170);
 
   useEffect(() => {
     if (!isFutbol || step !== 'draft') return;
@@ -450,7 +450,55 @@ export default function CrearEquipoPage() {
     return () => observer.disconnect();
   }, [isFutbol, step]);
 
-  const altoColumnas = `calc(100vh - 160px - ${altoBarraInferior}px)`;
+  // 06/10 (Iñi): pantalla más compacta. Se mide también la tarjeta fija de
+  // arriba (presupuesto) para que las columnas de partidos y jugadores
+  // ocupen justo el hueco que queda entre ella y la barra de abajo.
+  const tarjetaTopRef = useRef<HTMLDivElement | null>(null);
+  const [altoTarjetaTop, setAltoTarjetaTop] = useState(76);
+  useEffect(() => {
+    if (!isFutbol || step !== 'draft') return;
+    const el = tarjetaTopRef.current;
+    if (!el) return;
+    const medir = () => setAltoTarjetaTop(el.offsetHeight);
+    medir();
+    const observer = new ResizeObserver(medir);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isFutbol, step]);
+
+  // Alto REAL visible (en el móvil 100vh incluye la barra del navegador y las
+  // columnas quedaban tapadas por la barra inferior).
+  const [altoVentana, setAltoVentana] = useState(700);
+  useEffect(() => {
+    const medir = () => setAltoVentana(window.innerHeight);
+    medir();
+    window.addEventListener('resize', medir);
+    return () => window.removeEventListener('resize', medir);
+  }, []);
+
+  // 06/10 (Iñi): al entrar en la elección de jugadores se baja la página hasta
+  // dejar el presupuesto arriba del todo (cabecera y título fuera de la
+  // pantalla), para que se vean desde el primer momento los partidos y al
+  // menos 6 jugadores, como en su foto de referencia del móvil.
+  const autoScrollHecho = useRef(false);
+  useEffect(() => {
+    if (!isFutbol || step !== 'draft' || cargando) {
+      if (step !== 'draft') autoScrollHecho.current = false;
+      return;
+    }
+    if (autoScrollHecho.current) return;
+    const id = window.setTimeout(() => {
+      const el = tarjetaTopRef.current;
+      if (!el) return;
+      autoScrollHecho.current = true;
+      const y = el.getBoundingClientRect().top + window.scrollY;
+      window.scrollTo({ top: Math.max(0, y), behavior: 'auto' });
+    }, 80);
+    return () => window.clearTimeout(id);
+  }, [isFutbol, step, cargando]);
+
+  const altoColumnas = `${Math.max(180, altoVentana - altoTarjetaTop - 12 - altoBarraInferior)}px`;
+  const topColumnas = altoTarjetaTop + 4;
 
   function cambiarFormacion(nuevaAlineacion: string) {
     const nuevosHuecos = huecosPorLinea(nuevaAlineacion);
@@ -582,25 +630,27 @@ export default function CrearEquipoPage() {
           <PuntuacionInfoScreen deporte={sala.deporte} competicion={sala.competicion} onEntendido={() => avanzarPaso('draft')} onVolver={() => router.back()} />
         ) : step === 'draft' ? (
           <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '14px 20px 18px' }}>
-              <button type="button" onClick={() => router.push(`/salas/${salaId}`)} style={backArrowStyle}>
-                ←
-              </button>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#F0B94D' }}>{sala.competicion}</span>
-                <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT }}>{modoEdicion ? 'Modifica tu equipo' : 'Crea tu equipo'}</h1>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 20px 10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <button type="button" onClick={() => router.push(`/salas/${salaId}`)} style={{ ...backArrowStyle, alignSelf: 'center', margin: 0 }}>
+                  ←
+                </button>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 0, minWidth: 0 }}>
+                  <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#F0B94D' }}>{sala.competicion}</span>
+                  <h1 style={{ fontSize: 18, fontWeight: 800, color: S.TEXT, lineHeight: 1.15 }}>{modoEdicion ? 'Modifica tu equipo' : 'Crea tu equipo'}</h1>
+                </div>
               </div>
 
-              <div style={{ position: 'sticky', top: 0, zIndex: 5, background: S.BG, paddingTop: 2, paddingBottom: 6, margin: '0 -20px', paddingLeft: 20, paddingRight: 20 }}>
-                <div style={{ background: S.PANEL, border: '1px solid #1E2723', borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8, boxShadow: '0 10px 14px -8px rgba(0,0,0,0.5)' }}>
-                  <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-                    <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_2 }}>Presupuesto disponible</span>
-                    <span style={{ fontSize: 11, color: S.MUTED_3 }}>
+              <div ref={tarjetaTopRef} style={{ position: 'sticky', top: 0, zIndex: 5, background: S.BG, paddingTop: 2, paddingBottom: 4, margin: '0 -20px', paddingLeft: 20, paddingRight: 20 }}>
+                <div style={{ background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10, padding: '7px 12px 8px', display: 'flex', flexDirection: 'column', gap: 4, boxShadow: '0 10px 14px -8px rgba(0,0,0,0.5)' }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+                    <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_2 }}>Presupuesto disponible</span>
+                    <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 21, lineHeight: 1, color }}>{formatEuros(restante)}</span>
+                    <span style={{ fontSize: 10.5, color: S.MUTED_3, whiteSpace: 'nowrap' }}>
                       {selected.length}/{isFutbol ? totalHuecos : TAMANO_EQUIPO_GOLF_TENIS} elegidos
                     </span>
                   </div>
-                  <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 28, color }}>{formatEuros(restante)}</span>
-                  <div style={{ height: 6, borderRadius: 999, background: '#1B2420', overflow: 'hidden' }}>
+                  <div style={{ height: 4, borderRadius: 999, background: '#1B2420', overflow: 'hidden' }}>
                     <div style={{ height: '100%', width: `${spentPct}%`, background: color, borderRadius: 999 }} />
                   </div>
                 </div>
@@ -644,7 +694,7 @@ export default function CrearEquipoPage() {
               {isFutbol ? (
                 <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                   {partidos.length > 0 && (
-                    <div className="partidos-scroll" style={{ flexShrink: 0, width: 90, display: 'flex', flexDirection: 'column', gap: 6, position: 'sticky', top: 128, maxHeight: altoColumnas, overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: '#2A3733 transparent' } as React.CSSProperties}>
+                    <div className="partidos-scroll" style={{ flexShrink: 0, width: 84, display: 'flex', flexDirection: 'column', gap: 4, position: 'sticky', top: topColumnas, maxHeight: altoColumnas, overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: '#2A3733 transparent' } as React.CSSProperties}>
                       <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3, textAlign: 'center' }}>Partidos</span>
                       <button
                         type="button"
@@ -653,7 +703,7 @@ export default function CrearEquipoPage() {
                           fontFamily: "'Barlow Condensed', sans-serif",
                           fontWeight: 700,
                           fontSize: 11,
-                          padding: '6px 4px',
+                          padding: '4px 4px',
                           borderRadius: 8,
                           border: `1px solid ${partidosSeleccionados.size === 0 ? '#3DDC84' : S.BORDER}`,
                           background: partidosSeleccionados.size === 0 ? 'rgba(61,220,132,0.12)' : 'transparent',
@@ -673,13 +723,15 @@ export default function CrearEquipoPage() {
                             onClick={() => togglePartido(key)}
                             style={{
                               display: 'flex',
-                              flexDirection: 'column',
-                              gap: 1,
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: 3,
                               fontFamily: "'Manrope', sans-serif",
                               fontWeight: 700,
                               fontSize: 9.5,
                               lineHeight: 1.25,
-                              padding: '6px 5px',
+                              padding: '4px 3px',
                               borderRadius: 8,
                               textAlign: 'center',
                               border: `1px solid ${activo ? '#3DDC84' : S.BORDER}`,
@@ -688,14 +740,10 @@ export default function CrearEquipoPage() {
                               cursor: 'pointer',
                             }}
                           >
-                            {/* 06/10 (Iñi): escudo vs escudo en vez de los nombres. */}
-                            <span style={{ display: 'flex', justifyContent: 'center' }}>
-                              <EscudoEquipo url={escudoDe(p.equipo_local)} nombre={p.equipo_local} tam={30} />
-                            </span>
-                            <span style={{ color: S.MUTED_3, fontSize: 8, fontWeight: 600 }}>vs</span>
-                            <span style={{ display: 'flex', justifyContent: 'center' }}>
-                              <EscudoEquipo url={escudoDe(p.equipo_visitante)} nombre={p.equipo_visitante} tam={30} />
-                            </span>
+                            {/* 06/10 (Iñi): escudo vs escudo, en horizontal para ocupar menos alto. */}
+                            <EscudoEquipo url={escudoDe(p.equipo_local)} nombre={p.equipo_local} tam={24} />
+                            <span style={{ color: S.MUTED_3, fontSize: 7.5, fontWeight: 600 }}>vs</span>
+                            <EscudoEquipo url={escudoDe(p.equipo_visitante)} nombre={p.equipo_visitante} tam={24} />
                           </button>
                         );
                       })}
@@ -711,7 +759,7 @@ export default function CrearEquipoPage() {
                       flexDirection: 'column',
                       gap: 10,
                       position: 'sticky',
-                      top: 128,
+                      top: topColumnas,
                       maxHeight: altoColumnas,
                       overflowY: 'auto',
                       scrollbarWidth: 'thin',
@@ -818,7 +866,7 @@ export default function CrearEquipoPage() {
             </div>
 
             {isFutbol && (
-              <div ref={barraInferiorRef} style={{ position: 'sticky', bottom: 0, zIndex: 10, background: S.BG, borderTop: '1px solid #1E2723', boxShadow: '0 -10px 24px rgba(0,0,0,0.5)', padding: '7px 20px 9px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div ref={barraInferiorRef} style={{ position: 'sticky', bottom: 0, zIndex: 10, background: S.BG, borderTop: '1px solid #1E2723', boxShadow: '0 -10px 24px rgba(0,0,0,0.5)', padding: '5px 20px 6px', display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, overflowX: 'auto' }}>
                   <span style={{ flexShrink: 0, fontSize: 7.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Alineación</span>
                   <div style={{ display: 'flex', gap: 4 }}>
@@ -830,9 +878,9 @@ export default function CrearEquipoPage() {
                   </div>
                 </div>
 
-                <div style={{ position: 'relative', background: 'linear-gradient(180deg, #163A24 0%, #0F2A1A 100%)', border: '1px solid #1E4A2C', borderRadius: 12, padding: '10px 6px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 6, minHeight: 156, overflow: 'hidden' }}>
+                <div style={{ position: 'relative', background: 'linear-gradient(180deg, #163A24 0%, #0F2A1A 100%)', border: '1px solid #1E4A2C', borderRadius: 10, padding: '5px 6px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 2, minHeight: 92, overflow: 'hidden', width: '100%', maxWidth: 520, alignSelf: 'center' }}>
                   <div style={{ position: 'absolute', left: '8%', right: '8%', top: '50%', height: 1, background: 'rgba(255,255,255,0.14)' }} />
-                  <div style={{ position: 'absolute', left: '50%', top: '50%', width: 36, height: 36, marginLeft: -18, marginTop: -18, border: '1px solid rgba(255,255,255,0.14)', borderRadius: '50%' }} />
+                  <div style={{ position: 'absolute', left: '50%', top: '50%', width: 24, height: 24, marginLeft: -12, marginTop: -12, border: '1px solid rgba(255,255,255,0.14)', borderRadius: '50%' }} />
                   {(['DEL', 'MED', 'DEF', 'POR'] as LineaFutbol[]).map((linea) => (
                     <div key={linea} style={{ position: 'relative', display: 'flex', gap: 2 }}>
                       {Array.from({ length: huecos[linea] }).map((_, i) => {
@@ -849,13 +897,13 @@ export default function CrearEquipoPage() {
                                 }}
                                 style={{ animation: 'slotPop 0.4s cubic-bezier(.34,1.56,.64,1) both', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, textDecoration: 'none', width: '100%', maxWidth: 46 }}
                               >
-                                <span style={{ width: 19, height: 19, borderRadius: '50%', background: AVATAR_POR_LINEA[linea], color: '#04140B', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 7.5, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1.5px solid #F0B94D', boxShadow: '0 2px 6px rgba(0,0,0,0.45)' }}>
+                                <span style={{ width: 16, height: 16, borderRadius: '50%', background: AVATAR_POR_LINEA[linea], color: '#04140B', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 6.5, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1.5px solid #F0B94D', boxShadow: '0 2px 6px rgba(0,0,0,0.45)' }}>
                                   {inicialesJugador(j.nombre)}
                                 </span>
                                 <span style={{ fontSize: 6, fontWeight: 700, color: S.TEXT, textAlign: 'center', lineHeight: 1.1, width: '100%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.nombre}</span>
                               </a>
                             ) : (
-                              <div style={{ width: 19, height: 19, borderRadius: '50%', border: '1.5px dashed rgba(255,255,255,0.3)' }} />
+                              <div style={{ width: 16, height: 16, borderRadius: '50%', border: '1.5px dashed rgba(255,255,255,0.3)' }} />
                             )}
                           </div>
                         );
@@ -864,7 +912,7 @@ export default function CrearEquipoPage() {
                   ))}
                 </div>
 
-                <button type="button" disabled={!puedeConfirmar} onClick={() => avanzarPaso('confirm')} style={{ ...submitButtonStyle(puedeConfirmar), fontSize: 12, padding: '7px 20px', minHeight: 28, borderRadius: 8 }}>
+                <button type="button" disabled={!puedeConfirmar} onClick={() => avanzarPaso('confirm')} style={{ ...submitButtonStyle(puedeConfirmar), fontSize: 12, padding: '5px 20px', minHeight: 26, borderRadius: 8 }}>
                   {equipoCompleto ? (overBudget ? 'Supera el presupuesto' : textoRevisar) : `Faltan ${totalHuecos - selected.length} jugadores`}
                 </button>
               </div>
