@@ -80,6 +80,10 @@ type ResultadoSync = {
   hoyosActualizados: number;
   error?: string;
   aviso?: string;
+  // Comprobación previa al torneo (06/10): campo publicado por Data Golf vs jugadores de la porra.
+  comprobacion?: boolean;
+  totalCampoDG?: number;
+  enPorraNoEnCampo?: string[];
 };
 
 const TOUR_LABELS: Record<'pga' | 'eur', string> = { pga: 'PGA Tour', eur: 'DP World Tour' };
@@ -548,6 +552,44 @@ export default function AdminResultadosGolfPage() {
     setTorneos((prev) => prev.filter((x) => x.id !== t.id));
   }
 
+  // Comprobación previa (06/10, pedido de Iñi: "poder ir enlazando
+  // jugadores"): compara el campo que Data Golf ya publica con los jugadores
+  // cargados en la porra, ANTES de que empiece el torneo, y deja enlazar a
+  // mano (alias) los nombres que no coincidan, con el mismo formulario de
+  // siempre. No escribe nada en los resultados.
+  async function comprobarEmparejamiento() {
+    setSincronizando(true);
+    setErrorSync(null);
+    setResultadoSync(null);
+    setAliasGuardadosClave(new Set());
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session) {
+      setSincronizando(false);
+      setErrorSync('Tu sesión ha caducado. Vuelve a iniciar sesión.');
+      return;
+    }
+    try {
+      const res = await fetch('/api/admin/comprobar-emparejamiento-golf', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setErrorSync(body.error ?? 'No se ha podido comprobar.');
+      } else {
+        const resultados = ((body.resultados ?? []) as ResultadoSync[]).map((r) => ({ ...r, comprobacion: true }));
+        setResultadoSync(resultados);
+        resultados.filter((r) => r.nombresSinEmparejar.length > 0).forEach((r) => cargarJugadoresCompeticion(r.competicion));
+      }
+    } catch (e) {
+      setErrorSync(e instanceof Error ? e.message : 'No se ha podido comprobar.');
+    } finally {
+      setSincronizando(false);
+    }
+  }
+
   async function actualizarAhora() {
     setSincronizando(true);
     setErrorSync(null);
@@ -794,9 +836,14 @@ export default function AdminResultadosGolfPage() {
               <span style={S.sectionLabel}>
                 {torneos.length} competición{torneos.length === 1 ? '' : 'es'} vigente{torneos.length === 1 ? '' : 's'}
               </span>
-              <button type="button" disabled={sincronizando} onClick={actualizarAhora} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '8px 14px', opacity: sincronizando ? 0.7 : 1, cursor: 'pointer', border: 'none' }}>
-                {sincronizando ? 'Actualizando...' : 'Actualizar ahora'}
-              </button>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                <button type="button" disabled={sincronizando} onClick={comprobarEmparejamiento} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '8px 14px', opacity: sincronizando ? 0.7 : 1, cursor: 'pointer', border: 'none' }}>
+                  Comprobar jugadores
+                </button>
+                <button type="button" disabled={sincronizando} onClick={actualizarAhora} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '8px 14px', opacity: sincronizando ? 0.7 : 1, cursor: 'pointer', border: 'none' }}>
+                  {sincronizando ? 'Actualizando...' : 'Actualizar ahora'}
+                </button>
+              </div>
             </div>
 
             {errorSync && <p style={S.errorText}>{errorSync}</p>}
@@ -807,13 +854,21 @@ export default function AdminResultadosGolfPage() {
                 {resultadoSync.map((r) => (
                   <div key={r.competicion} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                     <span style={{ fontSize: 12, fontWeight: 700, color: r.ok ? S.TEXT : S.ERROR }}>
-                      {r.competicion}: {r.ok ? (r.aviso ? 'sin actualizar (otro torneo en vivo en Data Golf)' : `${r.jugadoresEmparejados}/${r.jugadoresEnCampo} jugadores emparejados, ${r.hoyosActualizados} hoyos actualizados`) : `error — ${r.error}`}
+                      {r.competicion}: {r.ok ? (r.comprobacion ? (r.aviso ? 'no se puede comprobar todavía' : `${r.jugadoresEmparejados}/${r.totalCampoDG ?? '?'} jugadores del campo de Data Golf emparejados con tu porra (tu porra tiene ${r.jugadoresEnCampo})`) : r.aviso ? 'sin actualizar (otro torneo en vivo en Data Golf)' : `${r.jugadoresEmparejados}/${r.jugadoresEnCampo} jugadores emparejados, ${r.hoyosActualizados} hoyos actualizados`) : `error — ${r.error}`}
                     </span>
                     {r.aviso && <span style={{ fontSize: 11.5, color: '#F0B94D', lineHeight: 1.4 }}>⚠ {r.aviso}</span>}
+                    {r.comprobacion && r.enPorraNoEnCampo && r.enPorraNoEnCampo.length > 0 && (
+                      <span style={{ fontSize: 11.5, color: S.MUTED_2, lineHeight: 1.45 }}>
+                        En tu porra pero NO en el campo de Data Golf ({r.enPorraNoEnCampo.length}): {r.enPorraNoEnCampo.join(', ')}. Si ya no juegan, quítalos en Porras de golf → Jugadores; si es solo un nombre escrito distinto, enlázalo abajo.
+                      </span>
+                    )}
+                    {r.comprobacion && !r.aviso && r.nombresSinEmparejar.length === 0 && (
+                      <span style={{ fontSize: 11.5, color: S.ACCENT, lineHeight: 1.4 }}>Todos los jugadores del campo de Data Golf están emparejados.</span>
+                    )}
                     {r.nombresSinEmparejar.length > 0 && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 2 }}>
                         <span style={{ fontSize: 10.5, fontWeight: 700, color: S.MUTED_3, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
-                          Sin emparejar en {r.fuenteDatos === 'datagolf' ? 'Data Golf' : 'ESPN'} — elige a quién corresponde cada uno:
+                          {r.comprobacion ? 'En el campo de Data Golf pero no en tu porra' : 'Sin emparejar'} en {r.fuenteDatos === 'datagolf' ? 'Data Golf' : 'ESPN'} — elige a quién corresponde cada uno:
                         </span>
                         {r.nombresSinEmparejar.map((nombreOrigen) => {
                           const clave = `${r.competicion}:::${nombreOrigen}`;

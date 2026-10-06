@@ -20,3 +20,17 @@ export function normalizarNombre(nombre: string): string {
     .replace(/\s+/g, ' ')
     .trim();
 }
+
+/** ¿El nombre de un torneo de Data Golf es esta competición? Compara los
+ * nombres normalizados (uno contenido en el otro, el más corto de al menos 8
+ * caracteres). Si falta el nombre de Data Golf no se puede comprobar y se
+ * deja pasar, para no bloquear nada por un dato que falte. */
+export function nombreTorneoCoincide(competicion: string, eventName: string | null): boolean {
+  if (!eventName || !eventName.trim()) return true;
+  const a = normalizarNombre(competicion);
+  const b = normalizarNombre(eventName);
+  if (!a || !b) return true;
+  const corto = a.length <= b.length ? a : b;
+  const largo = a.length <= b.length ? b : a;
+  return corto.length >= 8 && largo.includes(corto);
+}

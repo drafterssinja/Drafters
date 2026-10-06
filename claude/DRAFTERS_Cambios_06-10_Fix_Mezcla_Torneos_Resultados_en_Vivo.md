@@ -23,3 +23,10 @@ La Alfred Dunhill seguía "vigente" dos días después de acabar (finalizado_en 
 
 ## Causa real de la Dunhill (diagnóstico de Iñi, 06/10 20:11)
 El botón de diagnóstico dio: rondas guardadas 4, ronda más alta vista 4, 154 jugadores con resultado, 66 compitiendo, y **1 sin terminar: Benjamin Follett-Smith con ronda/hoyo/posición vacíos**. Un jugador con resultado pero sin ronda ni hoyo (Data Golf lo dejó sin estado, típico de una retirada) bloqueaba el cierre. Arreglo: tanto la sincronización como el diagnóstico ignoran a quien tiene `resultado_en_vivo_ronda` vacío al decidir si el torneo ha terminado. El arreglo del nº de rondas de más arriba no era la causa en este caso.
+
+## Enlazar jugadores ANTES de que empiece el torneo (06/10)
+Pedido de Iñi: poder ir enlazando jugadores sin esperar al en vivo. Antes, los nombres "sin emparejar" solo salían tras una sincronización con datos del torneo.
+- Nuevo botón **Comprobar jugadores** (junto a "Actualizar ahora") en `/admin/resultados-golf`. Llama a `POST /api/admin/comprobar-emparejamiento-golf` (solo admin), que compara el campo que Data Golf publica en `field-updates` (sin aficionados, mismos nombres que usará el en vivo) con los jugadores cargados en la porra de cada competición vigente de Data Golf, aplicando los alias ya guardados. No escribe nada.
+- Muestra: nº del campo de Data Golf emparejados con la porra; los nombres de Data Golf sin emparejar (con el mismo formulario de alias de siempre para enlazarlos); y los jugadores de la porra que Data Golf NO tiene en el campo (candidatos a quitar con la × de Porras de golf → Jugadores).
+- Si Data Golf todavía publica el campo de otro torneo, avisa y no compara.
+- `nombreTorneoCoincide()` pasó a `lib/nombreMatch.ts` (compartida con la sincronización).

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { crearClienteAdmin } from '@/lib/server/supabaseAdmin';
-import { normalizarNombre } from '@/lib/nombreMatch';
+import { normalizarNombre, nombreTorneoCoincide } from '@/lib/nombreMatch';
 import { obtenerLeaderboardEspn, obtenerHoyosJugadorEspn, conConcurrenciaLimitada, type EspnTour } from '@/lib/espnGolf';
 import {
   obtenerEnJuegoDataGolfParseado,
@@ -125,20 +125,6 @@ async function estaAutorizado(req: NextRequest, admin: ReturnType<typeof crearCl
 
   const { data: perfil } = await admin.from('perfiles').select('rol').eq('id', userData.user.id).single();
   return !!perfil && perfil.rol === 'admin';
-}
-
-/** ¿El evento que devuelve Data Golf en vivo es esta competición? Compara los
- * nombres normalizados (uno contenido en el otro, el más corto de al menos 8
- * caracteres). Si Data Golf no manda nombre no se puede comprobar y se deja
- * pasar, para no bloquear nada por un dato que falte. */
-function nombreTorneoCoincide(competicion: string, eventName: string | null): boolean {
-  if (!eventName || !eventName.trim()) return true;
-  const a = normalizarNombre(competicion);
-  const b = normalizarNombre(eventName);
-  if (!a || !b) return true;
-  const corto = a.length <= b.length ? a : b;
-  const largo = a.length <= b.length ? b : a;
-  return corto.length >= 8 && largo.includes(corto);
 }
 
 /** Rama ESPN — lógica original de esta ruta (28/09), sin cambios de
