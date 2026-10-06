@@ -106,6 +106,9 @@ type ResultadoTorneo = {
   nombresSinEmparejar: string[];
   hoyosActualizados: number;
   error?: string;
+  // 06/10: aviso (no es un error) cuando Data Golf todavía devuelve OTRO
+  // torneo del tour — no se toca ningún jugador. Ver nombreTorneoCoincide().
+  aviso?: string;
 };
 
 async function estaAutorizado(req: NextRequest, admin: ReturnType<typeof crearClienteAdmin>): Promise<boolean> {
@@ -122,6 +125,20 @@ async function estaAutorizado(req: NextRequest, admin: ReturnType<typeof crearCl
 
   const { data: perfil } = await admin.from('perfiles').select('rol').eq('id', userData.user.id).single();
   return !!perfil && perfil.rol === 'admin';
+}
+
+/** ¿El evento que devuelve Data Golf en vivo es esta competición? Compara los
+ * nombres normalizados (uno contenido en el otro, el más corto de al menos 8
+ * caracteres). Si Data Golf no manda nombre no se puede comprobar y se deja
+ * pasar, para no bloquear nada por un dato que falte. */
+function nombreTorneoCoincide(competicion: string, eventName: string | null): boolean {
+  if (!eventName || !eventName.trim()) return true;
+  const a = normalizarNombre(competicion);
+  const b = normalizarNombre(eventName);
+  if (!a || !b) return true;
+  const corto = a.length <= b.length ? a : b;
+  const largo = a.length <= b.length ? b : a;
+  return corto.length >= 8 && largo.includes(corto);
 }
 
 /** Rama ESPN — lógica original de esta ruta (28/09), sin cambios de
@@ -463,14 +480,33 @@ async function procesarTorneoDataGolf(
 
   const jugadorPorNombre = new Map(jugadores.map((j) => [normalizarNombre(j.nombre), j]));
 
-  const { jugadores: enJuego, rondaActual } = await obtenerEnJuegoDataGolfParseado(torneo.tourDataGolf);
+  const enVivoDG = await obtenerEnJuegoDataGolfParseado(torneo.tourDataGolf);
+
+  // PROTECCIÓN CONTRA MEZCLA DE TORNEOS (06/10, aviso de Iñi: "igual me está
+  // mezclando y me está transportando jugadores de un torneo a otro").
+  // `in-play` está pedido por TOUR, no por torneo: mientras el torneo que
+  // acaba de terminar (p.ej. la Dunhill) siga siendo el "en vivo" de Data
+  // Golf, devuelve SUS resultados, y como los jugadores se emparejan por
+  // nombre, los que repiten en el torneo siguiente (Open de España, aún sin
+  // empezar) recibían los resultados del torneo anterior. Ahora solo se
+  // actualizan jugadores si el nombre del evento que devuelve Data Golf
+  // coincide con esta competición; si no, se salta (sin tocar nada) y se
+  // avisa con el nombre que devuelve Data Golf.
+  const coincideTorneoEnVivo = nombreTorneoCoincide(torneo.competicion, enVivoDG.eventName);
+  if (!coincideTorneoEnVivo) {
+    resultado.aviso = `Data Golf todavía devuelve en vivo otro torneo ("${enVivoDG.eventName ?? 'sin nombre'}"), no "${torneo.competicion}" — no se ha actualizado ningún jugador. Se actualizará solo en cuanto Data Golf devuelva este torneo (si no es cuestión de esperar, comprueba que el nombre de la competición coincide con el del torneo en Data Golf).`;
+  }
+  const enJuego = coincideTorneoEnVivo ? enVivoDG.jugadores : [];
+  const rondaActual = coincideTorneoEnVivo ? enVivoDG.rondaActual : null;
 
   // El par de cada hoyo, por campo — hace falta la ronda en curso para
   // pedirlo (preds/live-hole-stats pide un número de ronda), pero el par en
   // sí es fijo durante todo el torneo. Si todavía no se sabe la ronda
   // actual (torneo recién empezado, antes del primer tee time), se pide la
   // ronda 1 como mejor opción por defecto.
-  const paresPorCampo = await obtenerParesPorCampoDataGolf(torneo.tourDataGolf, (String(rondaActual ?? 1) as '1' | '2' | '3' | '4'));
+  const paresPorCampo = coincideTorneoEnVivo
+    ? await obtenerParesPorCampoDataGolf(torneo.tourDataGolf, (String(rondaActual ?? 1) as '1' | '2' | '3' | '4'))
+    : new Map<string, (number | null)[]>();
 
   // Nombre real de cada campo (Data Golf SÍ lo da, a diferencia de ESPN) —
   // se guarda en campos_golf_live sin que el admin tenga que escribir nada

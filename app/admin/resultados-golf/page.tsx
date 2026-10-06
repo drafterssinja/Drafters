@@ -58,6 +58,8 @@ type TorneoGolfLive = {
   temporada: number | null;
   tour_datagolf: 'pga' | 'euro' | null;
   activo: boolean;
+  // 06/10: fecha en que se detectó que el torneo terminó — los finalizados ya no se muestran aquí.
+  finalizado_en: string | null;
   ultima_actualizacion: string | null;
   ultimo_error: string | null;
 };
@@ -74,6 +76,7 @@ type ResultadoSync = {
   nombresSinEmparejar: string[];
   hoyosActualizados: number;
   error?: string;
+  aviso?: string;
 };
 
 const TOUR_LABELS: Record<'pga' | 'eur', string> = { pga: 'PGA Tour', eur: 'DP World Tour' };
@@ -201,7 +204,10 @@ export default function AdminResultadosGolfPage() {
       setError('No se han podido cargar los torneos de golf en vivo.');
       return;
     }
-    setTorneos((data as TorneoGolfLive[]) ?? []);
+    // Solo los torneos vigentes (06/10, pedido de Iñi): los ya finalizados
+    // desaparecen de esta pantalla (siguen en la base de datos, con su
+    // clasificación final, pero no se sincronizan ni se muestran).
+    setTorneos(((data as TorneoGolfLive[]) ?? []).filter((t) => !t.finalizado_en));
   }
 
   async function cargarBiblioteca() {
@@ -728,7 +734,7 @@ export default function AdminResultadosGolfPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
               <span style={S.sectionLabel}>
-                {torneos.length} competición{torneos.length === 1 ? '' : 'es'} conectada{torneos.length === 1 ? '' : 's'}
+                {torneos.length} competición{torneos.length === 1 ? '' : 'es'} vigente{torneos.length === 1 ? '' : 's'}
               </span>
               <button type="button" disabled={sincronizando} onClick={actualizarAhora} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '8px 14px', opacity: sincronizando ? 0.7 : 1, cursor: 'pointer', border: 'none' }}>
                 {sincronizando ? 'Actualizando...' : 'Actualizar ahora'}
@@ -743,8 +749,9 @@ export default function AdminResultadosGolfPage() {
                 {resultadoSync.map((r) => (
                   <div key={r.competicion} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                     <span style={{ fontSize: 12, fontWeight: 700, color: r.ok ? S.TEXT : S.ERROR }}>
-                      {r.competicion}: {r.ok ? `${r.jugadoresEmparejados}/${r.jugadoresEnCampo} jugadores emparejados, ${r.hoyosActualizados} hoyos actualizados` : `error — ${r.error}`}
+                      {r.competicion}: {r.ok ? (r.aviso ? 'sin actualizar (otro torneo en vivo en Data Golf)' : `${r.jugadoresEmparejados}/${r.jugadoresEnCampo} jugadores emparejados, ${r.hoyosActualizados} hoyos actualizados`) : `error — ${r.error}`}
                     </span>
+                    {r.aviso && <span style={{ fontSize: 11.5, color: '#F0B94D', lineHeight: 1.4 }}>⚠ {r.aviso}</span>}
                     {r.nombresSinEmparejar.length > 0 && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 2 }}>
                         <span style={{ fontSize: 10.5, fontWeight: 700, color: S.MUTED_3, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
@@ -818,7 +825,7 @@ export default function AdminResultadosGolfPage() {
               </div>
             )}
 
-            {torneos.length === 0 && <p style={{ fontSize: 12.5, color: S.MUTED_3, margin: 0 }}>Todavía no hay ninguna competición conectada.</p>}
+            {torneos.length === 0 && <p style={{ fontSize: 12.5, color: S.MUTED_3, margin: 0 }}>No hay ninguna competición vigente conectada.</p>}
 
             {torneos.map((t) => (
               <div key={t.id} style={{ display: 'flex', flexDirection: 'column', gap: 8, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 14 }}>

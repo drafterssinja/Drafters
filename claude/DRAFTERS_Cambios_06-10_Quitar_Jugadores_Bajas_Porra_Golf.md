@@ -17,3 +17,6 @@ Ejecutar primero en Supabase el SQL nuevo (`alter table public.jugadores add col
 
 ## Fix 06/10 — quitar jugador elegido al editar equipo (porra clásica)
 Aviso de Iñi: al editar un equipo, tocar al jugador ya elegido no lo quitaba. En `app/porras/[id]/crear-equipo/page.tsx` un jugador elegido (titular o comodín) ahora se puede tocar para quitarlo en cualquier momento, esté o no activa su lista o el modo comodín; al quitarlo se deja activa esa lista (o el comodín) para elegir enseguida al sustituto. Antes, un jugador elegido como comodín, o uno elegido mientras estaba activo el modo comodín, quedaba bloqueado.
+
+## Cambio visual 06/10 — nombre del equipo y botón desactivado (porra, elegir equipo)
+En `app/porras/[id]/crear-equipo/page.tsx`: la etiqueta "Nombre del equipo" ahora es verde y más grande; la caja del nombre tiene borde y fondo verdes (más intensos cuando ya hay nombre). El botón de abajo, cuando está desactivado, se ve con fondo verde tenue, borde discontinuo y texto verde en vez de gris casi invisible (sigue sin poder pulsarse). Solo cambia ese archivo.

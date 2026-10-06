@@ -493,8 +493,20 @@ export default function CrearEquipoPorraPage() {
 
               {!esFutbol && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_2 }}>Nombre del equipo</label>
-                  <input type="text" value={nombreEquipo} onChange={(e) => setNombreEquipo(e.target.value)} placeholder="Ej. Los Birdies de Iñi" style={S.input} />
+                  <label style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', color: S.ACCENT }}>Nombre del equipo</label>
+                  <input
+                    type="text"
+                    value={nombreEquipo}
+                    onChange={(e) => setNombreEquipo(e.target.value)}
+                    placeholder="Ej. Los Birdies de Iñi"
+                    style={{
+                      ...S.input,
+                      border: `1.5px solid ${nombreValido ? S.ACCENT : 'rgba(61,220,132,0.55)'}`,
+                      background: nombreValido ? 'rgba(61,220,132,0.12)' : 'rgba(61,220,132,0.06)',
+                      boxShadow: nombreValido ? '0 0 0 3px rgba(61,220,132,0.12)' : '0 0 0 3px rgba(61,220,132,0.06)',
+                      fontWeight: 600,
+                    }}
+                  />
                 </div>
               )}
 
@@ -1075,14 +1087,17 @@ function submitButtonStyle(enabled: boolean, activeColor: string): React.CSSProp
     fontSize: 13,
     textTransform: 'uppercase',
     letterSpacing: '0.03em',
-    color: enabled ? '#04140B' : S.MUTED_3,
-    background: enabled ? activeColor : S.PANEL,
+    // Desactivado pero bien visible (06/10, aviso de Iñi): fondo verde
+    // tenue con borde y texto verdes, para que se lea claro qué falta
+    // (nombre, jugadores...) aunque todavía no se pueda pulsar.
+    color: enabled ? '#04140B' : '#7FD9A6',
+    background: enabled ? activeColor : 'rgba(61,220,132,0.12)',
     padding: '9px 24px',
     borderRadius: 9,
     minHeight: 34,
     textAlign: 'center',
     width: '100%',
-    border: 'none',
+    border: enabled ? 'none' : '1.5px dashed rgba(61,220,132,0.5)',
     cursor: enabled ? 'pointer' : 'default',
   };
 }
