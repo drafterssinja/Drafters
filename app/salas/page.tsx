@@ -113,13 +113,15 @@ type PlazasFiltro = 'cualquiera' | 'libres' | 'casi';
 function SalasPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const deporteParam = searchParams.get('deporte');
+  const deporteInicial: Deporte = (DEPORTES as readonly string[]).includes(deporteParam ?? '') ? (deporteParam as Deporte) : 'futbol';
 
-  const [deporte, setDeporte] = useState<Deporte>((searchParams.get('deporte') as Deporte) ?? 'futbol');
+  const [deporte, setDeporte] = useState<Deporte>(deporteInicial);
   const [tipo, setTipo] = useState<TipoSala | 'todas'>('todas');
   const [buyin, setBuyin] = useState<NivelBuyIn | 'cualquiera'>('cualquiera');
   const [plazas, setPlazas] = useState<PlazasFiltro>('cualquiera');
   const [filtroAbierto, setFiltroAbierto] = useState<'tipo' | 'buyin' | 'plazas' | null>(null);
-  const [pestana, setPestana] = useState<string | null>(PESTANAS_COMPETICION[(searchParams.get('deporte') as Deporte) ?? 'futbol']?.[0]?.id ?? null);
+  const [pestana, setPestana] = useState<string | null>(PESTANAS_COMPETICION[deporteInicial][0]?.id ?? null);
   const [competicionElegida, setCompeticionElegida] = useState<string | null>(null);
   const [torneoAbierto, setTorneoAbierto] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
@@ -423,22 +425,16 @@ function SalasPageInner() {
         <DraftersHeader saldoLabel={perfil ? formatEuros(perfil.saldo_simulado) : '···'} accountInitials={perfil ? S.iniciales(perfil.nombre, perfil.apellido) : '·'} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '32px 20px 56px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <h1 style={{ fontSize: 26, fontWeight: 800, color: S.TEXT }}>Salas</h1>
+            <h1 style={{ fontSize: 26, fontWeight: 800, color: S.TEXT }}>Salas de {DEPORTE_LABELS[deporte].toLowerCase()}</h1>
             <p style={{ fontSize: 13, color: S.MUTED_2 }}>Doble o Nada, Triple o Nada, Oro y Plata, Tridente y Maratón.</p>
           </div>
 
-          <div style={{ display: 'flex', gap: 8 }}>
-            {DEPORTES.map((d) => (
-              <button key={d} type="button" onClick={() => cambiarDeporte(d)} style={pillButtonStyle(deporte === d)}>
-                {DEPORTE_LABELS[d]}
-              </button>
-            ))}
-          </div>
+          {/* 06/10 (Iñi): el deporte ya se elige en /mesas, así que aquí NO hay filtro de deporte arriba; cada deporte muestra sus propias competiciones. */}
 
           {/* 06/10 (Iñi): pestañas de competición (fútbol y golf) y desplegable
               de jornada/torneo con los que ya tienen horarios confirmados. */}
           {PESTANAS_COMPETICION[deporte].length > 0 && (
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 8 }}>
               {PESTANAS_COMPETICION[deporte].map((t) => (
                 <button
                   key={t.id}
@@ -448,7 +444,7 @@ function SalasPageInner() {
                     setCompeticionElegida(null);
                     setTorneoAbierto(false);
                   }}
-                  style={{ ...pillButtonStyle(pestana === t.id), width: 'auto', padding: '7px 14px', fontSize: 13 }}
+                  style={{ ...pillButtonStyle(pestana === t.id), flex: 1, width: 'auto', minWidth: 0, padding: '13px 10px', fontSize: 17, whiteSpace: 'nowrap' }}
                 >
                   {t.label}
                 </button>
