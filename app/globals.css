@@ -78,6 +78,28 @@
     margin-left: auto;
     margin-right: auto;
   }
+  /* /mesas en escritorio (06/10, Iñi: "sí como dices"): la publicidad pasa a
+     una columna lateral fija a la derecha mientras se hace scroll, y el resto
+     del contenido ocupa la columna izquierda. En el móvil no cambia nada. */
+  .mesas-contenido {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) 300px;
+    column-gap: 28px;
+    row-gap: 20px;
+    align-items: start;
+  }
+  .mesas-contenido > * {
+    grid-column: 1;
+  }
+  .mesas-contenido > .mesas-anuncio {
+    grid-column: 2;
+    grid-row: 1 / span 30;
+    position: sticky;
+    top: 16px;
+  }
+  .mesas-anuncio .anuncio-video-caja {
+    width: min(100%, calc(400px * var(--ratio, 0.5625)));
+  }
   .anuncio-video-caja video {
     width: 100% !important;
     height: auto !important;
@@ -258,4 +280,9 @@ th, td {
 .stat-card .label {
   font-size: 12px;
   color: var(--muted);
+}
+
+/* Hueco de publicidad de /mesas vacío (sin vídeo activo): que no deje un hueco extra. */
+.mesas-anuncio:empty {
+  display: none;
 }

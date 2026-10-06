@@ -320,125 +320,11 @@ function MesasPageInner() {
     <main style={S.mainReset}>
       <div style={S.pageFrame}>
         <DraftersHeader saldoLabel={formatEuros(perfil.saldo_simulado)} accountInitials={S.iniciales(perfil.nombre, perfil.apellido)} />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20, padding: '32px 20px 56px' }}>
+        <div className="mesas-contenido" style={{ display: 'flex', flexDirection: 'column', gap: 20, padding: '32px 20px 56px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <h1 style={{ fontSize: 26, fontWeight: 800, color: S.TEXT }}>Mesas Drafters</h1>
             <p style={{ fontSize: 13, color: S.MUTED_2 }}>Fútbol, golf y tenis — salas, maratón y draft de fantasía.</p>
           </div>
-
-          {misMesas.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <h2 style={{ fontSize: 20, fontWeight: 700, color: S.TEXT }}>Tus mesas en juego.</h2>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {(mostrarTodasMesas ? misMesas : misMesas.slice(0, LIMITE_MESAS_VISIBLE)).map((eq) => {
-                  const sala = eq.salas;
-                  const nombre = sala?.nombre ?? eq.nombre_equipo ?? 'Mi equipo';
-                  const href = sala ? `/salas/${eq.sala_id}` : '#';
-                  const clasificacionHref = sala ? `/salas/${eq.sala_id}/clasificacion` : '#';
-                  const enDirecto = sala?.estado === 'completa';
-                  const lesionado = lesionadoDe(eq);
-                  return (
-                    <div key={eq.id} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          gap: 10,
-                          background: S.PANEL,
-                          border: `1px solid ${S.CARD_BORDER}`,
-                          borderRadius: 12,
-                          padding: '12px 14px',
-                        }}
-                      >
-                        <Link href={href} style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1, textDecoration: 'none' }}>
-                          <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#F0B94D' }}>
-                            {sala?.competicion ?? ''}
-                          </span>
-                          <span style={{ fontSize: 13, fontWeight: 600, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {nombre}
-                          </span>
-                        </Link>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
-                          <Link
-                            href={href}
-                            style={{
-                              fontFamily: "'Barlow Condensed', sans-serif",
-                              fontWeight: 700,
-                              fontSize: 12,
-                              textTransform: 'uppercase',
-                              letterSpacing: '0.03em',
-                              color: '#04140B',
-                              background: '#3DDC84',
-                              borderRadius: 8,
-                              padding: '8px 12px',
-                              whiteSpace: 'nowrap',
-                              textDecoration: 'none',
-                            }}
-                          >
-                            Ver mi equipo
-                          </Link>
-                          {enDirecto && (
-                            <Link
-                              href={clasificacionHref}
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 5,
-                                fontFamily: "'Barlow Condensed', sans-serif",
-                                fontWeight: 700,
-                                fontSize: 11,
-                                textTransform: 'uppercase',
-                                letterSpacing: '0.03em',
-                                color: '#FF7A45',
-                                background: 'rgba(255,122,69,0.14)',
-                                border: '1px solid rgba(255,122,69,0.45)',
-                                borderRadius: 8,
-                                padding: '6px 10px',
-                                whiteSpace: 'nowrap',
-                                textDecoration: 'none',
-                              }}
-                            >
-                              <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#FF7A45', flexShrink: 0 }} />
-                              Clasificación en directo
-                            </Link>
-                          )}
-                        </div>
-                      </div>
-                      {lesionado && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 4px' }}>
-                          <span style={{ flexShrink: 0, width: 13, height: 13, borderRadius: '50%', background: '#FF5C5C' }} />
-                          <span style={{ fontSize: 11, color: '#FF5C5C', fontWeight: 600 }}>{lesionado}. Haz un cambio.</span>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-                {misMesas.length > LIMITE_MESAS_VISIBLE && (
-                  <button
-                    type="button"
-                    onClick={() => setMostrarTodasMesas((v) => !v)}
-                    style={{
-                      alignSelf: 'center',
-                      marginTop: 2,
-                      background: 'transparent',
-                      border: 'none',
-                      color: '#3DDC84',
-                      fontFamily: "'Manrope', sans-serif",
-                      fontWeight: 700,
-                      fontSize: 12.5,
-                      cursor: 'pointer',
-                      padding: '6px 10px',
-                    }}
-                  >
-                    {mostrarTodasMesas ? 'Mostrar menos ▴' : `Mostrar más (${misMesas.length - LIMITE_MESAS_VISIBLE}) ▾`}
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
-          <AnuncioVideoInline ubicacion="mesas" />
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <h2 style={{ fontSize: 20, fontWeight: 700, color: S.TEXT }}>Elige tu deporte.</h2>
@@ -592,6 +478,124 @@ function MesasPageInner() {
                 </span>
               </div>
             </Link>
+          </div>
+
+          {/* 06/10 (Iñi): primero las 3 ventanas de deporte, luego "Tus mesas en juego" y la publicidad. */}
+          {misMesas.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <h2 style={{ fontSize: 20, fontWeight: 700, color: S.TEXT }}>Tus mesas en juego.</h2>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {(mostrarTodasMesas ? misMesas : misMesas.slice(0, LIMITE_MESAS_VISIBLE)).map((eq) => {
+                  const sala = eq.salas;
+                  const nombre = sala?.nombre ?? eq.nombre_equipo ?? 'Mi equipo';
+                  const href = sala ? `/salas/${eq.sala_id}` : '#';
+                  const clasificacionHref = sala ? `/salas/${eq.sala_id}/clasificacion` : '#';
+                  const enDirecto = sala?.estado === 'completa';
+                  const lesionado = lesionadoDe(eq);
+                  return (
+                    <div key={eq.id} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 10,
+                          background: S.PANEL,
+                          border: `1px solid ${S.CARD_BORDER}`,
+                          borderRadius: 12,
+                          padding: '12px 14px',
+                        }}
+                      >
+                        <Link href={href} style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1, textDecoration: 'none' }}>
+                          <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#F0B94D' }}>
+                            {sala?.competicion ?? ''}
+                          </span>
+                          <span style={{ fontSize: 13, fontWeight: 600, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {nombre}
+                          </span>
+                        </Link>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
+                          <Link
+                            href={href}
+                            style={{
+                              fontFamily: "'Barlow Condensed', sans-serif",
+                              fontWeight: 700,
+                              fontSize: 12,
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.03em',
+                              color: '#04140B',
+                              background: '#3DDC84',
+                              borderRadius: 8,
+                              padding: '8px 12px',
+                              whiteSpace: 'nowrap',
+                              textDecoration: 'none',
+                            }}
+                          >
+                            Ver mi equipo
+                          </Link>
+                          {enDirecto && (
+                            <Link
+                              href={clasificacionHref}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 5,
+                                fontFamily: "'Barlow Condensed', sans-serif",
+                                fontWeight: 700,
+                                fontSize: 11,
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.03em',
+                                color: '#FF7A45',
+                                background: 'rgba(255,122,69,0.14)',
+                                border: '1px solid rgba(255,122,69,0.45)',
+                                borderRadius: 8,
+                                padding: '6px 10px',
+                                whiteSpace: 'nowrap',
+                                textDecoration: 'none',
+                              }}
+                            >
+                              <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#FF7A45', flexShrink: 0 }} />
+                              Clasificación en directo
+                            </Link>
+                          )}
+                        </div>
+                      </div>
+                      {lesionado && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 4px' }}>
+                          <span style={{ flexShrink: 0, width: 13, height: 13, borderRadius: '50%', background: '#FF5C5C' }} />
+                          <span style={{ fontSize: 11, color: '#FF5C5C', fontWeight: 600 }}>{lesionado}. Haz un cambio.</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {misMesas.length > LIMITE_MESAS_VISIBLE && (
+                  <button
+                    type="button"
+                    onClick={() => setMostrarTodasMesas((v) => !v)}
+                    style={{
+                      alignSelf: 'center',
+                      marginTop: 2,
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#3DDC84',
+                      fontFamily: "'Manrope', sans-serif",
+                      fontWeight: 700,
+                      fontSize: 12.5,
+                      cursor: 'pointer',
+                      padding: '6px 10px',
+                    }}
+                  >
+                    {mostrarTodasMesas ? 'Mostrar menos ▴' : `Mostrar más (${misMesas.length - LIMITE_MESAS_VISIBLE}) ▾`}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Móvil: aquí, entre "Tus mesas en juego" y el Maratón. Escritorio: columna lateral (ver .mesas-anuncio en globals.css). */}
+          <div className="mesas-anuncio">
+            <AnuncioVideoInline ubicacion="mesas" />
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 8 }}>

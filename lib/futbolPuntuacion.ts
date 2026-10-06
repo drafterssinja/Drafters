@@ -63,7 +63,7 @@ export const PUNTOS_TIRO_A_PUERTA: Record<PosicionFutbol, number> = { delantero:
 export const PUNTOS_TIRO_FUERA: Record<PosicionFutbol, number> = { delantero: 0.5, centrocampista: 0.5, defensa: 1, portero: 0 };
 
 export const PUNTOS_PENALTI_FALLADO = -4;
-/** PROPUESTA (06/10): la tabla maestra no contemplaba el gol en propia puerta. */
+/** CONFIRMADO por Iñi (06/10): gol en propia puerta = −4 (la tabla maestra no lo contemplaba). */
 export const PUNTOS_GOL_PROPIA_PUERTA = -4;
 export const PUNTOS_FALTA = -0.5;
 export const PUNTOS_AMARILLA = -1.5;

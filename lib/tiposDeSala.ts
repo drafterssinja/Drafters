@@ -106,6 +106,23 @@ export const MARATON_TIPO: TipoSala = 'maraton';
 export const MARATON_LABEL = 'Maratón';
 export const MARATON_BUY_IN = 10; // provisional — sin escalones, sala única
 
+// ----------------------------------------------------------------------------
+// FÚTBOL — mesas reducidas (06/10, pedido de Iñi)
+// ----------------------------------------------------------------------------
+// "Vamos a hacerlo más reducido para que no se genere mucho jaleo: solo
+// mesas de 10 euros. Doble o Nada de 2 y de 4 jugadores, Triple o Nada de 3
+// y de 6 jugadores, y una de 5 jugadores en la que ganan dos (Oro y Plata)."
+// Más 1 sala Maratón (10 €). Solo afecta al fútbol (golf y tenis siguen con todas las
+// variantes de arriba). Para ampliar más adelante, basta añadir filas aquí.
+export const BUY_IN_FUTBOL = 10;
+export const VARIANTES_FUTBOL: { tipo: TipoSala; label: string; aforo: number }[] = [
+  { tipo: 'doble_o_nada', label: 'Doble o Nada', aforo: 2 },
+  { tipo: 'doble_o_nada', label: 'Doble o Nada', aforo: 4 },
+  { tipo: 'triple_o_nada', label: 'Triple o Nada', aforo: 3 },
+  { tipo: 'triple_o_nada', label: 'Triple o Nada', aforo: 6 },
+  { tipo: 'oro_y_plata', label: 'Oro y Plata', aforo: 5 },
+];
+
 export interface SalaNueva {
   nombre: string;
   deporte: string;
@@ -125,6 +142,32 @@ export function generarSalasParaTorneo(params: {
   fechaLimiteIso: string | null;
 }): SalaNueva[] {
   const { competicionLabel, deporte, fechaLimiteIso } = params;
+
+  // Fútbol: solo el conjunto reducido de VARIANTES_FUTBOL (ver arriba) más la
+  // sala Maratón (decisión de Iñi 06/10: "mesas solo de 10€, pero que sí haya Maratón").
+  if (deporte === 'futbol') {
+    const mesas = VARIANTES_FUTBOL.map(
+      (v): SalaNueva => ({
+        nombre: `${v.label} · ${BUY_IN_FUTBOL}€`,
+        deporte,
+        competicion: competicionLabel,
+        tipo: v.tipo,
+        aforo: v.aforo,
+        buy_in: BUY_IN_FUTBOL,
+        fecha_limite_inscripcion: fechaLimiteIso,
+      })
+    );
+    mesas.push({
+      nombre: MARATON_LABEL,
+      deporte,
+      competicion: competicionLabel,
+      tipo: MARATON_TIPO,
+      aforo: null,
+      buy_in: MARATON_BUY_IN,
+      fecha_limite_inscripcion: fechaLimiteIso,
+    });
+    return mesas;
+  }
 
   // Nombre de la mesa (25/09, tercera y cuarta vuelta): antes incluía la
   // competición y la jornada delante ("La Liga - Jornada 9 · Doble o Nada ·

@@ -31,7 +31,7 @@ import { estadisticasVacias, puntuarJugador, type EstadisticasJugador, type Line
 
 type Admin = ReturnType<typeof crearClienteAdmin>;
 
-const BASE_ESPN = 'https://site.api.espn.com/apis/site/v2/sports/soccer';
+export const BASE_ESPN = 'https://site.api.espn.com/apis/site/v2/sports/soccer';
 const HORAS_ANTES_DE_EMPEZAR = 12;
 const HORAS_RECALCULO_TRAS_FINAL = 4;
 const DIAS_VENTANA_PARTIDOS = 6;
@@ -118,7 +118,7 @@ const BASE_ESPN_ALTERNATIVA = 'https://site.web.api.espn.com/apis/site/v2/sports
 
 /** GET a ESPN con reintento por el otro dominio de la API (como en golf) si
  * el primero responde con error (p.ej. 403). */
-async function jsonEspn(url: string, ms = 15000): Promise<any> {
+export async function jsonEspn(url: string, ms = 15000): Promise<any> {
   const res = await fetchConTiempo(url, ms);
   if (res.ok) return res.json();
   const primero = res.status;
@@ -130,7 +130,7 @@ async function jsonEspn(url: string, ms = 15000): Promise<any> {
   throw new Error(`ESPN respondió ${primero} (${url})`);
 }
 
-function yyyymmdd(d: Date): string {
+export function yyyymmdd(d: Date): string {
   return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
 }
 
@@ -146,9 +146,9 @@ function estadoEspn(ev: any): EstadoPartido {
 // ----------------------------------------------------------------------------
 // Equipos: casar los de ESPN con los nuestros
 // ----------------------------------------------------------------------------
-type MapaEquipos = Map<string, string>; // clave de equipo → nombre nuestro (equipo_real)
+export type MapaEquipos = Map<string, string>; // clave de equipo → nombre nuestro (equipo_real)
 
-function mapaEquiposNuestros(nombres: (string | null)[]): MapaEquipos {
+export function mapaEquiposNuestros(nombres: (string | null)[]): MapaEquipos {
   const m: MapaEquipos = new Map();
   for (const n of nombres) {
     if (!n) continue;
@@ -159,7 +159,7 @@ function mapaEquiposNuestros(nombres: (string | null)[]): MapaEquipos {
 }
 
 /** Clave de NUESTRO equipo que corresponde a un nombre de ESPN ('' si no hay). */
-function claveNuestraDe(nombreEspn: string | undefined | null, nuestros: MapaEquipos): string {
+export function claveNuestraDe(nombreEspn: string | undefined | null, nuestros: MapaEquipos): string {
   if (!nombreEspn) return '';
   const k = claveEquipoFutbol(nombreEspn);
   if (k && nuestros.has(k)) return k;
@@ -627,6 +627,21 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
     if (error) throw new Error(`Guardando partidos: ${error.message}`);
   }
 
+  // Cierre automático de las mesas (06/10, pedido de Iñi): en cuanto termina
+  // el último partido de la jornada, las mesas pasan a "finalizada" (clasificación
+  // final, sin más cambios). El PAGO de premios NO es automático: sigue siendo la
+  // confirmación manual de /admin/pagos-pendientes (liquidar_evento). Solo se
+  // cierra si están todos los equipos de la jornada con partido y todos
+  // terminados — con un aplazado pendiente no se cierra sola.
+  let mesasCerradas = false;
+  {
+    const cubreTodos = partidos.length > 0 && partidos.length * 2 >= nuestros.size - 1;
+    if (cubreTodos && partidos.every((p) => p.estado === 'finalizado')) {
+      const { data: cerradas } = await admin.from('salas').update({ estado: 'finalizada' }).eq('deporte', 'futbol').eq('competicion', competicion).neq('estado', 'finalizada').select('id');
+      mesasCerradas = (cerradas?.length ?? 0) > 0;
+    }
+  }
+
   return vacio(competicion, 'sincronizada', {
     jugadoresEnFicha: jugadores.length,
     jugadoresEmparejados: emparejadosTotal,
@@ -643,7 +658,7 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
       marcador: p.estado === 'pendiente' ? null : `${p.local.goles}-${p.visitante.goles}`,
       actualizado: p.estado === 'finalizado',
     })),
-    aviso: equiposSinPartido.length > 0 ? 'Hay equipos sin partido en el marcador (jornada con aplazados o jornada aún no publicada).' : undefined,
+    aviso: mesasCerradas ? 'Último partido terminado: mesas cerradas con los puntos tal como están (falta confirmar el pago en Pagos pendientes).' : equiposSinPartido.length > 0 ? 'Hay equipos sin partido en el marcador (jornada con aplazados o jornada aún no publicada).' : undefined,
   });
 }
 
@@ -703,6 +718,9 @@ async function comprobarEmparejamiento(
 }
 
 export async function sincronizarFutbol(admin: Admin, opciones: OpcionesSincronizacion = {}): Promise<{ resultados: ResultadoCompeticionFutbol[]; mensaje?: string; escudos?: { liga: string; equipos: number; error?: string }[] }> {
+  // Una jornada cerrada (todos los partidos terminados) ya no se vuelve a
+  // tocar, aunque ESPN corrija estadísticas después (06/10, Iñi: dinero
+  // ficticio por ahora; se afinará con un proveedor de datos de pago).
   const { data: salas, error } = await admin.from('salas').select('competicion,fecha_limite_inscripcion,estado').eq('deporte', 'futbol').neq('estado', 'finalizada');
   if (error) throw new Error(error.message);
 

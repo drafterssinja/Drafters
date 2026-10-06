@@ -353,6 +353,7 @@ export default function SalaDetallePage() {
                   // arriba).
                   salaId={sala.id}
                   puedeEditar={puedeEditarEquipo}
+                  buyIn={sala.buy_in}
                 />
               ))}
             </div>
@@ -478,6 +479,7 @@ function EquipoPanel({
   titulo,
   salaId,
   puedeEditar,
+  buyIn,
 }: {
   equipo: EquipoMio;
   jugadores: JugadorRow[];
@@ -485,7 +487,32 @@ function EquipoPanel({
   titulo?: string;
   salaId: string;
   puedeEditar: boolean;
+  buyIn: number;
 }) {
+  // 06/10 (Iñi): "Borrar equipo" (desapuntarse de la sala) junto a "Modificar
+  // equipo", con la misma regla (solo mientras la sala no haya empezado).
+  // Pide confirmación y devuelve el buy-in íntegro (ver desapuntarse_de_sala()
+  // en sql_desapuntarse_sala.sql; el servidor repite la comprobación).
+  const [confirmandoBorrado, setConfirmandoBorrado] = useState(false);
+  const [borrando, setBorrando] = useState(false);
+  const [errorBorrado, setErrorBorrado] = useState<string | null>(null);
+  const [borrado, setBorrado] = useState<string | null>(null);
+
+  async function borrarEquipo() {
+    setBorrando(true);
+    setErrorBorrado(null);
+    const { data, error } = await supabase.rpc('desapuntarse_de_sala', { p_equipo_id: equipo.id });
+    if (error) {
+      setErrorBorrado(error.message);
+      setBorrando(false);
+      return;
+    }
+    const importe = typeof data === 'number' ? data : Number(data ?? buyIn);
+    setBorrado(`Te has desapuntado. Te hemos devuelto ${formatEuros(importe)}.`);
+    setBorrando(false);
+    window.setTimeout(() => window.location.reload(), 1800);
+  }
+
   const huecos = huecosPorLinea(equipo.alineacion ?? null);
   const porLinea: Record<LineaFutbol, JugadorRow[]> = { POR: [], DEF: [], MED: [], DEL: [] };
   jugadores.forEach((j) => porLinea[lineaDePosicion(j.posicion)].push(j));
@@ -665,6 +692,64 @@ function EquipoPanel({
         >
           Ya no se puede modificar este equipo
         </span>
+      )}
+      {puedeEditar && !borrado && (
+        confirmandoBorrado ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '12px 14px', background: 'rgba(255,92,92,0.08)', border: '1px solid rgba(255,92,92,0.35)', borderRadius: 10 }}>
+            <span style={{ fontSize: 13, color: S.TEXT, lineHeight: 1.4 }}>
+              ¿Seguro que quieres borrar este equipo y desapuntarte de la sala? Te devolvemos tu inscripción íntegra ({formatEuros(buyIn)}).
+            </span>
+            {errorBorrado && <span style={{ fontSize: 12, color: '#FF5C5C', fontWeight: 600 }}>{errorBorrado}</span>}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                type="button"
+                disabled={borrando}
+                onClick={() => {
+                  setConfirmandoBorrado(false);
+                  setErrorBorrado(null);
+                }}
+                style={{ flex: 1, width: 'auto', padding: '10px 12px', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 13, textTransform: 'uppercase', color: S.MUTED_2, background: 'transparent', border: `1px solid ${S.BORDER}`, borderRadius: 10, cursor: 'pointer' }}
+              >
+                No, volver
+              </button>
+              <button
+                type="button"
+                disabled={borrando}
+                onClick={borrarEquipo}
+                style={{ flex: 1, width: 'auto', padding: '10px 12px', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 13, textTransform: 'uppercase', color: '#fff', background: '#FF5C5C', border: 'none', borderRadius: 10, cursor: 'pointer' }}
+              >
+                {borrando ? 'Borrando...' : 'Sí, borrar equipo'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setConfirmandoBorrado(true)}
+            style={{
+              width: '100%',
+              fontFamily: "'Barlow Condensed', sans-serif",
+              fontWeight: 700,
+              fontSize: 14,
+              textTransform: 'uppercase',
+              letterSpacing: '0.03em',
+              color: '#FF5C5C',
+              background: 'transparent',
+              border: '1px solid rgba(255,92,92,0.4)',
+              padding: '12px 20px',
+              borderRadius: 10,
+              minHeight: 42,
+              cursor: 'pointer',
+            }}
+          >
+            Borrar equipo
+          </button>
+        )
+      )}
+      {borrado && (
+        <div style={{ padding: '12px 14px', background: 'rgba(61,220,132,0.1)', border: '1px solid rgba(61,220,132,0.4)', borderRadius: 10 }}>
+          <span style={{ fontSize: 13, color: '#3DDC84', fontWeight: 700 }}>{borrado}</span>
+        </div>
       )}
     </div>
   );

@@ -173,6 +173,8 @@ async function crearBorrador(
   const salas = generarSalasParaTorneo({ competicionLabel: nombreTorneo, deporte: 'golf', fechaLimiteIso }).map((s) => ({
     ...s,
     publicada: false,
+    // Para las pestañas PGA Tour / DP World Tour de /salas.
+    circuito: tour === 'pga' ? 'pga' : 'eur',
   }));
   const { error: salasError } = await admin.from('salas').insert(salas);
   if (salasError) throw new Error(`No se han podido crear las mesas: ${salasError.message}`);

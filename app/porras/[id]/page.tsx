@@ -427,6 +427,7 @@ export default function PorraDetallePage() {
                         </div>
                       ))}
                     </div>
+                    {!porraEmpezada && <BorrarEquipoPorra equipoId={eq.id} precio={porra.precio} />}
                   </div>
                 );
               })}
@@ -656,6 +657,80 @@ export default function PorraDetallePage() {
         </div>
       </div>
     </main>
+  );
+}
+
+// 06/10 (Iñi): "Borrar equipo" (desapuntarse de la porra) mientras no haya
+// empezado — misma regla que "Editar equipo". Pide confirmación y devuelve el
+// precio de entrada íntegro (ver desapuntarse_de_porra() en
+// sql_desapuntarse_porra.sql; el servidor repite la comprobación).
+function BorrarEquipoPorra({ equipoId, precio }: { equipoId: string; precio: number }) {
+  const [confirmando, setConfirmando] = useState(false);
+  const [borrando, setBorrando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [hecho, setHecho] = useState<string | null>(null);
+
+  async function borrar() {
+    setBorrando(true);
+    setError(null);
+    const { data, error: err } = await supabase.rpc('desapuntarse_de_porra', { p_equipo_id: equipoId });
+    if (err) {
+      setError(err.message);
+      setBorrando(false);
+      return;
+    }
+    const importe = typeof data === 'number' ? data : Number(data ?? precio);
+    setHecho(`Te has desapuntado. Te hemos devuelto ${formatEuros(importe)}.`);
+    setBorrando(false);
+    window.setTimeout(() => window.location.reload(), 1800);
+  }
+
+  if (hecho) {
+    return (
+      <div style={{ padding: '12px 14px', background: 'rgba(61,220,132,0.1)', border: '1px solid rgba(61,220,132,0.4)', borderRadius: 10 }}>
+        <span style={{ fontSize: 13, color: '#3DDC84', fontWeight: 700 }}>{hecho}</span>
+      </div>
+    );
+  }
+  if (confirmando) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '12px 14px', background: 'rgba(255,92,92,0.08)', border: '1px solid rgba(255,92,92,0.35)', borderRadius: 10 }}>
+        <span style={{ fontSize: 13, color: S.TEXT, lineHeight: 1.4 }}>
+          ¿Seguro que quieres borrar este equipo y desapuntarte de la porra? Te devolvemos tu inscripción íntegra ({formatEuros(precio)}).
+        </span>
+        {error && <span style={{ fontSize: 12, color: '#FF5C5C', fontWeight: 600 }}>{error}</span>}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            type="button"
+            disabled={borrando}
+            onClick={() => {
+              setConfirmando(false);
+              setError(null);
+            }}
+            style={{ flex: 1, width: 'auto', padding: '10px 12px', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 13, textTransform: 'uppercase', color: S.MUTED_2, background: 'transparent', border: `1px solid ${S.BORDER}`, borderRadius: 10, cursor: 'pointer' }}
+          >
+            No, volver
+          </button>
+          <button
+            type="button"
+            disabled={borrando}
+            onClick={borrar}
+            style={{ flex: 1, width: 'auto', padding: '10px 12px', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 13, textTransform: 'uppercase', color: '#fff', background: '#FF5C5C', border: 'none', borderRadius: 10, cursor: 'pointer' }}
+          >
+            {borrando ? 'Borrando...' : 'Sí, borrar equipo'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => setConfirmando(true)}
+      style={{ width: '100%', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14, textTransform: 'uppercase', letterSpacing: '0.03em', color: '#FF5C5C', background: 'transparent', border: '1px solid rgba(255,92,92,0.4)', padding: '10px 20px', borderRadius: 10, minHeight: 40, cursor: 'pointer' }}
+    >
+      Borrar equipo
+    </button>
   );
 }
 
