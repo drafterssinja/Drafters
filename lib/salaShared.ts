@@ -224,11 +224,11 @@ export function lineaDePosicion(posicion: string | null): LineaFutbol {
   }
 }
 
-// A partir de la alineación elegida ('4-3-3', '4-4-2', '3-5-2', '4-2-3-1' —
-// convención DEF-MED-DEL, portero siempre 1) da cuántos huecos pintar en
-// cada línea del campo. Para '4-2-3-1' (def=4, resto=[2,3,1]): el último
-// número es siempre delanteros, todo lo de en medio se suma como centro del
-// campo (med = 2+3 = 5).
+// A partir de la alineación elegida ('4-3-3', '4-4-2', '4-5-1', '5-4-1',
+// '3-4-3' — convención DEF-MED-DEL, portero siempre 1) da cuántos huecos
+// pintar en cada línea del campo. Si una alineación tuviera más de 3
+// números (equipos antiguos con '4-2-3-1'), el último es siempre delanteros
+// y todo lo de en medio se suma como centro del campo (med = 2+3 = 5).
 export function huecosPorLinea(alineacion: string | null): Record<LineaFutbol, number> {
   const partes = (alineacion ?? '4-3-3').split('-').map((n) => parseInt(n, 10) || 0);
   const [def, ...resto] = partes;

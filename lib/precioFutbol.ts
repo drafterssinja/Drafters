@@ -51,8 +51,8 @@
  *    así el portero más caro de la jornada nunca se acerca al precio de un
  *    delantero estrella, aunque su valor de mercado bruto sea alto.
  *
- * 4. Tres reglas de seguridad, sobre las 4 alineaciones válidas de la app
- *    (4-3-3, 4-4-2, 3-5-2, 4-2-3-1 — ver FORMACIONES_FUTBOL):
+ * 4. Tres reglas de seguridad, sobre las 5 alineaciones válidas de la app
+ *    (4-3-3, 4-4-2, 4-5-1, 5-4-1, 3-4-3 — ver FORMACIONES_FUTBOL):
  *      Regla 1: el once más caro posible (la alineación que más cueste)
  *               debe costar >= 110% del presupuesto.
  *      Regla 2: los 3 jugadores más caros, completados con los más baratos

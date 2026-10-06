@@ -82,6 +82,10 @@ function MesasPageInner() {
   const [misMesas, setMisMesas] = useState<EquipoMesaFila[]>([]);
   const [lesionMap, setLesionMap] = useState<Map<string, { nombre: string; lesionado: boolean; baja: boolean }>>(new Map());
   const [cargando, setCargando] = useState(true);
+  // 06/10 (Iñi): "Tus mesas en juego" muestra solo 2 y el resto queda tras
+  // "Mostrar más", igual que en /inicio.
+  const [mostrarTodasMesas, setMostrarTodasMesas] = useState(false);
+  const LIMITE_MESAS_VISIBLE = 2;
   // Maratones finalizados (04/10, corrección de Iñi): no se ven de primeras
   // al entrar — se quedan plegados detrás de un desplegable, que empieza
   // cerrado.
@@ -326,7 +330,7 @@ function MesasPageInner() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <h2 style={{ fontSize: 20, fontWeight: 700, color: S.TEXT }}>Tus mesas en juego.</h2>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {misMesas.map((eq) => {
+                {(mostrarTodasMesas ? misMesas : misMesas.slice(0, LIMITE_MESAS_VISIBLE)).map((eq) => {
                   const sala = eq.salas;
                   const nombre = sala?.nombre ?? eq.nombre_equipo ?? 'Mi equipo';
                   const href = sala ? `/salas/${eq.sala_id}` : '#';
@@ -410,6 +414,26 @@ function MesasPageInner() {
                     </div>
                   );
                 })}
+                {misMesas.length > LIMITE_MESAS_VISIBLE && (
+                  <button
+                    type="button"
+                    onClick={() => setMostrarTodasMesas((v) => !v)}
+                    style={{
+                      alignSelf: 'center',
+                      marginTop: 2,
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#3DDC84',
+                      fontFamily: "'Manrope', sans-serif",
+                      fontWeight: 700,
+                      fontSize: 12.5,
+                      cursor: 'pointer',
+                      padding: '6px 10px',
+                    }}
+                  >
+                    {mostrarTodasMesas ? 'Mostrar menos ▴' : `Mostrar más (${misMesas.length - LIMITE_MESAS_VISIBLE}) ▾`}
+                  </button>
+                )}
               </div>
             </div>
           )}

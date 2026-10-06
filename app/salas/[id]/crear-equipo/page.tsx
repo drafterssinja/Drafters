@@ -871,7 +871,7 @@ export default function CrearEquipoPage() {
                   <span style={{ flexShrink: 0, fontSize: 7.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Alineación</span>
                   <div style={{ display: 'flex', gap: 4 }}>
                     {FORMACIONES_FUTBOL.map((f) => (
-                      <button key={f.alineacion} type="button" onClick={() => cambiarFormacion(f.alineacion)} style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 11, padding: '4px 10px', borderRadius: 999, border: `1px solid ${alineacion === f.alineacion ? '#3DDC84' : S.BORDER}`, background: alineacion === f.alineacion ? 'rgba(61,220,132,0.12)' : 'transparent', color: alineacion === f.alineacion ? '#3DDC84' : S.MUTED, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                      <button key={f.alineacion} type="button" onClick={() => cambiarFormacion(f.alineacion)} style={{ flexShrink: 0, width: 'auto', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 11, lineHeight: 1.2, padding: '3px 9px', borderRadius: 999, border: `1px solid ${alineacion === f.alineacion ? '#3DDC84' : S.BORDER}`, background: alineacion === f.alineacion ? 'rgba(61,220,132,0.12)' : 'transparent', color: alineacion === f.alineacion ? '#3DDC84' : S.MUTED, cursor: 'pointer', whiteSpace: 'nowrap' }}>
                         {f.label}
                       </button>
                     ))}

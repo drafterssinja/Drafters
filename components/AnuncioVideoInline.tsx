@@ -49,6 +49,8 @@ export default function AnuncioVideoInline({ ubicacion }: { ubicacion: 'clasific
   const [video, setVideo] = useState<{ id: string; url: string; enlace: string | null } | null | 'cargando'>('cargando');
   const [silenciado, setSilenciado] = useState(true);
   const [necesitaToque, setNecesitaToque] = useState(false);
+  // Proporción real del vídeo (ancho/alto), para la caja de escritorio.
+  const [proporcion, setProporcion] = useState<number | null>(null);
   const yaRegistradoRef = useRef(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -157,7 +159,7 @@ export default function AnuncioVideoInline({ ubicacion }: { ubicacion: 'clasific
       <div
         className="anuncio-video-caja"
         onClick={irAlEnlace}
-        style={{ position: 'relative', cursor: video.enlace ? 'pointer' : 'default' }}
+        style={{ position: 'relative', cursor: video.enlace ? 'pointer' : 'default', ...(proporcion ? ({ '--ratio': String(proporcion) } as React.CSSProperties) : {}) }}
       >
         <video
           key={video.id}
@@ -170,6 +172,10 @@ export default function AnuncioVideoInline({ ubicacion }: { ubicacion: 'clasific
           onPlay={() => {
             setNecesitaToque(false);
             alEmpezarReproduccion();
+          }}
+          onLoadedMetadata={(e) => {
+            const v = e.currentTarget;
+            if (v.videoWidth && v.videoHeight) setProporcion(v.videoWidth / v.videoHeight);
           }}
           onError={() => {
             // eslint-disable-next-line no-console

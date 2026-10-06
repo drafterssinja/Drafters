@@ -21,12 +21,14 @@ export interface FormacionFutbol {
   alineacion: string;
 }
 
-// Mismas 4 alineaciones de la maqueta (futbolFormacionesDisponibles).
+// 06/10 (Iñi): las 5 alineaciones válidas son 4-3-3, 4-4-2, 4-5-1, 5-4-1 y 3-4-3
+// (antes: 4-3-3, 4-4-2, 3-5-2, 4-2-3-1).
 export const FORMACIONES_FUTBOL: FormacionFutbol[] = [
   { label: '4-3-3', alineacion: '4-3-3' },
   { label: '4-4-2', alineacion: '4-4-2' },
-  { label: '3-5-2', alineacion: '3-5-2' },
-  { label: '4-2-3-1', alineacion: '4-2-3-1' },
+  { label: '4-5-1', alineacion: '4-5-1' },
+  { label: '5-4-1', alineacion: '5-4-1' },
+  { label: '3-4-3', alineacion: '3-4-3' },
 ];
 
 export function colorPresupuesto(restante: number): string {

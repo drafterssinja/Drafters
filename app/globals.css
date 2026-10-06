@@ -63,17 +63,26 @@
     background: var(--muted);
   }
 
-  /* Vídeo publicitario (components/AnuncioVideoInline.tsx) — aviso de Iñi
-     (01/10), justo después de ampliar la tarjeta de arriba a 960px: "se
-     queda muy alargado la caja del vídeo". El vídeo en sí no cambia nada
-     (mismo maxHeight:220 y proporción de siempre, que es la que ya se veía
-     bien en el móvil) — lo único que se limita aquí, y solo en escritorio,
-     es el ANCHO de su caja, para que no se estire a los 960px de la tarjeta
-     y vuelva a quedar con la misma proporción que ya tenía en el móvil. */
+  /* Vídeo publicitario (components/AnuncioVideoInline.tsx) — escritorio.
+     01/10: al ensanchar la tarjeta a 960px el vídeo se estiraba. 06/10
+     (Iñi: "en el ordenador se ve muy mal"): el límite de ancho de 480px
+     con márgenes automáticos hacía que, dentro de una columna flex, la
+     caja se encogiera al ancho del propio vídeo (un rectángulo estrecho
+     perdido en medio de una pantalla ancha). Ahora la caja tiene la
+     PROPORCIÓN REAL del vídeo (--ratio, la mide el componente al cargarlo)
+     y como mucho 400px de alto y 560px de ancho, centrada: se ve el vídeo
+     entero, sin recortes ni estirones, sea vertical u horizontal. En el
+     móvil no cambia nada (esto solo está dentro del @media de escritorio). */
   .anuncio-video-caja {
-    max-width: 480px;
+    width: min(100%, 560px, calc(400px * var(--ratio, 0.5625)));
     margin-left: auto;
     margin-right: auto;
+  }
+  .anuncio-video-caja video {
+    width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    object-fit: cover !important;
   }
 }
 
