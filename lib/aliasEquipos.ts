@@ -213,6 +213,18 @@ export function nombreSinFilial(nombre: string): string {
     .trim();
 }
 
+/** "Celta Fortuna" → "Celta", "Real Sociedad B" → "Real Sociedad" (conserva mayúsculas y acentos). */
+export function nombrePrimerEquipo(n: string): string {
+  return n
+    .replace(/bilbao\s+athletic/i, 'Athletic Club')
+    .replace(/\b(sevilla|valencia|betis|villarreal)\s+atl[eé]tico\s*$/i, '$1')
+    .replace(/\b(fortuna|castilla|atl[eé]tic|promesas|juvenil|sanse)\b/gi, ' ')
+    .replace(/\(\s*(b|c|ii)\s*\)/gi, ' ')
+    .replace(/\s+(b|c|ii)\s*$/i, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /**
  * Empareja el nombre de un equipo (tal y como lo escribe una fuente
  * externa) contra la lista de nombres reales candidatos (normalmente los

@@ -112,8 +112,11 @@ export const MARATON_BUY_IN = 10; // provisional — sin escalones, sala única
 // "Vamos a hacerlo más reducido para que no se genere mucho jaleo: solo
 // mesas de 10 euros. Doble o Nada de 2 y de 4 jugadores, Triple o Nada de 3
 // y de 6 jugadores, y una de 5 jugadores en la que ganan dos (Oro y Plata)."
-// Más 1 sala Maratón (10 €). Solo afecta al fútbol (golf y tenis siguen con todas las
-// variantes de arriba). Para ampliar más adelante, basta añadir filas aquí.
+// Más 1 sala Maratón (10 €). Para ampliar más adelante, basta añadir filas aquí.
+// 07/10, pedido de Iñi: lo MISMO para el golf (solo estos tipos y solo de 10 €),
+// y se añade la mesa de 10 jugadores con 3 ganadores (Tridente 60/25/15) en
+// fútbol y en golf. El tenis sigue con todas las variantes de arriba hasta que
+// se haga su creación automática.
 export const BUY_IN_FUTBOL = 10;
 export const VARIANTES_FUTBOL: { tipo: TipoSala; label: string; aforo: number }[] = [
   { tipo: 'doble_o_nada', label: 'Doble o Nada', aforo: 2 },
@@ -121,7 +124,9 @@ export const VARIANTES_FUTBOL: { tipo: TipoSala; label: string; aforo: number }[
   { tipo: 'triple_o_nada', label: 'Triple o Nada', aforo: 3 },
   { tipo: 'triple_o_nada', label: 'Triple o Nada', aforo: 6 },
   { tipo: 'oro_y_plata', label: 'Oro y Plata', aforo: 5 },
+  { tipo: 'tridente', label: 'Tridente', aforo: 10 },
 ];
+export const VARIANTES_REDUCIDAS = VARIANTES_FUTBOL;
 
 export interface SalaNueva {
   nombre: string;
@@ -145,7 +150,7 @@ export function generarSalasParaTorneo(params: {
 
   // Fútbol: solo el conjunto reducido de VARIANTES_FUTBOL (ver arriba) más la
   // sala Maratón (decisión de Iñi 06/10: "mesas solo de 10€, pero que sí haya Maratón").
-  if (deporte === 'futbol') {
+  if (deporte === 'futbol' || deporte === 'golf') {
     const mesas = VARIANTES_FUTBOL.map(
       (v): SalaNueva => ({
         nombre: `${v.label} · ${BUY_IN_FUTBOL}€`,

@@ -27,6 +27,7 @@ import { crearClienteAdmin } from './supabaseAdmin';
 import { normalizarNombre } from '../nombreMatch';
 import { emparejarEquipo } from '../aliasEquipos';
 import { claveEquipoFutbol, emparejarJugadoresConTabla, resultadoDeEquipo, type FilaFantasy, type ResultadoEquipo } from '../futbolLaLiga';
+import type { TipoAvisoFutbol } from '../futbolAvisos';
 import { estadisticasVacias, puntuarJugador, type EstadisticasJugador, type LineaDesglose } from '../futbolPuntuacion';
 
 type Admin = ReturnType<typeof crearClienteAdmin>;
@@ -236,7 +237,19 @@ type FilaRoster = {
   stats: Record<string, number>;
 };
 
+/** Evento del partido con su protagonista (para los avisos de la clasificación, 07/10). */
+type EventoClave = {
+  tipo: 'gol' | 'gol_propia' | 'penalti_marcado' | 'penalti_fallado' | 'amarilla' | 'roja';
+  atletaId: string;
+  jugador: string;
+  minutoTxt: string;
+  minuto: number;
+  asistenteId: string | null;
+  asistente: string | null;
+};
+
 type ResumenPartido = {
+  eventos: EventoClave[];
   goles: GolDetalle[];
   roster: { local: FilaRoster[]; visitante: FilaRoster[] };
   entra: Map<string, number>; // atletaId → minuto en que entró
@@ -256,6 +269,7 @@ async function resumenDelPartido(slug: string, p: PartidoEspn): Promise<ResumenP
   const json = await jsonEspn(`${BASE_ESPN}/${slug}/summary?event=${p.espnId}`);
 
   const goles: GolDetalle[] = [];
+  const eventos: EventoClave[] = [];
   const entra = new Map<string, number>();
   const sale = new Map<string, number>();
   const penaltisFallados = new Map<string, number>();
@@ -272,6 +286,15 @@ async function resumenDelPartido(slug: string, p: PartidoEspn): Promise<ResumenP
       const penalti = /penalty/i.test(tipoTexto);
       const jugador = k.participants?.[0]?.athlete?.displayName;
       if (!jugador) continue;
+      eventos.push({
+        tipo: propia ? 'gol_propia' : penalti ? 'penalti_marcado' : 'gol',
+        atletaId: String(k.participants?.[0]?.athlete?.id ?? ''),
+        jugador,
+        minutoTxt: String(k.clock?.displayValue ?? ''),
+        minuto,
+        asistenteId: propia || penalti ? null : (k.participants?.[1]?.athlete?.id ? String(k.participants[1].athlete.id) : null),
+        asistente: propia || penalti ? null : (k.participants?.[1]?.athlete?.displayName ?? null),
+      });
       goles.push({
         minuto: String(k.clock?.displayValue ?? ''),
         equipo: equipoId === p.visitante.id ? 'visitante' : 'local',
@@ -290,7 +313,15 @@ async function resumenDelPartido(slug: string, p: PartidoEspn): Promise<ResumenP
     }
     if (/red card/i.test(tipoTexto)) {
       const id = k.participants?.[0]?.athlete?.id;
-      if (id) sale.set(String(id), minuto);
+      if (id) {
+        sale.set(String(id), minuto);
+        eventos.push({ tipo: 'roja', atletaId: String(id), jugador: String(k.participants?.[0]?.athlete?.displayName ?? ''), minutoTxt: String(k.clock?.displayValue ?? ''), minuto, asistenteId: null, asistente: null });
+      }
+      continue;
+    }
+    if (/yellow card/i.test(tipoTexto)) {
+      const id = k.participants?.[0]?.athlete?.id;
+      if (id) eventos.push({ tipo: 'amarilla', atletaId: String(id), jugador: String(k.participants?.[0]?.athlete?.displayName ?? ''), minutoTxt: String(k.clock?.displayValue ?? ''), minuto, asistenteId: null, asistente: null });
       continue;
     }
     // Penalti fallado: "Penalty - Saved" (parado), "Penalty - Missed",
@@ -302,6 +333,7 @@ async function resumenDelPartido(slug: string, p: PartidoEspn): Promise<ResumenP
       if (lanzador) {
         penaltisFallados.set(String(lanzador), (penaltisFallados.get(String(lanzador)) ?? 0) + 1);
         fallosPenalti.push({ lanzadorId: String(lanzador), minuto });
+        eventos.push({ tipo: 'penalti_fallado', atletaId: String(lanzador), jugador: String(k.participants?.[0]?.athlete?.displayName ?? ''), minutoTxt: String(k.clock?.displayValue ?? ''), minuto, asistenteId: null, asistente: null });
       }
     }
   }
@@ -326,6 +358,7 @@ async function resumenDelPartido(slug: string, p: PartidoEspn): Promise<ResumenP
   const rosters: any[] = json.rosters ?? [];
   const delLado = (lado: LadoPartido) => rosters.find((r) => String(r.team?.id ?? '') === lado.id);
   return {
+    eventos,
     goles,
     roster: { local: leerRoster(delLado(p.local)), visitante: leerRoster(delLado(p.visitante)) },
     entra,
@@ -490,6 +523,7 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
 
   const filasPuntos: Record<string, unknown>[] = [];
   const filasPartido: Record<string, unknown>[] = [];
+  const filasEventos: Record<string, unknown>[] = [];
   const sinEmparejarEspn: { nombre: string; equipo: string }[] = [];
   const fichasSinPareja = new Map<string, { id: string; nombre: string; equipo: string | null }>();
   let emparejadosTotal = 0;
@@ -588,6 +622,44 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
         const fr = filaPorNuestro.get(j.id);
         const st = fr && resumen ? estadisticasDe(fr, resumen, finalizado, paradosPor.get(fr.atletaId) ?? 0) : estadisticasVacias();
         const { total, desglose } = puntuarJugador(j.posicion, st, { finalizado, golesContraEquipo: rival.goles, equipoGana: resultado === 'G' });
+        // Eventos del jugador para los avisos de la clasificación (07/10).
+        if (fr && resumen) {
+          const ev = (tipo: TipoAvisoFutbol, disc: string, minuto: string | null, detalle: string | null) =>
+            filasEventos.push({
+              clave: `${p.espnId}:${tipo}:${fr.atletaId}:${disc}`,
+              competicion,
+              partido_espn_id: p.espnId,
+              jugador_id: j.id,
+              jugador_nombre: j.nombre.replace(/\s*\([^)]*\)\s*$/, ''),
+              equipo_real: j.equipo_real,
+              tipo,
+              minuto,
+              detalle,
+            });
+          let golesVistos = 0;
+          resumen.eventos.forEach((e, idx) => {
+            if (e.atletaId === fr.atletaId) {
+              if (e.tipo === 'gol' || e.tipo === 'penalti_marcado') {
+                golesVistos++;
+                ev(e.tipo, `${e.minuto}-${idx}`, e.minutoTxt, e.asistente ? `asistencia de ${e.asistente}` : null);
+                if (golesVistos === 2) ev('doblete', 'd', e.minutoTxt, null);
+                if (golesVistos === 3) ev('hat_trick', 'h', e.minutoTxt, null);
+              } else {
+                ev(e.tipo, `${e.minuto}-${idx}`, e.minutoTxt, null);
+              }
+            }
+            if (e.asistenteId && e.asistenteId === fr.atletaId) ev('asistencia', `${e.minuto}-${idx}`, e.minutoTxt, e.jugador);
+          });
+          if (j.posicion === 'portero') {
+            for (let n = 1; n <= st.paradas; n++) ev('parada', String(n), null, null);
+            for (let n = 1; n <= (paradosPor.get(fr.atletaId) ?? 0); n++) ev('penalti_parado', String(n), null, null);
+          }
+          if (finalizado && st.jugo) {
+            if (desglose.some((l) => l.clave === 'porteria_cero')) ev('porteria_cero', 'f', null, null);
+            if (desglose.some((l) => l.clave === 'victoria')) ev('victoria_portero', 'f', null, null);
+            ev('fin_partido', 'f', null, `${p.local.goles}-${p.visitante.goles} · ${total > 0 ? '+' : ''}${total} pts`);
+          }
+        }
         const previo = puntosGuardados.get(j.id);
         const mismo = previo && Number(previo.puntos_total) === total && previo.partido_estado === p.estado && previo.actualizado === finalizado && JSON.stringify(previo.desglose ?? []) === JSON.stringify(desglose);
         if (mismo) continue;
@@ -621,6 +693,12 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
   for (let i = 0; i < filasPuntos.length; i += 300) {
     const { error } = await admin.from('futbol_puntos_jugador').upsert(filasPuntos.slice(i, i + 300), { onConflict: 'jugador_id' });
     if (error) throw new Error(`Guardando puntos: ${error.message}`);
+  }
+  // Eventos (avisos): upsert ignorando los que ya existían, para que un mismo
+  // gol no se avise dos veces. Un fallo aquí nunca debe tirar la sincronización.
+  for (let i = 0; i < filasEventos.length; i += 300) {
+    const { error } = await admin.from('futbol_eventos').upsert(filasEventos.slice(i, i + 300), { onConflict: 'clave', ignoreDuplicates: true });
+    if (error) break;
   }
   if (filasPartido.length > 0) {
     const { error } = await admin.from('futbol_partidos_jornada').upsert(filasPartido, { onConflict: 'competicion,clave_local,clave_visitante' });
@@ -684,6 +762,9 @@ async function comprobarEmparejamiento(
   for (const [k, nombre] of Array.from(nuestros.entries())) if (!porClave.has(k)) equiposSinEmparejar.push(nombre);
 
   const sinEmparejarFicha: { id: string; nombre: string; equipo: string | null }[] = [];
+  // Jugadores de las plantillas de ESPN que no casan con ninguno nuestro: con
+  // ellos y los nuestros sin pareja se proponen los enlaces (lib/sugerirAlias.ts).
+  const sinEmparejarEspn: { nombre: string; equipo: string }[] = [];
   let emparejados = 0;
   const entradas = Array.from(porClave.entries());
   for (let i = 0; i < entradas.length; i += 8) {
@@ -697,6 +778,7 @@ async function comprobarEmparejamiento(
           const emp = emparejarJugadoresConTabla(nuestrosDelEquipo, filas, alias);
           emparejados += emp.emparejados.size;
           for (const j of emp.sinEmparejarFicha) sinEmparejarFicha.push({ id: j.id, nombre: j.nombre, equipo: j.equipo_real });
+          if (emp.sinEmparejarFicha.length > 0) for (const f of emp.sinEmparejarTabla) sinEmparejarEspn.push({ nombre: f.slug || f.nombre, equipo: nuestros.get(clave) ?? e.nombre });
         } catch {
           for (const j of jugadoresPorEquipo.get(clave) ?? []) sinEmparejarFicha.push({ id: j.id, nombre: j.nombre, equipo: j.equipo_real });
         }
@@ -712,6 +794,7 @@ async function comprobarEmparejamiento(
     jugadoresEnFicha: jugadores.length,
     jugadoresEmparejados: emparejados,
     nombresFichaSinEmparejar: sinEmparejarFicha,
+    jugadoresEspnSinEmparejar: sinEmparejarEspn,
     equiposSinEmparejar,
     aviso: 'Comprobación contra las plantillas de ESPN (los jugadores que no estén en una plantilla de ESPN aparecen sin emparejar).',
   });

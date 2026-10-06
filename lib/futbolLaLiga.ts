@@ -11,7 +11,7 @@
 // fuentes y el emparejado por nombre (jugadores de ESPN ↔ nuestra ficha).
 
 import { normalizarNombre } from './nombreMatch';
-import { normalizarEquipo, canonicoEquipo, esEquipoFilial } from './aliasEquipos';
+import { normalizarEquipo, canonicoEquipo, esEquipoFilial, nombrePrimerEquipo } from './aliasEquipos';
 
 /** Un jugador "externo" a emparejar con nuestra ficha (p.ej. de ESPN). */
 export type FilaFantasy = {
@@ -174,7 +174,9 @@ const ESCUDOS_ESPN: Record<string, number> = {
   'real sociedad': 89, sevilla: 243, valencia: 94, villarreal: 102,
 };
 export function escudoLaLiga(nombreEquipo: string | null | undefined): string | null {
-  const id = ESCUDOS_ESPN[claveEquipoLaLiga(nombreEquipo ?? '')];
+  const n = nombreEquipo ?? '';
+  // Un filial (Celta Fortuna) enseña el escudo del primer equipo (07/10).
+  const id = ESCUDOS_ESPN[claveEquipoLaLiga(esEquipoFilial(n) ? nombrePrimerEquipo(n) : n)];
   return id ? `https://a.espncdn.com/i/teamlogos/soccer/500/${id}.png` : null;
 }
 

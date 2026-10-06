@@ -23,7 +23,8 @@ import { mapaEquiposNuestros, claveNuestraDe } from './sincronizarFutbolEspn';
 import { plantillaDeLaLiga } from './crearFutbolAutomatico';
 import { normalizarNombre } from '../nombreMatch';
 import { calcularPreciosFutbolDetallado, factorPosicion, fuerzaPorEquipo } from '../precioFutbol';
-import { esEquipoFilial, nombreSinFilial } from '../aliasEquipos';
+import { esEquipoFilial, nombrePrimerEquipo } from '../aliasEquipos';
+import { claveEquipoFutbol } from '../futbolLaLiga';
 import type { PosicionFutbol } from '../futbolPuntuacion';
 
 type Admin = ReturnType<typeof crearClienteAdmin>;
@@ -44,21 +45,56 @@ async function repararUna(admin: Admin, competicion: string, prefijo: string): P
   const cuotas = (cuotasData as FilaCuota[]) ?? [];
   if (cuotas.length === 0) return { competicion, estado: 'sin_cambios', detalle: 'Sin cuotas guardadas: no hay nada que reparar.' };
 
-  const plantilla = await plantillaDeLaLiga(admin, prefijo);
+  let plantilla = await plantillaDeLaLiga(admin, prefijo);
+  const avisos: string[] = [];
+
+  // 0. Equipos de la jornada que no tienen NINGÚN jugador del primer equipo en la
+  //    base: lo normal es que sus jugadores se cargaran con el nombre del filial
+  //    ("Celta Fortuna") al pegar el valor de mercado. En La Liga el primer equipo
+  //    nunca puede quedarse a cero, así que se les devuelve el nombre del primer
+  //    equipo (solo cambia la etiqueta de equipo; los ids no se tocan).
+  {
+    const claves = (ps: typeof plantilla) => new Set(ps.filter((j) => !esEquipoFilial(j.equipo_real ?? '')).map((j) => claveEquipoFutbol(j.equipo_real)));
+    const tienen = claves(plantilla);
+    const nombresCuotas = Array.from(new Set(cuotas.flatMap((c) => [c.equipo_local, c.equipo_visitante])));
+    const claveJornada = new Map<string, string>(); // clave del primer equipo → nombre sin filial
+    for (const n of nombresCuotas) {
+      const base = esEquipoFilial(n) ? nombrePrimerEquipo(n) : n;
+      const k = claveEquipoFutbol(base);
+      if (k && !tienen.has(k)) claveJornada.set(k, base);
+    }
+    let reasignados = 0;
+    for (const [k, base] of Array.from(claveJornada.entries())) {
+      const nombresFilial = Array.from(new Set(plantilla.filter((j) => esEquipoFilial(j.equipo_real ?? '') && claveEquipoFutbol(nombrePrimerEquipo(j.equipo_real ?? '')) === k).map((j) => j.equipo_real as string)));
+      for (const nf of nombresFilial) {
+        const { data: tocados, error } = await admin.from('jugadores').update({ equipo_real: base }).eq('deporte', 'futbol').ilike('competicion', `${prefijo}%`).eq('equipo_real', nf).select('id');
+        if (error) throw new Error(`jugadores: ${error.message}`);
+        reasignados += tocados?.length ?? 0;
+        avisos.push(`"${nf}" no tenía equivalente del primer equipo: ${tocados?.length ?? 0} jugadores pasan a llamarse "${base}"`);
+      }
+    }
+    if (reasignados > 0) plantilla = await plantillaDeLaLiga(admin, prefijo);
+  }
+
   const nuestros = mapaEquiposNuestros(plantilla.filter((j) => !esEquipoFilial(j.equipo_real ?? '')).map((j) => j.equipo_real));
   const nombreCorrecto = (n: string): string | null => {
-    const base = esEquipoFilial(n) ? nombreSinFilial(n) : n;
+    const base = esEquipoFilial(n) ? nombrePrimerEquipo(n) : n;
     const k = claveNuestraDe(base, nuestros);
     return k ? (nuestros.get(k) ?? null) : null;
   };
 
-  // 1. Cuotas con el nombre del primer equipo.
+  // 1. Cuotas con el nombre del primer equipo. Si un equipo no existe ni así en
+  //    la base se deja como está y se avisa (antes se abortaba toda la jornada).
   const corregidas: FilaCuota[] = [];
+  const equiposSinJugadores = new Set<string>();
   let cuotasCambiadas = 0;
   for (const c of cuotas) {
-    const loc = nombreCorrecto(c.equipo_local);
-    const vis = nombreCorrecto(c.equipo_visitante);
-    if (!loc || !vis) throw new Error(`No encuentro el equipo "${!loc ? c.equipo_local : c.equipo_visitante}" entre los jugadores cargados de ${prefijo}.`);
+    const locOk = nombreCorrecto(c.equipo_local);
+    const visOk = nombreCorrecto(c.equipo_visitante);
+    if (!locOk) equiposSinJugadores.add(c.equipo_local);
+    if (!visOk) equiposSinJugadores.add(c.equipo_visitante);
+    const loc = locOk ?? c.equipo_local;
+    const vis = visOk ?? c.equipo_visitante;
     if (loc !== c.equipo_local || vis !== c.equipo_visitante) {
       const { error } = await admin
         .from('cuotas_partido_futbol')
@@ -71,6 +107,8 @@ async function repararUna(admin: Admin, competicion: string, prefijo: string): P
     }
     corregidas.push({ ...c, equipo_local: loc, equipo_visitante: vis });
   }
+  // Los marcadores guardados con la clave del filial ya no sirven: se recalculan solos.
+  await admin.from('futbol_partidos_jornada').delete().eq('competicion', competicion).or('clave_local.like.filial*,clave_visitante.like.filial*');
 
   // 2. Fichas que deberían estar en la jornada y precio de cada una.
   const partidos = corregidas.map((c) => ({ equipoLocal: c.equipo_local, equipoVisitante: c.equipo_visitante, cuota1: c.cuota_1, cuotaX: c.cuota_x, cuota2: c.cuota_2 }));
@@ -153,12 +191,27 @@ async function repararUna(admin: Admin, competicion: string, prefijo: string): P
   }
   const filialesConservados = filiales.length - aBorrar.length;
 
-  const cambios = nuevas.length + cuotasCambiadas + aBorrar.length + reprecios;
+  // Diagnóstico final: jugadores por equipo en la jornada.
+  const { data: finalData } = await admin.from('jugadores').select('equipo_real').eq('competicion', competicion);
+  const porEquipoFinal = new Map<string, number>();
+  for (const f of (finalData as { equipo_real: string | null }[] | null) ?? []) {
+    const k = claveEquipoFutbol(f.equipo_real);
+    if (k) porEquipoFinal.set(k, (porEquipoFinal.get(k) ?? 0) + 1);
+  }
+  const pocos = Array.from(equiposJornada)
+    .map((n) => ({ n, k: claveEquipoFutbol(n), c: porEquipoFinal.get(claveEquipoFutbol(n)) ?? 0 }))
+    .filter((x) => x.c < 15)
+    .map((x) => `${x.n} (${x.c})`);
+  for (const n of Array.from(equiposSinJugadores)) avisos.push(`FALTA: no hay ningún jugador cargado de "${n}" en ${prefijo}. Vuelve a pegar el valor de mercado de esa liga con ese equipo.`);
+  if (pocos.length > 0) avisos.push(`Equipos de la jornada con pocos jugadores: ${pocos.join(', ')}`);
+
+  const cambios = nuevas.length + cuotasCambiadas + aBorrar.length + reprecios + (avisos.length > 0 ? 1 : 0);
   const detalle =
     `${nuevas.length} jugadores añadidos, ${cuotasCambiadas} partido(s) con el nombre de equipo corregido, ${aBorrar.length} jugador(es) de filial retirados` +
     (filialesConservados > 0 ? ` (${filialesConservados} conservado(s) porque alguien ya los eligió)` : '') +
     (hayEquipos ? '; ya hay equipos apuntados: los precios de los jugadores que ya estaban no se han tocado' : `; precios recalculados de ${reprecios} jugadores`) +
-    '.';
+    '.' +
+    (avisos.length > 0 ? `\n   · ${avisos.join('\n   · ')}` : '');
   return { competicion, estado: cambios > 0 ? 'reparada' : 'sin_cambios', detalle };
 }
 

@@ -116,12 +116,12 @@ export const PUNTUACION_GOLF: TablaPuntuacion[] = [
   {
     titulo: 'Rachas y golpes destacados',
     filas: [
-      { accion: 'Racha de 3 birdies seguidos (máx. 1 por día)', puntos: '+3' },
-      { accion: 'Racha de 5 birdies seguidos (máx. 1 por día)', puntos: '+2' },
+      { accion: 'Racha de 3 birdies (o mejor) seguidos (máx. 1 por día)', puntos: '+3' },
+      { accion: 'Racha de 5 birdies seguidos (máx. 1 por día, se suma a la de 3)', puntos: '+2' },
       { accion: 'Vuelta sin bogeys (18 hoyos)', puntos: '+4' },
-      { accion: 'Putt de +30 pies', puntos: '+1' },
-      { accion: 'Approach metido', puntos: '+1' },
-      { accion: 'Hole in one', puntos: '+4' },
+      { accion: 'Putt de +30 pies', puntos: '+1', proximamente: true },
+      { accion: 'Approach metido', puntos: '+1', proximamente: true },
+      { accion: 'Hole in one (además de los puntos del hoyo)', puntos: '+4' },
     ],
   },
   {
