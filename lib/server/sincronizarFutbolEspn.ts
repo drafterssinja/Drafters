@@ -32,7 +32,6 @@ import { estadisticasVacias, puntuarJugador, type EstadisticasJugador, type Line
 type Admin = ReturnType<typeof crearClienteAdmin>;
 
 const BASE_ESPN = 'https://site.api.espn.com/apis/site/v2/sports/soccer';
-const USER_AGENT = 'DraftersBot/1.0 (+https://drafters-rho.vercel.app)';
 const HORAS_ANTES_DE_EMPEZAR = 12;
 const HORAS_RECALCULO_TRAS_FINAL = 4;
 const DIAS_VENTANA_PARTIDOS = 6;
@@ -106,16 +105,29 @@ async function fetchConTiempo(url: string, ms: number): Promise<Response> {
   const control = new AbortController();
   const t = setTimeout(() => control.abort(), ms);
   try {
-    return await fetch(url, { headers: { 'User-Agent': USER_AGENT }, signal: control.signal, cache: 'no-store' });
+    // Sin cabecera User-Agent propia: ESPN devolvía 403 a las llamadas del
+    // servidor con "DraftersBot" (06/10). Las de golf, que no mandan ninguna,
+    // funcionan, así que se hace igual.
+    return await fetch(url, { headers: { Accept: 'application/json' }, signal: control.signal, cache: 'no-store' });
   } finally {
     clearTimeout(t);
   }
 }
 
+const BASE_ESPN_ALTERNATIVA = 'https://site.web.api.espn.com/apis/site/v2/sports/soccer';
+
+/** GET a ESPN con reintento por el otro dominio de la API (como en golf) si
+ * el primero responde con error (p.ej. 403). */
 async function jsonEspn(url: string, ms = 15000): Promise<any> {
   const res = await fetchConTiempo(url, ms);
-  if (!res.ok) throw new Error(`ESPN respondió ${res.status} (${url.replace(BASE_ESPN, '')})`);
-  return res.json();
+  if (res.ok) return res.json();
+  const primero = res.status;
+  if (url.startsWith(BASE_ESPN)) {
+    const alt = await fetchConTiempo(url.replace(BASE_ESPN, BASE_ESPN_ALTERNATIVA), ms).catch(() => null);
+    if (alt && alt.ok) return alt.json();
+    throw new Error(`ESPN respondió ${primero}${alt ? ` y ${alt.status} (dominio alternativo)` : ''} (${url.replace(BASE_ESPN, '')})`);
+  }
+  throw new Error(`ESPN respondió ${primero} (${url})`);
 }
 
 function yyyymmdd(d: Date): string {
