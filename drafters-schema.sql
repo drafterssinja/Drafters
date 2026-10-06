@@ -415,7 +415,7 @@ create table if not exists public.equipos (
   porra_id uuid references public.porras (id) on delete cascade,
   nombre_equipo text,
   jugadores jsonb not null default '[]'::jsonb, -- lista de ids de jugadores elegidos
-  alineacion text, -- solo fútbol: '4-3-3', '4-4-2', '3-5-2', '4-2-3-1'
+  alineacion text, -- solo fútbol: '4-3-3', '4-4-2', '4-5-1', '5-4-1', '3-4-3'
   gasto_total numeric(10, 2) not null default 0,
   puntos_totales numeric,
   posicion_final int,

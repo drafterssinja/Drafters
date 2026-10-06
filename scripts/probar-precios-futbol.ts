@@ -167,10 +167,10 @@ for (const p of resultado.precios) {
 // sin reutilizar la función interna del módulo (para no validar la fórmula
 // contra sí misma).
 function huecos(alineacion: string) {
-  const [def, med, del] = alineacion === '4-3-3' ? [4, 3, 3] : alineacion === '4-4-2' ? [4, 4, 2] : alineacion === '3-5-2' ? [3, 5, 2] : [4, 5, 1]; // 4-2-3-1
+  const [def, med, del] = alineacion.split('-').map((n) => parseInt(n, 10));
   return { POR: 1, DEF: def, MED: med, DEL: del };
 }
-const ALINEACIONES = ['4-3-3', '4-4-2', '3-5-2', '4-2-3-1'];
+const ALINEACIONES = ['4-3-3', '4-4-2', '4-5-1', '5-4-1', '3-4-3'];
 const preciosConPosicion = jugadores.map((j) => ({ ...j, precio: porId.get(j.id)!.precio }));
 const porLinea = {
   POR: preciosConPosicion.filter((j) => j.posicion === 'portero').map((j) => j.precio).sort((a, b) => b - a),
