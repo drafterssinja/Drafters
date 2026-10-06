@@ -750,7 +750,12 @@ async function procesarTorneoDataGolf(
       await admin.from('torneos_golf_live').update({ rondas_totales: rondasFinal }).eq('id', torneo.id);
     }
 
-    const activos = estadoActual.filter((j) => j.total !== null && sigueCompitiendo(j.posicion));
+    // 06/10: se ignora a quien tiene resultado pero NINGÚN dato de ronda/hoyo
+    // (ronda y thru vacíos, posición vacía): Data Golf lo ha dejado sin
+    // estado (típico de una retirada) y nunca va a "terminar" la ronda, lo
+    // que bloqueaba el cierre de la Dunhill (un solo jugador, Follett-Smith,
+    // con ronda/hoyo/posición vacíos, impedía que se diera por acabado).
+    const activos = estadoActual.filter((j) => j.total !== null && j.ronda !== null && sigueCompitiendo(j.posicion));
     const todosListos = activos.length > 0 && activos.every((j) => j.ronda === rondasFinal && j.thru === 18);
 
     if (todosListos) {

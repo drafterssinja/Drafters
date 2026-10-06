@@ -511,13 +511,15 @@ export default function AdminResultadosGolfPage() {
     }
     const jug = (data as { nombre: string; resultado_en_vivo_total: number | null; resultado_en_vivo_thru: number | null; resultado_en_vivo_ronda: number | null; resultado_en_vivo_posicion: string | null }[]) ?? [];
     const conDatos = jug.filter((j) => j.resultado_en_vivo_total !== null);
-    const activos = conDatos.filter((j) => sigueCompitiendo(j.resultado_en_vivo_posicion));
+    // Igual que la sincronización: quien no tiene ronda (sin estado en Data Golf, típico de una retirada) no cuenta.
+    const activos = conDatos.filter((j) => j.resultado_en_vivo_ronda !== null && sigueCompitiendo(j.resultado_en_vivo_posicion));
+    const sinEstado = conDatos.filter((j) => j.resultado_en_vivo_ronda === null && sigueCompitiendo(j.resultado_en_vivo_posicion)).length;
     const maxRonda = conDatos.reduce((m, j) => Math.max(m, j.resultado_en_vivo_ronda ?? 0), 0);
     const rondas = Math.max(t.rondas_totales ?? 0, maxRonda);
     const noListos = activos.filter((j) => !(j.resultado_en_vivo_ronda === rondas && j.resultado_en_vivo_thru === 18));
     const lineas = [
       `Rondas totales guardadas: ${t.rondas_totales ?? 'sin dato'} · ronda más alta vista: ${maxRonda || 'ninguna'}.`,
-      `${conDatos.length} jugadores con resultado en vivo; ${activos.length} siguen compitiendo (sin CUT/WD/DQ).`,
+      `${conDatos.length} jugadores con resultado en vivo; ${activos.length} siguen compitiendo (sin CUT/WD/DQ)${sinEstado > 0 ? `; ${sinEstado} sin ronda/hoyo en Data Golf se ignoran` : ''}.`,
       noListos.length === 0
         ? activos.length === 0
           ? 'No hay ningún jugador con resultado: no se puede dar por terminado.'
