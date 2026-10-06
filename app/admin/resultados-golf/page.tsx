@@ -78,6 +78,7 @@ type ResultadoSync = {
   jugadoresEmparejados: number;
   nombresSinEmparejar: string[];
   hoyosActualizados: number;
+  avisosPuntos?: string[];
   error?: string;
   aviso?: string;
   // Comprobación previa al torneo (06/10): campo publicado por Data Golf vs jugadores de la porra.
@@ -857,6 +858,12 @@ export default function AdminResultadosGolfPage() {
                       {r.competicion}: {r.ok ? (r.comprobacion ? (r.aviso ? 'no se puede comprobar todavía' : `${r.jugadoresEmparejados}/${r.totalCampoDG ?? '?'} jugadores del campo de Data Golf emparejados con tu porra (tu porra tiene ${r.jugadoresEnCampo})`) : r.aviso ? 'sin actualizar (otro torneo en vivo en Data Golf)' : `${r.jugadoresEmparejados}/${r.jugadoresEnCampo} jugadores emparejados, ${r.hoyosActualizados} hoyos actualizados`) : `error — ${r.error}`}
                     </span>
                     {r.aviso && <span style={{ fontSize: 11.5, color: '#F0B94D', lineHeight: 1.4 }}>⚠ {r.aviso}</span>}
+                    {r.avisosPuntos && r.avisosPuntos.length > 0 && (
+                      <span style={{ fontSize: 11.5, color: '#F0B94D', lineHeight: 1.45 }}>
+                        ⚠ Puntos Drafters de las mesas — hoyos sin dato ({r.avisosPuntos.length}): {r.avisosPuntos.slice(0, 12).join(' · ')}
+                        {r.avisosPuntos.length > 12 ? ' …' : ''}
+                      </span>
+                    )}
                     {r.comprobacion && r.enPorraNoEnCampo && r.enPorraNoEnCampo.length > 0 && (
                       <span style={{ fontSize: 11.5, color: S.MUTED_2, lineHeight: 1.45 }}>
                         En tu porra pero NO en el campo de Data Golf ({r.enPorraNoEnCampo.length}): {r.enPorraNoEnCampo.join(', ')}. Si ya no juegan, quítalos en Porras de golf → Jugadores; si es solo un nombre escrito distinto, enlázalo abajo.

@@ -16,6 +16,8 @@ import { cargarFavoritosJugador } from '@/lib/favoritosJugador';
 import { cargarParesBiblioteca } from '@/lib/paresBiblioteca';
 import EstrellaFavorito from '@/components/EstrellaFavorito';
 import ClasificacionMesaFutbol from '@/components/ClasificacionMesaFutbol';
+import { formatPuntos } from '@/lib/futbolLaLiga';
+import type { LineaDesglose } from '@/lib/futbolPuntuacion';
 import TablaHoyoAHoyo, { type CasillaHoyo, type FilaRondaTabla } from '@/components/TablaHoyoAHoyo';
 
 // ============================================================================
@@ -62,41 +64,22 @@ type JugadorRow = {
   resultado_en_vivo_ronda: number | null;
   resultado_en_vivo_posicion: string | null;
 };
+type PuntosGolfRow = { jugador_id: string; puntos_total: number; desglose: LineaDesglose[] | null };
 type EquipoClasif = { equipoId: string; nombre: string; jugadores: string[]; createdAt: string };
 type HoyoRow = { ronda: number; hoyo: number; par: number; golpes: number; campo_id: string | null; tipo_resultado: TipoResultadoHoyo };
 
 type Vista = 'mesa' | 'torneo' | 'premios' | 'eventos';
 
-// Desglose día a día de la penalización por no pasar el corte (04/10,
-// segunda vuelta) — mismo mecanismo que en
-// app/porras/[id]/clasificacion/page.tsx, ver el comentario largo junto a
-// golf_penalizacion_corte_dia en drafters-schema.sql. La penalización en sí
-// es una regla global de golf (jugadores.resultado_en_vivo_total), no algo
-// propio de la porra clásica, así que aplica igual aquí.
-type PenalizacionCorteDia = { ronda: number; golpesSumados: number };
-
-async function cargarPenalizacionCorte(jugadorIds: string[]): Promise<Map<string, PenalizacionCorteDia[]>> {
-  if (jugadorIds.length === 0) return new Map();
-  const { data } = await supabase
-    .from('golf_penalizacion_corte_dia')
-    .select('jugador_id,ronda,golpes_sumados')
-    .in('jugador_id', jugadorIds)
-    .order('ronda', { ascending: true });
-  const mapa = new Map<string, PenalizacionCorteDia[]>();
-  ((data as { jugador_id: string; ronda: number; golpes_sumados: number }[]) ?? []).forEach((f) => {
-    const lista = mapa.get(f.jugador_id) ?? [];
-    lista.push({ ronda: f.ronda, golpesSumados: f.golpes_sumados });
-    mapa.set(f.jugador_id, lista);
-  });
+// Puntos Drafters de golf de todo el campo de la competición (07/10).
+async function cargarPuntosGolf(competicion: string): Promise<Map<string, PuntosGolfRow>> {
+  const mapa = new Map<string, PuntosGolfRow>();
+  for (let desde = 0; ; desde += 1000) {
+    const { data } = await supabase.from('golf_puntos_jugador').select('jugador_id,puntos_total,desglose').eq('competicion', competicion).range(desde, desde + 999);
+    const filas = (data as PuntosGolfRow[]) ?? [];
+    filas.forEach((f) => mapa.set(f.jugador_id, f));
+    if (filas.length < 1000) break;
+  }
   return mapa;
-}
-
-function totalEquipo(jugadoresIds: string[], jugadoresPorId: Map<string, JugadorRow>): number {
-  return jugadoresIds.reduce((acc, id) => {
-    const j = jugadoresPorId.get(id);
-    if (!j) return acc;
-    return acc + (j.resultado_en_vivo_total ?? 0);
-  }, 0);
 }
 
 // CAMBIO 03/10 (pedido de Iñi): "después de cuántos hoyos lleva ese
@@ -107,7 +90,8 @@ function estadoJugador(j: JugadorRow): string | null {
   const posicion = j.resultado_en_vivo_posicion ? `Pos. ${j.resultado_en_vivo_posicion}` : null;
   const ronda = j.resultado_en_vivo_ronda ? `Ronda ${j.resultado_en_vivo_ronda}` : null;
   const thru = j.resultado_en_vivo_thru !== null ? (j.resultado_en_vivo_thru >= 18 ? 'F' : `Thru ${j.resultado_en_vivo_thru}`) : null;
-  return [posicion, ronda, thru].filter(Boolean).join(' · ') || null;
+  const alPar = j.resultado_en_vivo_total !== null ? formatGolfScore(j.resultado_en_vivo_total) : null;
+  return [posicion, ronda, thru, alPar].filter(Boolean).join(' · ') || null;
 }
 
 export default function SalaClasificacionPage() {
@@ -118,6 +102,9 @@ export default function SalaClasificacionPage() {
   const [perfil, setPerfil] = useState<Perfil | null>(null);
   const [sala, setSala] = useState<SalaRow | null>(null);
   const [jugadores, setJugadores] = useState<JugadorRow[]>([]);
+  // Puntos Drafters de cada jugador de golf (07/10, tabla golf_puntos_jugador,
+  // la escribe la sincronización de Data Golf — ver lib/golfPuntuacion.ts).
+  const [puntosGolf, setPuntosGolf] = useState<Map<string, PuntosGolfRow>>(new Map());
   const [equipos, setEquipos] = useState<EquipoClasif[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -168,9 +155,6 @@ export default function SalaClasificacionPage() {
   const [eventos, setEventos] = useState<
     { id: string; jugador: string; tipo: TipoResultadoHoyo; hoyo: number; ronda: number; actualizadoEn: string }[] | 'cargando' | null
   >(null);
-  // Penalización por no pasar el corte, día a día (04/10, segunda vuelta) —
-  // ver cargarPenalizacionCorte más arriba.
-  const [penalizacionCorte, setPenalizacionCorte] = useState<Map<string, PenalizacionCorteDia[]>>(new Map());
 
   useEffect(() => {
     let activo = true;
@@ -252,11 +236,9 @@ export default function SalaClasificacionPage() {
 
       const jugadoresCargados = (jugData as JugadorRow[]) ?? [];
       setJugadores(jugadoresCargados);
-      if (jugadoresCargados.length > 0) {
-        cargarPenalizacionCorte(jugadoresCargados.map((j) => j.id)).then((mapa) => {
-          if (activo) setPenalizacionCorte(mapa);
-        });
-      }
+      cargarPuntosGolf(salaRow.competicion).then((m) => {
+        if (activo) setPuntosGolf(m);
+      });
       const camposArr = (camposData as { campo_id: string; nombre: string }[]) ?? [];
       setNombresCampo(Object.fromEntries(camposArr.map((c) => [c.campo_id, c.nombre])));
       if (camposArr.length > 0) {
@@ -280,11 +262,14 @@ export default function SalaClasificacionPage() {
   }, [router, salaId]);
 
   const jugadoresPorId = useMemo(() => new Map(jugadores.map((j) => [j.id, j])), [jugadores]);
+  // Puntos Drafters (más = mejor). Un jugador sin fila todavía = 0.
+  const puntosDe = (id: string): number => puntosGolf.get(id)?.puntos_total ?? 0;
+  const totalEquipo = (jugadoresIds: string[]): number => jugadoresIds.reduce((acc, id) => acc + puntosDe(id), 0);
   // A diferencia del "campo completo" de la porra (que se ordena por precio
   // del jugador, pensado como explorador de la plantilla), aquí tiene más
   // sentido ordenar por resultado real — esta pantalla ya es la
   // clasificación en directo, no un selector de jugadores.
-  const campoOrdenado = useMemo(() => jugadores.slice().sort((a, b) => (a.resultado_en_vivo_total ?? 0) - (b.resultado_en_vivo_total ?? 0)), [jugadores]);
+  const campoOrdenado = useMemo(() => jugadores.slice().sort((a, b) => (puntosGolf.get(b.id)?.puntos_total ?? 0) - (puntosGolf.get(a.id)?.puntos_total ?? 0) || (a.resultado_en_vivo_total ?? 0) - (b.resultado_en_vivo_total ?? 0)), [jugadores, puntosGolf]);
 
   // Hoyo a hoyo del jugador con el foco puesto — mismo criterio que
   // app/porras/[id]/clasificacion/page.tsx. CAMBIO 03/10: ya no hay una
@@ -360,6 +345,32 @@ export default function SalaClasificacionPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vista, sala?.competicion, favoritosJugador, jugadoresPorId]);
+
+  // Refresco automático cada minuto (07/10): resultado en vivo de los
+  // jugadores y sus puntos Drafters. Una vez terminado el torneo ya no cambia.
+  useEffect(() => {
+    const competicion = sala?.competicion;
+    if (!competicion || sala?.deporte !== 'golf' || torneoFinalizado) return;
+    let activo = true;
+    async function refrescar() {
+      const [{ data: jugData }, mapa] = await Promise.all([
+        supabase
+          .from('jugadores')
+          .select('id,nombre,resultado_en_vivo_total,resultado_en_vivo_thru,resultado_en_vivo_ronda,resultado_en_vivo_posicion')
+          .eq('deporte', 'golf')
+          .eq('competicion', competicion as string),
+        cargarPuntosGolf(competicion as string),
+      ]);
+      if (!activo) return;
+      if (jugData && (jugData as JugadorRow[]).length > 0) setJugadores(jugData as JugadorRow[]);
+      setPuntosGolf(mapa);
+    }
+    const intervalo = setInterval(refrescar, 60000);
+    return () => {
+      activo = false;
+      clearInterval(intervalo);
+    };
+  }, [sala?.competicion, sala?.deporte, torneoFinalizado]);
 
   // Marca/desmarca un equipo como favorito (02/10) — ver comentario de
   // cabecera del archivo y lib/favoritosEquipo.ts.
@@ -471,7 +482,7 @@ export default function SalaClasificacionPage() {
   // equipos que da equipos_sala_clasificacion() viene ordenada por fecha de
   // inscripción, así que aquí se reordena por puntuación para la columna de
   // la izquierda.
-  const equiposPorPuntuacion = equipos.slice().sort((a, b) => totalEquipo(a.jugadores, jugadoresPorId) - totalEquipo(b.jugadores, jugadoresPorId));
+  const equiposPorPuntuacion = equipos.slice().sort((a, b) => totalEquipo(b.jugadores) - totalEquipo(a.jugadores));
 
   // Favoritos (02/10): solo tiene sentido en el Maratón — ver comentario de
   // cabecera del archivo.
@@ -480,38 +491,32 @@ export default function SalaClasificacionPage() {
     .map((eq, i) => ({ eq, rango: i + 1 }))
     .filter(({ eq }) => !esMaraton || !soloFavoritos || favoritos.has(eq.equipoId));
 
-  // Total de golpes sumados por el corte (04/10, segunda vuelta) — número
-  // rojo al lado del nombre, y desglose día a día dentro de la tarjeta del
-  // jugador — mismo mecanismo que en app/porras/[id]/clasificacion/page.tsx.
-  function totalPenalizacionCorte(jugadorId: string): number {
-    return (penalizacionCorte.get(jugadorId) ?? []).reduce((acc, d) => acc + d.golpesSumados, 0);
-  }
-
-  function desgloseCorte(jugador: JugadorRow) {
-    const dias = penalizacionCorte.get(jugador.id);
-    if (!dias || dias.length === 0) return null;
+  // Desglose de los puntos Drafters del jugador (07/10): de dónde sale cada
+  // punto + las dos acciones que Data Golf todavía no da ("Próximamente").
+  function desglosePuntosJugador(jugador: JugadorRow) {
+    const fila = puntosGolf.get(jugador.id);
+    const lineas = fila?.desglose ?? [];
+    const signo = (n: number) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${formatPuntos(Math.abs(n))}`;
     return (
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 4,
-          padding: '8px 10px',
-          background: 'rgba(255,92,92,0.08)',
-          border: '1px solid rgba(255,92,92,0.3)',
-          borderRadius: 8,
-        }}
-      >
-        <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.ERROR }}>
-          No pasó el corte — penalización por día
-        </span>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-          {dias.map((d) => (
-            <span key={d.ronda} style={{ fontSize: 11.5, color: S.MUTED }}>
-              Ronda {d.ronda}: <strong style={{ color: S.ERROR }}>+{d.golpesSumados}</strong>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '8px 10px', background: 'rgba(255,255,255,0.03)', border: '1px solid #1E2723', borderRadius: 10 }}>
+        <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Desglose de puntos{torneoFinalizado ? '' : ' (en directo)'}</span>
+        {lineas.length === 0 && <span style={{ fontSize: 11.5, color: S.MUTED }}>Todavía sin acciones que puntúen.</span>}
+        {lineas.map((l) => (
+          <div key={l.clave} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: 11.5 }}>
+            <span style={{ color: S.MUTED }}>
+              {l.etiqueta}
+              {l.cantidad > 1 ? ` ×${l.cantidad}` : ''}
             </span>
-          ))}
+            <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 13, color: l.puntos < 0 ? S.ERROR : '#F0B94D' }}>{signo(l.puntos)}</span>
+          </div>
+        ))}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, borderTop: '1px solid #1E2723', paddingTop: 4, marginTop: 2 }}>
+          <span style={{ fontSize: 11.5, fontWeight: 700, color: S.TEXT }}>Total</span>
+          <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 14, color: S.TEXT }}>{formatPuntos(puntosDe(jugador.id))}</span>
         </div>
+        <span style={{ fontSize: 9.5, color: S.MUTED_3, lineHeight: 1.4 }}>
+          {torneoFinalizado ? 'Incluye los puntos por la posición final.' : 'Los puntos por la posición final se suman cuando termina el torneo.'} Putt de +30 pies y approach metido: próximamente (todavía no puntúan).
+        </span>
       </div>
     );
   }
@@ -685,7 +690,7 @@ export default function SalaClasificacionPage() {
                         {eq.nombre}
                       </span>
                       <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 12, color: S.MUTED_2 }}>
-                        {formatGolfScore(totalEquipo(eq.jugadores, jugadoresPorId))}
+                        {formatPuntos(totalEquipo(eq.jugadores))}
                       </span>
                     </motion.a>
                   );
@@ -703,7 +708,7 @@ export default function SalaClasificacionPage() {
                     {equipoSeleccionado.nombre}
                   </span>
                   <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, color: S.MUTED_2 }}>
-                    {formatGolfScore(totalEquipo(equipoSeleccionado.jugadores, jugadoresPorId))}
+                    {formatPuntos(totalEquipo(equipoSeleccionado.jugadores))} pts
                   </span>
                 </div>
                 {jugadoresDelEquipoSeleccionado.map((j) => (
@@ -744,17 +749,11 @@ export default function SalaClasificacionPage() {
                         >
                           {j.nombre}
                         </span>
-                        {/* Penalización por no pasar el corte (04/10,
-                            segunda vuelta) — mismo sitio que el bono de
-                            podio en la porra clásica (que aquí no existe). */}
-                        {totalPenalizacionCorte(j.id) > 0 && (
-                          <span style={{ flexShrink: 0, fontSize: 9.5, fontWeight: 800, color: S.ERROR }}>+{totalPenalizacionCorte(j.id)}</span>
-                        )}
                       </span>
                       {estadoJugador(j) && <span style={{ fontSize: 9, color: S.MUTED_3 }}>{estadoJugador(j)}</span>}
                     </div>
                     <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 13, color: S.MUTED_2 }}>
-                      {formatGolfScore(j.resultado_en_vivo_total ?? 0)}
+                      {formatPuntos(puntosDe(j.id))}
                     </span>
                   </motion.a>
                 ))}
@@ -809,13 +808,10 @@ export default function SalaClasificacionPage() {
                           >
                             {j.nombre}
                           </span>
-                          {totalPenalizacionCorte(j.id) > 0 && (
-                            <span style={{ flexShrink: 0, fontSize: 9.5, fontWeight: 800, color: S.ERROR }}>+{totalPenalizacionCorte(j.id)}</span>
-                          )}
                         </span>
                         {estadoJugador(j) && <span style={{ fontSize: 9, color: S.MUTED_3 }}>{estadoJugador(j)}</span>}
                       </div>
-                      <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 13, color: S.MUTED_2 }}>{formatGolfScore(j.resultado_en_vivo_total ?? 0)}</span>
+                      <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 13, color: S.MUTED_2 }}>{formatPuntos(puntosDe(j.id))}</span>
                     </a>
                     {jugadorFocoId === j.id && (
                       <div style={{ margin: '0 0 2px 20px', padding: '7px 9px', background: 'rgba(61,220,132,0.05)', border: '1px dashed rgba(61,220,132,0.3)', borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 5 }}>
@@ -851,7 +847,7 @@ export default function SalaClasificacionPage() {
                             Mesa, ver más abajo). */}
                         <div style={{ paddingTop: 2, borderTop: `1px solid ${S.CARD_BORDER}`, display: 'flex', flexDirection: 'column', gap: 5 }}>
                           {estadoJugador(j) && <span style={{ fontSize: 9, color: S.MUTED_3 }}>{estadoJugador(j)}</span>}
-                          {desgloseCorte(j)}
+                          {desglosePuntosJugador(j)}
                           {tablaResultadosJugador(j)}
                         </div>
                       </div>
@@ -882,9 +878,9 @@ export default function SalaClasificacionPage() {
               if (torneoFinalizado) {
                 const clasificacionFinal: ClasificacionEntrada[] = equiposPorPuntuacion.map((eq) => ({
                   equipoId: eq.equipoId,
-                  valor: totalEquipo(eq.jugadores, jugadoresPorId),
+                  valor: totalEquipo(eq.jugadores),
                 }));
-                const repartoFinal = repartirPremiosConEmpates(clasificacionFinal, tramosPremios, bote, 'asc').sort((a, b) => a.posicion - b.posicion);
+                const repartoFinal = repartirPremiosConEmpates(clasificacionFinal, tramosPremios, bote, 'desc').sort((a, b) => a.posicion - b.posicion);
                 return (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '20px 14px', background: 'rgba(61,220,132,0.08)', border: '1px solid rgba(61,220,132,0.35)', borderRadius: 12 }}>
@@ -908,7 +904,7 @@ export default function SalaClasificacionPage() {
                           <span style={{ flex: 1, minWidth: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 13, color: S.TEXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {eq?.nombre ?? 'Equipo'}
                           </span>
-                          <span style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 700, color: S.MUTED_2 }}>{eq ? formatGolfScore(totalEquipo(eq.jugadores, jugadoresPorId)) : ''}</span>
+                          <span style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 700, color: S.MUTED_2 }}>{eq ? `${formatPuntos(totalEquipo(eq.jugadores))} pts` : ''}</span>
                           <span style={{ flexShrink: 0, width: 70, textAlign: 'right', fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13, color: '#3DDC84' }}>
                             {formatEuros(r.importe)}
                           </span>
@@ -1003,14 +999,13 @@ export default function SalaClasificacionPage() {
               </div>
               {estadoJugador(jugadorFoco) && <span style={{ fontSize: 11, color: S.MUTED_3 }}>{estadoJugador(jugadorFoco)}</span>}
 
-              {desgloseCorte(jugadorFoco)}
+              {desglosePuntosJugador(jugadorFoco)}
               {tablaResultadosJugador(jugadorFoco)}
             </div>
           )}
 
           <span style={{ fontSize: 10, color: S.FAINT }}>
-            *Clasificación en directo: resultado respecto al par de cada jugador/equipo (no puntos), actualizado automáticamente cada minuto. Se ve "E"
-            (par) mientras un jugador todavía no tiene ningún resultado registrado.
+            *Clasificación en directo por puntos Drafters (hoyo a hoyo, rachas, vuelta sin bogeys, hole in one y posición final), actualizada automáticamente cada minuto. Pulsa un jugador para ver el desglose y su hoyo a hoyo. Los puntos por la posición final se suman cuando termina el torneo.
           </span>
 
           {/* Vídeo publicitario debajo de todo — mismo criterio que en

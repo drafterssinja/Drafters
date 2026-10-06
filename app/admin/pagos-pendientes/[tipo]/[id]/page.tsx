@@ -34,7 +34,7 @@ import { PorraFormato, PORRA_FORMATO_LABELS } from '@/lib/porraFormato';
 type Tipo = 'sala' | 'porra';
 
 type PorraRow = { id: string; major: string; formato: PorraFormato; precio: number; competicion: string | null };
-type SalaRow = { id: string; nombre: string; tipo: TipoSala; aforo: number | null; buy_in: number };
+type SalaRow = { id: string; nombre: string; tipo: TipoSala; aforo: number | null; buy_in: number; deporte: string; competicion: string };
 type EquipoRow = { id: string; nombre_equipo: string | null; usuario_id: string; jugadores: string[] };
 // CAMBIO 03/10 (pedido de Iñi): el desempate del bono de podio ya no mira el
 // grupo del jugador, mira su precio — ver lib/golfScoring.ts.
@@ -130,7 +130,7 @@ export default function AdminLiquidarPage() {
           }
         }
       } else {
-        const { data: salaData } = await supabase.from('salas').select('id, nombre, tipo, aforo, buy_in').eq('id', itemId).single();
+        const { data: salaData } = await supabase.from('salas').select('id, nombre, tipo, aforo, buy_in, deporte, competicion').eq('id', itemId).single();
         if (!activo) return;
         if (!salaData) {
           setError('No se ha encontrado esta sala.');
@@ -147,7 +147,29 @@ export default function AdminLiquidarPage() {
           e.inscripciones.some((i) => i.estado !== 'reembolsada')
         );
         setEquipos(equiposActivos);
-        setAvisoDatos('Esta sala no tiene un motor de puntuación automático todavía — escribe a mano la posición final de cada equipo.');
+        const salaRow = salaData as SalaRow;
+        if (salaRow.deporte === 'golf') {
+          // Golf (07/10): las mesas puntúan con los puntos Drafters (tabla
+          // golf_puntos_jugador); se rellena sola la posición de cada equipo
+          // (empatados = mismo puesto) y se puede corregir a mano.
+          const { data: ptsData } = await supabase.from('golf_puntos_jugador').select('jugador_id, puntos_total').eq('competicion', salaRow.competicion);
+          const pts = new Map(((ptsData as { jugador_id: string; puntos_total: number }[]) ?? []).map((f) => [f.jugador_id, Number(f.puntos_total)]));
+          const totales = equiposActivos.map((e) => ({ id: e.id, total: (e.jugadores ?? []).reduce((a, id) => a + (pts.get(id) ?? 0), 0) }));
+          const sorted = totales.slice().sort((a, b) => b.total - a.total);
+          const posiciones = new Map<string, string>();
+          sorted.forEach((t, i) => {
+            const previoIgual = i > 0 && sorted[i - 1].total === t.total;
+            posiciones.set(t.id, previoIgual ? (posiciones.get(sorted[i - 1].id) as string) : String(i + 1));
+          });
+          setPosicionesManual(posiciones);
+          setAvisoDatos(
+            pts.size === 0
+              ? 'Todavía no hay puntos Drafters de golf para esta competición (¿has ejecutado sql_golf_puntos.sql y está sincronizando?). Escribe la posición a mano.'
+              : 'Posiciones rellenadas automáticamente con los puntos Drafters de golf (más puntos = mejor; empatados comparten puesto). Revísalas antes de repartir: los puntos por posición final solo se incluyen si el torneo ya está dado por terminado.'
+          );
+        } else {
+          setAvisoDatos('Esta sala no tiene un motor de puntuación automático todavía — escribe a mano la posición final de cada equipo.');
+        }
       }
 
       setCargando(false);

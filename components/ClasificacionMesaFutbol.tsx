@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
@@ -11,6 +11,8 @@ import { formatEuros, parteParaPremios } from '@/lib/salaShared';
 import { calcularReparto, type TipoSala } from '@/lib/repartoPremios';
 import { claveEquipoLaLiga, escudoLaLiga, formatPuntos } from '@/lib/futbolLaLiga';
 import type { LineaDesglose } from '@/lib/futbolPuntuacion';
+import { reproducirSonidoAviso, leerPreferenciaSonido, guardarPreferenciaSonido } from '@/lib/sonidoAviso';
+import { TIPOS_AVISO_FUTBOL, TIPOS_AVISO_POR_DEFECTO, INFO_TIPO_AVISO, textoAvisoFutbol, type EventoFutbol, type TipoAvisoFutbol } from '@/lib/futbolAvisos';
 
 // ============================================================================
 // CLASIFICACIÓN EN DIRECTO DE UNA MESA DRAFTERS DE FÚTBOL (06/10)
@@ -297,7 +299,23 @@ export default function ClasificacionMesaFutbol({ sala, saldoLabel, initials }: 
   const [puntos, setPuntos] = useState<Map<string, PuntosF>>(new Map());
   const [partidos, setPartidos] = useState<PartidoF[]>([]);
   const [escudos, setEscudos] = useState<Map<string, string>>(new Map());
-  const [vista, setVista] = useState<'mesa' | 'premios'>('mesa');
+  const [vista, setVista] = useState<'mesa' | 'eventos' | 'premios'>('mesa');
+
+  // Avisos y eventos (07/10, pedido de Iñi): como en golf, pero para los
+  // jugadores del EQUIPO del usuario en esta mesa y con las alertas
+  // elegibles (guardadas en su cuenta). Ver lib/futbolAvisos.ts.
+  const [usuarioId, setUsuarioId] = useState<string | null>(null);
+  const [misIds, setMisIds] = useState<string[]>([]);
+  const [tiposActivos, setTiposActivos] = useState<Set<TipoAvisoFutbol>>(new Set(TIPOS_AVISO_POR_DEFECTO));
+  const [eventos, setEventos] = useState<EventoFutbol[] | null>(null);
+  const [avisos, setAvisos] = useState<EventoFutbol[]>([]);
+  const [sonidoActivado, setSonidoActivado] = useState(true);
+  const [errorPreferencias, setErrorPreferencias] = useState<string | null>(null);
+  const tiposActivosRef = useRef(tiposActivos);
+  tiposActivosRef.current = tiposActivos;
+  const sonidoActivadoRef = useRef(sonidoActivado);
+  sonidoActivadoRef.current = sonidoActivado;
+  const eventosVistosRef = useRef<Set<string> | null>(null);
   const [equipoSeleccionadoId, setEquipoSeleccionadoId] = useState<string | null>(null);
   const [jugadorFocoId, setJugadorFocoId] = useState<string | null>(null);
 
@@ -312,6 +330,23 @@ export default function ClasificacionMesaFutbol({ sala, saldoLabel, initials }: 
         supabase.from('futbol_escudos').select('clave,logo'),
       ]);
       if (!activo) return;
+      // Mi equipo en esta mesa (puede haber varios en el Maratón) y mis alertas.
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (session && activo) {
+        setUsuarioId(session.user.id);
+        const [{ data: misEquipos }, { data: pref }] = await Promise.all([
+          supabase.from('equipos').select('jugadores').eq('sala_id', sala.id).eq('usuario_id', session.user.id),
+          supabase.from('preferencias_avisos_futbol').select('tipos').eq('usuario_id', session.user.id).maybeSingle(),
+        ]);
+        if (!activo) return;
+        const ids = new Set<string>();
+        for (const e of (misEquipos as { jugadores: unknown }[] | null) ?? []) if (Array.isArray(e.jugadores)) for (const id of e.jugadores) if (typeof id === 'string') ids.add(id);
+        setMisIds(Array.from(ids));
+        const tipos = (pref as { tipos: string[] } | null)?.tipos;
+        if (tipos) setTiposActivos(new Set(tipos.filter((t): t is TipoAvisoFutbol => t in INFO_TIPO_AVISO)));
+      }
       setEscudos(new Map(((esc as { clave: string; logo: string }[]) ?? []).map((e) => [e.clave, e.logo])));
       setJugadores((jug as JugadorF[]) ?? []);
       const lista = ((eqs as { equipo_id: string; nombre: string; jugadores: string[]; created_at: string }[]) ?? [])
@@ -352,6 +387,76 @@ export default function ClasificacionMesaFutbol({ sala, saldoLabel, initials }: 
       clearInterval(intervalo);
     };
   }, [sala.competicion]);
+
+  useEffect(() => {
+    setSonidoActivado(leerPreferenciaSonido());
+  }, []);
+
+  // Eventos de MIS jugadores, cada 20 segundos. La primera lectura solo se
+  // anota (nada de avisos por lo que ya había pasado); a partir de ahí, cada
+  // evento nuevo cuyo tipo esté activado sale como aviso de 5 segundos con
+  // sonido, igual que en golf.
+  const misIdsClave = misIds.join(',');
+  useEffect(() => {
+    if (misIds.length === 0) {
+      setEventos([]);
+      return;
+    }
+    let activo = true;
+    async function revisar() {
+      const { data } = await supabase
+        .from('futbol_eventos')
+        .select('id,tipo,jugador_id,jugador_nombre,equipo_real,minuto,detalle,creado_en')
+        .eq('competicion', sala.competicion)
+        .in('jugador_id', misIds)
+        .order('creado_en', { ascending: false })
+        .limit(300);
+      if (!activo) return;
+      const filas = ((data as EventoFutbol[]) ?? []).filter((e) => e.tipo in INFO_TIPO_AVISO);
+      setEventos(filas);
+      const vistos = eventosVistosRef.current;
+      if (vistos === null) {
+        eventosVistosRef.current = new Set(filas.map((e) => e.id));
+        return;
+      }
+      const nuevos = filas.filter((e) => !vistos.has(e.id)).reverse(); // del más antiguo al más nuevo
+      nuevos.forEach((e) => vistos.add(e.id));
+      const aAvisar = nuevos.filter((e) => tiposActivosRef.current.has(e.tipo));
+      if (aAvisar.length > 0) {
+        setAvisos((prev) => [...prev, ...aAvisar]);
+        if (sonidoActivadoRef.current) reproducirSonidoAviso();
+      }
+    }
+    revisar();
+    const intervalo = setInterval(revisar, 20000);
+    return () => {
+      activo = false;
+      clearInterval(intervalo);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [misIdsClave, sala.competicion]);
+
+  // El aviso dura 5 segundos; si llega otro detrás, no reinicia el cronómetro del actual.
+  useEffect(() => {
+    if (avisos.length === 0) return;
+    const idAMostrar = avisos[0].id;
+    const timer = setTimeout(() => setAvisos((prev) => prev.filter((a) => a.id !== idAMostrar)), 5000);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [avisos.length > 0 ? avisos[0].id : null]);
+
+  async function alternarTipoAviso(tipo: TipoAvisoFutbol) {
+    if (!usuarioId) return;
+    const nuevo = new Set(tiposActivos);
+    if (nuevo.has(tipo)) nuevo.delete(tipo);
+    else nuevo.add(tipo);
+    setTiposActivos(nuevo);
+    setErrorPreferencias(null);
+    const { error } = await supabase
+      .from('preferencias_avisos_futbol')
+      .upsert({ usuario_id: usuarioId, tipos: Array.from(nuevo), updated_at: new Date().toISOString() }, { onConflict: 'usuario_id' });
+    if (error) setErrorPreferencias('No se han podido guardar tus alertas. Inténtalo de nuevo.');
+  }
 
   const jugadoresPorId = useMemo(() => new Map(jugadores.map((j) => [j.id, j])), [jugadores]);
 
@@ -439,10 +544,62 @@ export default function ClasificacionMesaFutbol({ sala, saldoLabel, initials }: 
             <button type="button" onClick={() => setVista('mesa')} style={vistaPillStyle(vista === 'mesa')}>
               Mesa
             </button>
+            <button type="button" onClick={() => setVista('eventos')} style={vistaPillStyle(vista === 'eventos')}>
+              Eventos
+            </button>
             <button type="button" onClick={() => setVista('premios')} style={vistaPillStyle(vista === 'premios')}>
               Premios
             </button>
+            {/* Campanita de sonido (07/10): igual que en golf; se recuerda
+                por dispositivo (lib/sonidoAviso.ts). */}
+            <button
+              type="button"
+              onClick={() => {
+                const nuevoValor = !sonidoActivado;
+                setSonidoActivado(nuevoValor);
+                guardarPreferenciaSonido(nuevoValor);
+              }}
+              aria-pressed={sonidoActivado}
+              aria-label={sonidoActivado ? 'Desactivar el sonido de los avisos' : 'Activar el sonido de los avisos'}
+              title={sonidoActivado ? 'Sonido de avisos activado' : 'Sonido de avisos desactivado'}
+              style={{
+                flexShrink: 0,
+                width: 30,
+                height: 30,
+                alignSelf: 'center',
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 14,
+                cursor: 'pointer',
+                border: `1px solid ${sonidoActivado ? 'rgba(61,220,132,0.4)' : 'rgba(255,92,92,0.4)'}`,
+                background: sonidoActivado ? 'rgba(61,220,132,0.12)' : 'rgba(255,92,92,0.12)',
+              }}
+            >
+              {sonidoActivado ? '🔔' : '🔕'}
+            </button>
           </div>
+
+          {/* Aviso de evento de uno de MIS jugadores (07/10): tira de 5
+              segundos con sonido, en cualquier pestaña. */}
+          {avisos.length > 0 && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '9px 14px',
+                borderRadius: 10,
+                alignSelf: 'flex-start',
+                background: 'rgba(61,220,132,0.1)',
+                border: '1px solid rgba(61,220,132,0.4)',
+              }}
+            >
+              <span style={{ fontSize: 15, flexShrink: 0 }}>{INFO_TIPO_AVISO[avisos[0].tipo].icono}</span>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: S.TEXT }}>{textoAvisoFutbol(avisos[0])}</span>
+            </div>
+          )}
 
           {vista === 'mesa' && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
@@ -559,6 +716,84 @@ export default function ClasificacionMesaFutbol({ sala, saldoLabel, initials }: 
                     </span>
                   ))}
                 </div>
+              </div>
+            </div>
+          )}
+
+          {vista === 'eventos' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <p style={{ fontSize: 12.5, color: S.MUTED_2, margin: 0, lineHeight: 1.45 }}>
+                Elige de qué quieres que te avisemos cuando le pase a un jugador de tu equipo en esta mesa. Los avisos salen en esta pantalla con sonido (la campanita de arriba lo activa o lo silencia).
+              </p>
+
+              {(['goles', 'otras'] as const).map((grupo) => (
+                <div key={grupo} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>
+                    {grupo === 'goles' ? 'Goles y penaltis' : 'Otras alertas (desactivadas al principio)'}
+                  </span>
+                  {TIPOS_AVISO_FUTBOL.filter((t) => t.grupo === grupo).map((t) => {
+                    const on = tiposActivos.has(t.tipo);
+                    return (
+                      <button
+                        key={t.tipo}
+                        type="button"
+                        onClick={() => alternarTipoAviso(t.tipo)}
+                        aria-pressed={on}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          padding: '10px 12px',
+                          background: on ? 'rgba(61,220,132,0.08)' : S.PANEL,
+                          border: `1px solid ${on ? 'rgba(61,220,132,0.4)' : '#1E2723'}`,
+                          borderRadius: 9,
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                        }}
+                      >
+                        <span style={{ fontSize: 15, flexShrink: 0, width: 22, textAlign: 'center' }}>{t.icono}</span>
+                        <span style={{ flex: 1, minWidth: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 12.5, color: on ? S.TEXT : S.MUTED_2 }}>{t.etiqueta}</span>
+                        <span
+                          style={{
+                            flexShrink: 0,
+                            width: 38,
+                            height: 22,
+                            borderRadius: 999,
+                            background: on ? '#3DDC84' : '#2A3330',
+                            position: 'relative',
+                            transition: 'background 0.15s',
+                          }}
+                        >
+                          <span style={{ position: 'absolute', top: 3, left: on ? 19 : 3, width: 16, height: 16, borderRadius: '50%', background: on ? '#04140B' : '#8A9490', transition: 'left 0.15s' }} />
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+              {errorPreferencias && <p style={{ fontSize: 12, color: S.ERROR, margin: 0 }}>{errorPreferencias}</p>}
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Lo último de tus jugadores</span>
+                {misIds.length === 0 ? (
+                  <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>No tienes ningún equipo en esta mesa, así que no hay eventos que mostrar.</p>
+                ) : eventos === null ? (
+                  <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>Cargando...</p>
+                ) : (
+                  (() => {
+                    const visibles = eventos.filter((e) => tiposActivos.has(e.tipo));
+                    if (visibles.length === 0) return <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>Todavía no ha pasado nada de lo que has elegido con los jugadores de tu equipo.</p>;
+                    return visibles.map((e) => (
+                      <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 10px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 9 }}>
+                        <span style={{ fontSize: 15, flexShrink: 0, width: 22, textAlign: 'center' }}>{INFO_TIPO_AVISO[e.tipo].icono}</span>
+                        <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: S.TEXT }}>{textoAvisoFutbol(e)}</span>
+                        <span style={{ flexShrink: 0, fontSize: 10.5, color: S.MUTED_3 }}>
+                          {new Date(e.creado_en).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Madrid' })}
+                        </span>
+                      </div>
+                    ));
+                  })()
+                )}
               </div>
             </div>
           )}

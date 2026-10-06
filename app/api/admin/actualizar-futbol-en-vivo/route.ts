@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { crearClienteAdmin } from '@/lib/server/supabaseAdmin';
 import { sincronizarFutbol, sincronizarEscudos } from '@/lib/server/sincronizarFutbolEspn';
+import { repararJornadasFutbol } from '@/lib/server/repararJornadaFutbol';
 
 // Puntos y marcadores en vivo de las mesas de fútbol (LaLiga, Champions...)
 // — 06/10. Ver lib/server/sincronizarFutbolEspn.ts para el detalle.
@@ -57,7 +58,18 @@ export async function POST(req: NextRequest) {
 
   try {
     if (accion === 'comprobar') {
-      return NextResponse.json(await sincronizarFutbol(admin, { soloComprobar: true, competicion: cuerpo.competicion }));
+      // Antes de comprobar se repara la jornada (nombres de filiales en las
+      // cuotas, jugadores que faltan...) para no depender de un botón aparte
+      // (07/10: Celta y Real Sociedad seguían sin jugadores). Es idempotente.
+      let reparacion: { competicion: string; estado: string; detalle: string }[] = [];
+      if (!auth.esCron) {
+        try {
+          reparacion = await repararJornadasFutbol(admin, cuerpo.competicion);
+        } catch (err) {
+          reparacion = [{ competicion: cuerpo.competicion ?? '(todas)', estado: 'error', detalle: (err as Error).message }];
+        }
+      }
+      return NextResponse.json({ ...(await sincronizarFutbol(admin, { soloComprobar: true, competicion: cuerpo.competicion })), reparacion });
     }
     if (accion === 'escudos') {
       if (auth.esCron) return NextResponse.json({ error: 'Acción solo para administradores.' }, { status: 403 });

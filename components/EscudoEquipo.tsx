@@ -4,9 +4,12 @@ import { useState } from 'react';
 import * as S from '@/lib/mockupStyles';
 
 // Escudo de un equipo con iniciales de reserva si la imagen no carga.
-export default function EscudoEquipo({ url, nombre, tam = 26 }: { url: string | null; nombre: string; tam?: number }) {
-  const [falla, setFalla] = useState(false);
-  if (!url || falla) {
+export default function EscudoEquipo({ url, nombre, tam = 26, alternativa = null }: { url: string | null; nombre: string; tam?: number; alternativa?: string | null }) {
+  // 07/10: si la imagen guardada no carga se prueba la alternativa (mapa fijo de ESPN) antes de las iniciales.
+  const [falla, setFalla] = useState(0);
+  const lista = [url, alternativa].filter((u, i, a): u is string => !!u && a.indexOf(u) === i);
+  const actual = lista[falla] ?? null;
+  if (!actual) {
     return (
       <span
         title={nombre}
@@ -17,5 +20,5 @@ export default function EscudoEquipo({ url, nombre, tam = 26 }: { url: string | 
     );
   }
   // eslint-disable-next-line @next/next/no-img-element
-  return <img src={url} alt={nombre} title={nombre} width={tam} height={tam} onError={() => setFalla(true)} style={{ width: tam, height: tam, flexShrink: 0, objectFit: 'contain' }} />;
+  return <img src={actual} alt={nombre} title={nombre} width={tam} height={tam} onError={() => setFalla((n) => n + 1)} style={{ width: tam, height: tam, flexShrink: 0, objectFit: 'contain' }} />;
 }

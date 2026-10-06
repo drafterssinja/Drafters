@@ -12,6 +12,7 @@ import {
 } from '@/lib/dataGolf';
 import { tipoResultadoHoyo, sigueCompitiendo } from '@/lib/golfScoring';
 import { liquidarPorrasGolfDeCompeticion } from '@/lib/liquidacionGolfAutomatica';
+import { recalcularPuntosGolfCompeticion } from '@/lib/server/golfPuntosDrafters';
 
 // Cuánto hay que esperar, UNA VEZ que todos los jugadores que siguen
 // compitiendo llevan thru=18 en la última ronda del torneo, antes de dar
@@ -109,6 +110,8 @@ type ResultadoTorneo = {
   // 06/10: aviso (no es un error) cuando Data Golf todavía devuelve OTRO
   // torneo del tour — no se toca ningún jugador. Ver nombreTorneoCoincide().
   aviso?: string;
+  // 07/10: avisos de los puntos Drafters de golf (hoyos sin dato).
+  avisosPuntos?: string[];
 };
 
 async function estaAutorizado(req: NextRequest, admin: ReturnType<typeof crearClienteAdmin>): Promise<boolean> {
@@ -634,6 +637,16 @@ async function procesarTorneoDataGolf(
   // ==========================================================================
   await aplicarPenalizacionCorte(admin, torneo.competicion, enJuego, rondaActual, jugadores, aliasPorNombreOrigen, ahora);
 
+  // Puntos Drafters de golf para las mesas (07/10, ver lib/golfPuntuacion.ts).
+  // Un fallo aquí nunca debe tirar el resto del ciclo (cierre de inscripciones,
+  // liquidación...), solo se anota como aviso.
+  try {
+    const puntos = await recalcularPuntosGolfCompeticion(admin, torneo.competicion, false);
+    if (puntos.avisos.length > 0) resultado.avisosPuntos = puntos.avisos;
+  } catch (err) {
+    resultado.avisosPuntos = [`No se han podido calcular los puntos Drafters: ${(err as Error).message}`];
+  }
+
   // A diferencia de ESPN, aquí el par de los 18 hoyos de un campo puede
   // conocerse de golpe (sin esperar a que ningún jugador los haya jugado
   // todos) — en cuanto paresPorCampo tiene los 18 completos para un campo
@@ -750,6 +763,19 @@ async function procesarTorneoDataGolf(
       } else {
         const transcurrido = Date.now() - new Date(torneo.listoParaLiquidarDesde).getTime();
         if (transcurrido >= ESPERA_LIQUIDACION_MS) {
+          // Puntos Drafters definitivos (con los de posición final) ANTES de
+          // cerrar: después de finalizado_en el torneo ya no se sincroniza.
+          // Se intenta dos veces; si aun así falla (p.ej. todavía no se ha
+          // ejecutado sql_golf_puntos.sql) NO se bloquea la liquidación de las
+          // porras, que no depende de esto.
+          for (let intento = 0; intento < 2; intento++) {
+            try {
+              await recalcularPuntosGolfCompeticion(admin, torneo.competicion, true);
+              break;
+            } catch {
+              /* reintento */
+            }
+          }
           await liquidarPorrasGolfDeCompeticion(admin, torneo.competicion);
           await admin.from('torneos_golf_live').update({ finalizado_en: new Date().toISOString() }).eq('id', torneo.id);
         }

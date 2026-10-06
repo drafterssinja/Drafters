@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, Suspense, type CSSProperties } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase, Perfil } from '@/lib/supabaseClient';
+import AvisoMasMesas from '@/components/AvisoMasMesas';
 import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
 import {
@@ -655,11 +656,7 @@ function SalasPageInner() {
             </div>
           )}
 
-          {deporte === 'futbol' && (
-            <p style={{ fontSize: 12.5, color: S.MUTED_2, margin: 0, lineHeight: 1.5, textAlign: 'center' }}>
-              Próximamente habrá más tipos de salas, con más buy-ins.
-            </p>
-          )}
+          {(deporte === 'futbol' || deporte === 'golf') && <AvisoMasMesas />}
 
           <span style={{ fontSize: 11, color: S.FAINT }}>*Importes en euros — Fase 1, saldo simulado.</span>
         </div>

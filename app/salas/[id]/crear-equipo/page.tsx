@@ -11,6 +11,7 @@ import { EQUIPO_PRESUPUESTO, TAMANO_EQUIPO_GOLF_TENIS, FORMACIONES_FUTBOL, color
 import { formatEuros, inicialesJugador, huecosPorLinea, lineaDePosicion, type LineaFutbol } from '@/lib/salaShared';
 import { tablaPuntuacionPorDeporte } from '@/lib/puntuaciones';
 import { escudoLaLiga, claveEquipoFutbol } from '@/lib/futbolLaLiga';
+import { esEquipoFilial, nombrePrimerEquipo } from '@/lib/aliasEquipos';
 import EscudoEquipo from '@/components/EscudoEquipo';
 
 // ============================================================================
@@ -114,7 +115,11 @@ export default function CrearEquipoPage() {
       activo = false;
     };
   }, []);
-  const escudoDe = (nombre: string): string | null => escudosBD.get(claveEquipoFutbol(nombre)) ?? escudoLaLiga(nombre);
+  // Un nombre de filial ("Celta Fortuna") nunca debe salir en una jornada de primera:
+  // se busca el escudo del primer equipo (07/10).
+  const claveEscudo = (nombre: string): string => claveEquipoFutbol(esEquipoFilial(nombre) ? nombrePrimerEquipo(nombre) : nombre);
+  const escudoDe = (nombre: string): string | null => escudosBD.get(claveEscudo(nombre)) ?? escudoLaLiga(esEquipoFilial(nombre) ? nombrePrimerEquipo(nombre) : nombre);
+  const escudoAlternativo = (nombre: string): string | null => escudoLaLiga(esEquipoFilial(nombre) ? nombrePrimerEquipo(nombre) : nombre);
   const [selected, setSelected] = useState<string[]>([]);
   const [alineacion, setAlineacion] = useState<string>('4-3-3');
   // 'info' (25/09, tercera vuelta): pantalla previa "cómo puntúan los
@@ -755,9 +760,9 @@ export default function CrearEquipoPage() {
                             }}
                           >
                             {/* 06/10 (Iñi): escudo vs escudo, en horizontal para ocupar menos alto. */}
-                            <EscudoEquipo url={escudoDe(p.equipo_local)} nombre={p.equipo_local} tam={24} />
+                            <EscudoEquipo url={escudoDe(p.equipo_local)} alternativa={escudoAlternativo(p.equipo_local)} nombre={p.equipo_local} tam={24} />
                             <span style={{ color: S.MUTED_3, fontSize: 7.5, fontWeight: 600 }}>vs</span>
-                            <EscudoEquipo url={escudoDe(p.equipo_visitante)} nombre={p.equipo_visitante} tam={24} />
+                            <EscudoEquipo url={escudoDe(p.equipo_visitante)} alternativa={escudoAlternativo(p.equipo_visitante)} nombre={p.equipo_visitante} tam={24} />
                           </button>
                         );
                       })}

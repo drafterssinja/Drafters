@@ -10,6 +10,7 @@ import { conTiempoMaximo } from '@/lib/conTiempoMaximo';
 import { normalizarNombre } from '@/lib/nombreMatch';
 import { formatEuros } from '@/lib/salaShared';
 import { claveEquipoFutbol } from '@/lib/futbolLaLiga';
+import { sugerirParejas, type SugerenciaAlias } from '@/lib/sugerirAlias';
 import type { ResultadoCompeticionFutbol } from '@/lib/server/sincronizarFutbolEspn';
 
 // ============================================================================
@@ -41,6 +42,12 @@ export default function AdminResultadosFutbolPage() {
   const [seleccion, setSeleccion] = useState<Record<string, string>>({});
   const [guardados, setGuardados] = useState<Set<string>>(new Set());
   const [errorAlias, setErrorAlias] = useState<string | null>(null);
+  // Sugerencias de emparejamiento (07/10): elección de cada una (por si no es la
+  // propuesta), las ya descartadas y las fichas ya enlazadas (desaparecen de las listas).
+  const [eleccionSug, setEleccionSug] = useState<Record<string, string>>({});
+  const [descartadas, setDescartadas] = useState<Set<string>>(new Set());
+  const [fichasEnlazadas, setFichasEnlazadas] = useState<Set<string>>(new Set());
+  const [guardandoSug, setGuardandoSug] = useState<string | null>(null);
 
   useEffect(() => {
     let activo = true;
@@ -84,6 +91,9 @@ export default function AdminResultadosFutbolPage() {
     setMensaje(null);
     setResultados(null);
     setGuardados(new Set());
+    setDescartadas(new Set());
+    setFichasEnlazadas(new Set());
+    setEleccionSug({});
     setErrorAlias(null);
     const {
       data: { session },
@@ -112,7 +122,10 @@ export default function AdminResultadosFutbolPage() {
         setMensaje(`Escudos descargados: ${(body.escudos as { liga: string; equipos: number; error?: string }[]).map((e) => `${e.liga} ${e.equipos}${e.error ? ` (error: ${e.error})` : ''}`).join(' · ')}`);
       } else {
         setResultados((body.resultados ?? []) as ResultadoCompeticionFutbol[]);
-        if (body.mensaje) setMensaje(body.mensaje);
+        const rep = (body.reparacion ?? []) as { competicion: string; estado: string; detalle: string }[];
+        const lineasRep = rep.filter((x) => x.estado !== 'sin_cambios').map((x) => `Reparación previa · ${x.competicion} → ${x.estado}: ${x.detalle}`);
+        const partes = [body.mensaje, ...lineasRep].filter(Boolean);
+        if (partes.length > 0) setMensaje(partes.join('\n'));
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se ha podido completar la acción.');
@@ -128,6 +141,27 @@ export default function AdminResultadosFutbolPage() {
       setErrorAlias('Elige a qué jugador corresponde antes de guardar.');
       return;
     }
+    if (await grabarAlias(nombreTabla, ficha)) {
+      setGuardados((prev) => new Set(prev).add(clave));
+      setFichasEnlazadas((prev) => new Set(prev).add(ficha.id));
+    }
+  }
+
+  /** Confirma una sugerencia: guarda el alias (vale para todas las jornadas futuras) y la quita de la lista. */
+  async function confirmarSugerencia(competicion: string, sug: SugerenciaAlias, fichas: JugadorFicha[]) {
+    const clave = `${competicion}:::${sug.espn}`;
+    const fichaId = eleccionSug[clave] ?? sug.mejor.fichaId;
+    const ficha = fichas.find((f) => f.id === fichaId);
+    if (!ficha) return;
+    setGuardandoSug(clave);
+    if (await grabarAlias(sug.espn, ficha)) {
+      setGuardados((prev) => new Set(prev).add(clave));
+      setFichasEnlazadas((prev) => new Set(prev).add(ficha.id));
+    }
+    setGuardandoSug(null);
+  }
+
+  async function grabarAlias(nombreTabla: string, ficha: JugadorFicha): Promise<boolean> {
     setErrorAlias(null);
     const { error: upsertError } = await supabase.from('alias_nombres_jugador').upsert(
       {
@@ -142,9 +176,9 @@ export default function AdminResultadosFutbolPage() {
     );
     if (upsertError) {
       setErrorAlias(`No se ha podido guardar el alias: ${upsertError.message}`);
-      return;
+      return false;
     }
-    setGuardados((prev) => new Set(prev).add(clave));
+    return true;
   }
 
   if (errorAcceso) {
@@ -220,6 +254,13 @@ export default function AdminResultadosFutbolPage() {
 
           {resultados?.map((r) => {
             const fichas: JugadorFicha[] = r.nombresFichaSinEmparejar;
+            const fichasLibres = fichas.filter((f) => !fichasEnlazadas.has(f.id));
+            const { sugerencias, sinCandidato } = sugerirParejas(r.jugadoresEspnSinEmparejar, fichasLibres);
+            const sugerenciasPendientes = sugerencias.filter((x) => {
+              const c = `${r.competicion}:::${x.espn}`;
+              return !guardados.has(c) && !descartadas.has(c);
+            });
+            const sinCandidatoPendiente = sinCandidato.filter((x) => !guardados.has(`${r.competicion}:::${x.nombre}`));
             return (
               <div key={r.competicion} style={{ display: 'flex', flexDirection: 'column', gap: 8, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 14 }}>
                 <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 14, color: S.TEXT }}>{r.competicion}</span>
@@ -255,13 +296,64 @@ export default function AdminResultadosFutbolPage() {
                   </div>
                 )}
 
-                {r.jugadoresEspnSinEmparejar.length > 0 && (
+                {(sugerencias.length > 0) && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+                    <span style={S.sectionLabel}>Sugerencias de emparejamiento por confirmar ({sugerenciasPendientes.length})</span>
+                    <span style={{ fontSize: 10.5, color: S.MUTED_3, lineHeight: 1.4 }}>
+                      Propuestas automáticas: jugador de ESPN → jugador nuestro del mismo equipo con nombre parecido. Confirma uno a uno: al confirmar se guarda el enlace para siempre (vale para todas las jornadas) y desaparece de la lista. Si la propuesta no es, cambia el jugador en el desplegable o pulsa "No es".
+                    </span>
+                    {sugerenciasPendientes.length === 0 && <span style={{ fontSize: 12, color: S.ACCENT }}>No queda ninguna sugerencia pendiente.</span>}
+                    {sugerenciasPendientes.map((sug) => {
+                      const clave = `${r.competicion}:::${sug.espn}`;
+                      const elegido = eleccionSug[clave] ?? sug.mejor.fichaId;
+                      const opciones = [sug.mejor, ...sug.alternativas];
+                      const colorConf = sug.confianza === 'alta' ? S.ACCENT : sug.confianza === 'media' ? '#F0B94D' : S.MUTED_3;
+                      return (
+                        <div key={clave} style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', padding: '6px 0', borderTop: `1px solid ${S.CARD_BORDER}` }}>
+                          <span style={{ fontSize: 12, color: S.TEXT, minWidth: 150 }}>
+                            {sug.espn} <span style={{ color: S.MUTED_3 }}>({sug.equipo})</span>
+                          </span>
+                          <span style={{ fontSize: 12, color: S.MUTED_3 }}>→</span>
+                          <select
+                            value={elegido}
+                            onChange={(e) => setEleccionSug((prev) => ({ ...prev, [clave]: e.target.value }))}
+                            style={{ ...S.selectInput, width: 'auto', minWidth: 170, padding: '6px 8px', fontSize: 12 }}
+                          >
+                            {opciones.map((c) => (
+                              <option key={c.fichaId} value={c.fichaId}>
+                                {c.fichaNombre} · {Math.round(c.puntuacion * 100)}%
+                              </option>
+                            ))}
+                          </select>
+                          <span style={{ fontSize: 10.5, color: colorConf, fontWeight: 700 }}>{sug.confianza}</span>
+                          <button
+                            type="button"
+                            disabled={guardandoSug === clave}
+                            onClick={() => confirmarSugerencia(r.competicion, sug, fichas)}
+                            style={{ ...S.pill(true), padding: '5px 10px', fontSize: 11, opacity: guardandoSug === clave ? 0.6 : 1 }}
+                          >
+                            {guardandoSug === clave ? 'Guardando…' : 'Confirmar'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDescartadas((prev) => new Set(prev).add(clave))}
+                            style={{ ...S.pill(false), padding: '5px 10px', fontSize: 11 }}
+                          >
+                            No es
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {sinCandidatoPendiente.length > 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
-                    <span style={S.sectionLabel}>Jugadores de ESPN que han jugado y no están emparejados con nuestra ficha ({r.jugadoresEspnSinEmparejar.length})</span>
+                    <span style={S.sectionLabel}>Jugadores de ESPN sin sugerencia ({sinCandidatoPendiente.length})</span>
                     <span style={{ fontSize: 10.5, color: S.MUTED_3, lineHeight: 1.4 }}>
                       Si alguno es un jugador que sí tenemos con otro nombre, elígelo y guarda: queda enlazado para siempre y sus puntos se recalculan en la siguiente pasada. (Los que no están en nuestra lista simplemente no puntúan; es normal.)
                     </span>
-                    {r.jugadoresEspnSinEmparejar.slice(0, 80).map((n) => {
+                    {sinCandidatoPendiente.slice(0, 80).map((n) => {
                       const clave = `${r.competicion}:::${n.nombre}`;
                       const hecho = guardados.has(clave);
                       return (
@@ -275,7 +367,7 @@ export default function AdminResultadosFutbolPage() {
                             style={{ ...S.selectInput, width: 'auto', minWidth: 160, padding: '6px 8px', fontSize: 12 }}
                           >
                             <option value="">— nuestro jugador —</option>
-                            {fichas.filter((f) => !n.equipo || claveEquipoFutbol(f.equipo) === claveEquipoFutbol(n.equipo)).map((f) => (
+                            {fichasLibres.filter((f) => !n.equipo || claveEquipoFutbol(f.equipo) === claveEquipoFutbol(n.equipo)).map((f) => (
                               <option key={f.id} value={f.id}>
                                 {f.nombre} {f.equipo ? `(${f.equipo})` : ''}
                               </option>
@@ -295,12 +387,12 @@ export default function AdminResultadosFutbolPage() {
                   </div>
                 )}
 
-                {fichas.length > 0 && (
+                {fichasLibres.length > 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 4 }}>
-                    <span style={S.sectionLabel}>Nuestros jugadores sin pareja en ESPN ({fichas.length})</span>
+                    <span style={S.sectionLabel}>Nuestros jugadores sin pareja en ESPN ({fichasLibres.length})</span>
                     <span style={{ fontSize: 11.5, color: S.MUTED_3, lineHeight: 1.5 }}>
-                      {fichas.slice(0, 120).map((f) => `${f.nombre}${f.equipo ? ` (${f.equipo})` : ''}`).join(' · ')}
-                      {fichas.length > 120 ? ' …' : ''}
+                      {fichasLibres.slice(0, 120).map((f) => `${f.nombre}${f.equipo ? ` (${f.equipo})` : ''}`).join(' · ')}
+                      {fichasLibres.length > 120 ? ' …' : ''}
                     </span>
                   </div>
                 )}
