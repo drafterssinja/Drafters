@@ -8,6 +8,7 @@ import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
 import { conTiempoMaximo } from '@/lib/conTiempoMaximo';
 import { normalizarNombre } from '@/lib/nombreMatch';
+import { sigueCompitiendo } from '@/lib/golfScoring';
 
 // ============================================================================
 // RESULTADOS DE GOLF EN VIVO — panel de admin (nuevo, 28/09)
@@ -60,6 +61,8 @@ type TorneoGolfLive = {
   activo: boolean;
   // 06/10: fecha en que se detectó que el torneo terminó — los finalizados ya no se muestran aquí.
   finalizado_en: string | null;
+  rondas_totales: number | null;
+  listo_para_liquidar_desde: string | null;
   ultima_actualizacion: string | null;
   ultimo_error: string | null;
 };
@@ -165,6 +168,8 @@ export default function AdminResultadosGolfPage() {
   // Links — nuevo, 01/10, pedido de Iñi). Se cargan a demanda por torneo
   // (botón "Ver campos detectados"), no de golpe para todos al entrar en la
   // pantalla — la mayoría de torneos no los necesita.
+  // 06/10: por qué un torneo no se da por terminado solo, y cierre manual.
+  const [diagnosticoPorTorneo, setDiagnosticoPorTorneo] = useState<Record<string, string[] | 'cargando'>>({});
   const [camposPorTorneo, setCamposPorTorneo] = useState<Record<string, CampoDetectado[] | 'cargando'>>({});
   const [nombresCampoEditados, setNombresCampoEditados] = useState<Record<string, string>>({});
   const [guardandoCampo, setGuardandoCampo] = useState<string | null>(null);
@@ -485,6 +490,57 @@ export default function AdminResultadosGolfPage() {
     const { error: deleteError } = await supabase.from('torneos_golf_live').delete().eq('id', t.id);
     if (deleteError) {
       setError('No se ha podido eliminar.');
+      return;
+    }
+    setTorneos((prev) => prev.filter((x) => x.id !== t.id));
+  }
+
+  // Explica, con los datos guardados ahora mismo, por qué el torneo no se ha
+  // marcado como finalizado solo (misma condición que usa la sincronización:
+  // todos los que siguen compitiendo en la última ronda y con 18 hoyos).
+  async function diagnosticarTorneo(t: TorneoGolfLive) {
+    setDiagnosticoPorTorneo((prev) => ({ ...prev, [t.id]: 'cargando' }));
+    const { data, error: jugError } = await supabase
+      .from('jugadores')
+      .select('nombre, resultado_en_vivo_total, resultado_en_vivo_thru, resultado_en_vivo_ronda, resultado_en_vivo_posicion')
+      .eq('deporte', 'golf')
+      .eq('competicion', t.competicion);
+    if (jugError) {
+      setDiagnosticoPorTorneo((prev) => ({ ...prev, [t.id]: ['No se han podido leer los jugadores.'] }));
+      return;
+    }
+    const jug = (data as { nombre: string; resultado_en_vivo_total: number | null; resultado_en_vivo_thru: number | null; resultado_en_vivo_ronda: number | null; resultado_en_vivo_posicion: string | null }[]) ?? [];
+    const conDatos = jug.filter((j) => j.resultado_en_vivo_total !== null);
+    const activos = conDatos.filter((j) => sigueCompitiendo(j.resultado_en_vivo_posicion));
+    const maxRonda = conDatos.reduce((m, j) => Math.max(m, j.resultado_en_vivo_ronda ?? 0), 0);
+    const rondas = Math.max(t.rondas_totales ?? 0, maxRonda);
+    const noListos = activos.filter((j) => !(j.resultado_en_vivo_ronda === rondas && j.resultado_en_vivo_thru === 18));
+    const lineas = [
+      `Rondas totales guardadas: ${t.rondas_totales ?? 'sin dato'} · ronda más alta vista: ${maxRonda || 'ninguna'}.`,
+      `${conDatos.length} jugadores con resultado en vivo; ${activos.length} siguen compitiendo (sin CUT/WD/DQ).`,
+      noListos.length === 0
+        ? activos.length === 0
+          ? 'No hay ningún jugador con resultado: no se puede dar por terminado.'
+          : 'Todos los que compiten han terminado la última ronda.' + (t.listo_para_liquidar_desde ? ` Listo desde ${new Date(t.listo_para_liquidar_desde).toLocaleString('es-ES')} (se cierra tras 1 hora).` : ' En el próximo ciclo empieza la espera de 1 hora.')
+        : `${noListos.length} aún no han terminado la ronda ${rondas}: ` +
+          noListos
+            .slice(0, 8)
+            .map((j) => `${j.nombre} (ronda ${j.resultado_en_vivo_ronda ?? '?'}, hoyo ${j.resultado_en_vivo_thru ?? '?'}, pos. ${j.resultado_en_vivo_posicion ?? '?'})`)
+            .join('; ') +
+          (noListos.length > 8 ? '…' : ''),
+    ];
+    setDiagnosticoPorTorneo((prev) => ({ ...prev, [t.id]: lineas }));
+  }
+
+  // Cierre manual: marca el torneo como finalizado (desaparece de esta
+  // pantalla y deja de sincronizarse, así no se le pisa la clasificación
+  // final con otro torneo). NO liquida las porras: eso sigue en Pagos
+  // pendientes.
+  async function darPorFinalizado(t: TorneoGolfLive) {
+    if (!window.confirm(`¿Dar por finalizado "${t.competicion}"? Dejará de sincronizarse y desaparecerá de esta pantalla (su clasificación final se conserva). No liquida las porras: eso sigue en Pagos pendientes.`)) return;
+    const { error: updError } = await supabase.from('torneos_golf_live').update({ finalizado_en: new Date().toISOString() }).eq('id', t.id);
+    if (updError) {
+      setError('No se ha podido marcar como finalizado.');
       return;
     }
     setTorneos((prev) => prev.filter((x) => x.id !== t.id));
@@ -865,6 +921,31 @@ export default function AdminResultadosGolfPage() {
                   />
                   Activo (se sincroniza en el cron de cada minuto)
                 </label>
+
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => diagnosticarTorneo(t)}
+                    style={{ ...S.secondaryLinkButton, width: 'auto', padding: '6px 10px', fontSize: 11.5, cursor: 'pointer', border: `1px solid ${S.CARD_BORDER}` }}
+                  >
+                    ¿Por qué no se cierra solo?
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => darPorFinalizado(t)}
+                    style={{ ...S.secondaryLinkButton, width: 'auto', padding: '6px 10px', fontSize: 11.5, cursor: 'pointer', border: `1px solid ${S.ACCENT}`, color: S.ACCENT }}
+                  >
+                    Dar por finalizado
+                  </button>
+                </div>
+                {diagnosticoPorTorneo[t.id] === 'cargando' && <p style={{ fontSize: 11.5, color: S.MUTED_3, margin: 0 }}>Revisando...</p>}
+                {Array.isArray(diagnosticoPorTorneo[t.id]) && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 8, padding: 8 }}>
+                    {(diagnosticoPorTorneo[t.id] as string[]).map((l, i) => (
+                      <span key={i} style={{ fontSize: 11.5, color: S.MUTED_2, lineHeight: 1.45 }}>{l}</span>
+                    ))}
+                  </div>
+                )}
 
                 {/* Campos del torneo (01/10) — solo hace falta para los
                     pocos torneos que se juegan en más de un campo (p.ej. el

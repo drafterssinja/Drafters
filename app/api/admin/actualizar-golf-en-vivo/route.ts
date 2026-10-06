@@ -738,8 +738,20 @@ async function procesarTorneoDataGolf(
       };
     });
 
+    // 06/10: el nº de rondas guardado nunca puede ser menor que la ronda más
+    // alta que ya se ha visto jugar a alguien. Si por la contaminación de
+    // field-updates (ver más arriba) se hubiera guardado un valor demasiado
+    // bajo (p.ej. 1), el torneo no se daba por terminado NUNCA, porque nadie
+    // estaba "en la ronda 1" con thru 18 (caso de la Alfred Dunhill, que
+    // seguía sin cerrarse dos días después de acabar).
+    const maxRondaVista = estadoActual.reduce((m, j) => (j.ronda !== null && j.ronda > m ? j.ronda : m), 0);
+    const rondasFinal = Math.max(rondasTotalesEfectivo, maxRondaVista);
+    if (rondasFinal !== rondasTotalesEfectivo) {
+      await admin.from('torneos_golf_live').update({ rondas_totales: rondasFinal }).eq('id', torneo.id);
+    }
+
     const activos = estadoActual.filter((j) => j.total !== null && sigueCompitiendo(j.posicion));
-    const todosListos = activos.length > 0 && activos.every((j) => j.ronda === rondasTotalesEfectivo && j.thru === 18);
+    const todosListos = activos.length > 0 && activos.every((j) => j.ronda === rondasFinal && j.thru === 18);
 
     if (todosListos) {
       if (!torneo.listoParaLiquidarDesde) {

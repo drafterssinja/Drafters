@@ -15,3 +15,8 @@ Los endpoints de Data Golf son por TOUR, no por torneo. `in-play` sigue devolvie
 
 ## Limpieza de datos ya contaminados
 `sql_limpiar_resultados_open_espana.sql`: vacía resultados en vivo, hoyo a hoyo y penalización de corte de los jugadores del Open de España (competición que contenga "Open de Espa"). No toca porras, equipos ni precios.
+
+## Dunhill sin cerrarse (06/10, mismo día)
+La Alfred Dunhill seguía "vigente" dos días después de acabar (finalizado_en vacío). Causa más probable: el nº de rondas guardado (`rondas_totales`) se queda bajo por la contaminación de `field-updates` (que ya devuelve el Open de España, con solo la ronda 1 publicada) y la detección exige que todos estén en la última ronda con 18 hoyos — con un valor demasiado bajo no se cumple nunca.
+- `route.ts`: el nº de rondas efectivo es ahora `max(guardado, ronda más alta vista jugando)` y se guarda si sube. Así un valor bajo atascado se corrige solo en el siguiente ciclo, sin tocar la regla de cierre (todos los que compiten en la última ronda con thru 18, y 1 hora de espera).
+- `/admin/resultados-golf`, en cada torneo: botón **¿Por qué no se cierra solo?** (rondas guardadas, ronda máxima vista, cuántos jugadores siguen compitiendo y cuáles no han terminado) y botón **Dar por finalizado** (marca `finalizado_en`: desaparece de la pantalla y deja de sincronizarse; NO liquida porras, eso sigue en Pagos pendientes).
