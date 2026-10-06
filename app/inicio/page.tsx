@@ -49,7 +49,7 @@ export default function InicioPage() {
   const router = useRouter();
   const [perfil, setPerfil] = useState<Perfil | null>(null);
   const [equipos, setEquipos] = useState<EquipoFila[]>([]);
-  const [lesionMap, setLesionMap] = useState<Map<string, { nombre: string; lesionado: boolean }>>(new Map());
+  const [lesionMap, setLesionMap] = useState<Map<string, { nombre: string; lesionado: boolean; baja: boolean }>>(new Map());
   const [cargando, setCargando] = useState(true);
   // "Mostrar más/menos" en "mis equipos en juego" (28/09, pedido de Iñi:
   // con muchos equipos a la vez la lista se hacía muy larga y empujaba los
@@ -98,9 +98,9 @@ export default function InicioPage() {
 
       const idsJugadores = Array.from(new Set(misEquipos.flatMap((eq) => eq.jugadores ?? [])));
       if (idsJugadores.length > 0) {
-        const { data: jugData } = await supabase.from('jugadores').select('id,nombre,lesionado').in('id', idsJugadores);
-        const mapa = new Map<string, { nombre: string; lesionado: boolean }>();
-        (jugData ?? []).forEach((j) => mapa.set(j.id, { nombre: j.nombre as string, lesionado: j.lesionado as boolean }));
+        const { data: jugData } = await supabase.from('jugadores').select('id,nombre,lesionado,baja').in('id', idsJugadores);
+        const mapa = new Map<string, { nombre: string; lesionado: boolean; baja: boolean }>();
+        (jugData ?? []).forEach((j) => mapa.set(j.id, { nombre: j.nombre as string, lesionado: j.lesionado as boolean, baja: !!j.baja }));
         if (activo) setLesionMap(mapa);
       }
 
@@ -132,7 +132,8 @@ export default function InicioPage() {
   function lesionadoDe(eq: EquipoFila): string | null {
     for (const id of eq.jugadores ?? []) {
       const j = lesionMap.get(id);
-      if (j?.lesionado) return j.nombre;
+      if (j?.baja) return `${j.nombre} no va a jugar`;
+      if (j?.lesionado) return `${j.nombre} está lesionado`;
     }
     return null;
   }
@@ -285,7 +286,7 @@ export default function InicioPage() {
                     {lesionado && !esFinalizadoEq && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 4px' }}>
                         <span style={{ flexShrink: 0, width: 13, height: 13, borderRadius: '50%', background: '#FF5C5C' }} />
-                        <span style={{ fontSize: 11, color: '#FF5C5C', fontWeight: 600 }}>{lesionado} está lesionado. Haz un cambio.</span>
+                        <span style={{ fontSize: 11, color: '#FF5C5C', fontWeight: 600 }}>{lesionado}. Haz un cambio.</span>
                       </div>
                     )}
                   </div>

@@ -80,7 +80,7 @@ function MesasPageInner() {
   const [maratones, setMaratones] = useState<MaratonFila[]>([]);
   const [inscritosPorSala, setInscritosPorSala] = useState<Map<string, number>>(new Map());
   const [misMesas, setMisMesas] = useState<EquipoMesaFila[]>([]);
-  const [lesionMap, setLesionMap] = useState<Map<string, { nombre: string; lesionado: boolean }>>(new Map());
+  const [lesionMap, setLesionMap] = useState<Map<string, { nombre: string; lesionado: boolean; baja: boolean }>>(new Map());
   const [cargando, setCargando] = useState(true);
   // Maratones finalizados (04/10, corrección de Iñi): no se ven de primeras
   // al entrar — se quedan plegados detrás de un desplegable, que empieza
@@ -143,9 +143,9 @@ function MesasPageInner() {
 
       const idsJugadores = Array.from(new Set(mesas.flatMap((eq) => eq.jugadores ?? [])));
       if (idsJugadores.length > 0) {
-        const { data: jugData } = await supabase.from('jugadores').select('id,nombre,lesionado').in('id', idsJugadores);
-        const mapaLesion = new Map<string, { nombre: string; lesionado: boolean }>();
-        (jugData ?? []).forEach((j) => mapaLesion.set(j.id, { nombre: j.nombre as string, lesionado: j.lesionado as boolean }));
+        const { data: jugData } = await supabase.from('jugadores').select('id,nombre,lesionado,baja').in('id', idsJugadores);
+        const mapaLesion = new Map<string, { nombre: string; lesionado: boolean; baja: boolean }>();
+        (jugData ?? []).forEach((j) => mapaLesion.set(j.id, { nombre: j.nombre as string, lesionado: j.lesionado as boolean, baja: !!j.baja }));
         if (activo) setLesionMap(mapaLesion);
       }
 
@@ -306,7 +306,8 @@ function MesasPageInner() {
   function lesionadoDe(eq: EquipoMesaFila): string | null {
     for (const id of eq.jugadores ?? []) {
       const j = lesionMap.get(id);
-      if (j?.lesionado) return j.nombre;
+      if (j?.baja) return `${j.nombre} no va a jugar`;
+      if (j?.lesionado) return `${j.nombre} está lesionado`;
     }
     return null;
   }
@@ -403,7 +404,7 @@ function MesasPageInner() {
                       {lesionado && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 4px' }}>
                           <span style={{ flexShrink: 0, width: 13, height: 13, borderRadius: '50%', background: '#FF5C5C' }} />
-                          <span style={{ fontSize: 11, color: '#FF5C5C', fontWeight: 600 }}>{lesionado} está lesionado. Haz un cambio.</span>
+                          <span style={{ fontSize: 11, color: '#FF5C5C', fontWeight: 600 }}>{lesionado}. Haz un cambio.</span>
                         </div>
                       )}
                     </div>

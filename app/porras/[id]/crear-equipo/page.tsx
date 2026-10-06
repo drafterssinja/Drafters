@@ -39,7 +39,7 @@ import EscudoEquipoFutbol from '@/components/EscudoEquipoFutbol';
 // presupuesto) vive en el servidor, ver drafters-schema.sql.
 
 type PorraRow = { id: string; major: string; precio: number; competicion: string | null; estado: string; formato: PorraFormato; fecha_limite_inscripcion: string | null };
-type JugadorRow = { id: string; nombre: string; grupo_porra: GrupoPorra | null; precio: number };
+type JugadorRow = { id: string; nombre: string; grupo_porra: GrupoPorra | null; precio: number; baja?: boolean };
 // Porra de fútbol por jornadas (29/09) — sin jugadores que elegir, 10
 // partidos públicos (iguales para todos) a pronosticar (1/X/2). El nombre
 // del equipo NO se pide aquí (se calcula solo, "Sindeler"/"Sindeler
@@ -153,7 +153,7 @@ export default function CrearEquipoPorraPage() {
 
       const [{ data: jugData }, { data: equipoEditandoData }, { data: partidosFutbolData }] = await Promise.all([
         porraRow.competicion
-          ? supabase.from('jugadores').select('id,nombre,grupo_porra,precio').eq('deporte', 'golf').eq('competicion', porraRow.competicion)
+          ? supabase.from('jugadores').select('id,nombre,grupo_porra,precio,baja').eq('deporte', 'golf').eq('competicion', porraRow.competicion)
           : Promise.resolve({ data: [] as JugadorRow[] }),
         equipoEditandoId
           ? supabase
@@ -171,7 +171,8 @@ export default function CrearEquipoPorraPage() {
 
       if (!activo) return;
 
-      const jugRows = ((jugData as JugadorRow[]) ?? []).filter((j) => porraRow.formato === 'clasica' ? j.grupo_porra !== null : true);
+      // Las bajas (jugadores que no van a jugar, marcados por el admin) no se pueden fichar: se quitan de la lista, y si un equipo ya existente los tenía, al editarlo ese hueco queda libre para elegir otro.
+      const jugRows = ((jugData as JugadorRow[]) ?? []).filter((j) => !j.baja).filter((j) => porraRow.formato === 'clasica' ? j.grupo_porra !== null : true);
       setPorra(porraRow);
       setJugadores(jugRows);
       setPartidosFutbol((partidosFutbolData as PartidoFutbol[]) ?? []);
@@ -186,7 +187,7 @@ export default function CrearEquipoPorraPage() {
         setNombreEquipo(equipoEditando.nombre_equipo ?? '');
 
         if (porraRow.formato === 'presupuesto') {
-          setSelectedPresupuesto(equipoEditando.jugadores ?? []);
+          setSelectedPresupuesto((equipoEditando.jugadores ?? []).filter((id) => jugRows.some((j) => j.id === id)));
         } else {
           // Reconstruye qué jugador es el titular de cada grupo y cuál es el
           // comodín a partir de la lista de ids guardada — un grupo con dos
@@ -682,7 +683,12 @@ export default function CrearEquipoPorraPage() {
                             const modoComodin = activeGroup === 'comodin';
                             const isSelectedPrimario = selected.get(grupo) === j.id;
                             const isSelectedComodin = comodinId === j.id;
-                            const isSelected = modoComodin ? isSelectedComodin : isSelectedPrimario;
+                            // Un jugador ya elegido (da igual si como titular de su
+                            // lista o como comodín) siempre se puede tocar para quitarlo,
+                            // esté el grupo o el comodín activo o no — también al editar
+                            // un equipo ya inscrito (06/10, aviso de Iñi: al editar, tocar
+                            // al jugador elegido ya no lo quitaba).
+                            const isSelected = isSelectedPrimario || isSelectedComodin;
                             // No se puede usar el mismo jugador físico dos veces: si ya
                             // está puesto como comodín, no se puede volver a elegir como
                             // titular de su grupo, y viceversa.
@@ -690,7 +696,7 @@ export default function CrearEquipoPorraPage() {
                               ? Array.from(selected.values()).includes(j.id) && !isSelectedComodin
                               : comodinId === j.id && !isSelectedPrimario;
                             const isActive = modoComodin ? true : grupo === activeGroup;
-                            const disabled = usadoEnOtroHueco || (!isSelected && !isActive);
+                            const disabled = !isSelected && (usadoEnOtroHueco || !isActive);
                             return (
                               <a
                                 key={j.id}
@@ -698,7 +704,19 @@ export default function CrearEquipoPorraPage() {
                                 onClick={(e) => {
                                   e.preventDefault();
                                   if (disabled) return;
-                                  if (modoComodin) toggleComodin(j);
+                                  if (isSelectedPrimario) {
+                                    // Quitar al titular de su lista y dejar activa esa lista
+                                    // para poder elegir al sustituto directamente.
+                                    setSelected((prev) => {
+                                      const nuevo = new Map(prev);
+                                      nuevo.delete(grupo);
+                                      return nuevo;
+                                    });
+                                    setActiveGroup(grupo);
+                                  } else if (isSelectedComodin) {
+                                    setComodinId(null);
+                                    setActiveGroup('comodin');
+                                  } else if (modoComodin) toggleComodin(j);
                                   else toggleJugador(j);
                                 }}
                                 style={{

@@ -42,7 +42,7 @@ type SalaRow = {
   fecha_limite_inscripcion: string | null;
 };
 
-type JugadorRow = { id: string; nombre: string; posicion: string | null; precio: number; lesionado: boolean; equipo_real: string | null };
+type JugadorRow = { id: string; nombre: string; posicion: string | null; precio: number; lesionado: boolean; equipo_real: string | null; baja?: boolean };
 type PartidoRow = { equipo_local: string; equipo_visitante: string; cuota_1: number; cuota_x: number; cuota_2: number };
 
 const AVATAR_POR_LINEA: Record<LineaFutbol, string> = { POR: '#FF7A45', DEF: '#8FB6FF', MED: '#F0B94D', DEL: '#3DDC84' };
@@ -176,7 +176,7 @@ export default function CrearEquipoPage() {
 
       const [{ data: misEquiposData }, { data: jugData }, { data: partidosData }, { data: equipoEditandoData }] = await Promise.all([
         supabase.from('equipos').select('id, inscripciones(estado)').eq('sala_id', salaId).eq('usuario_id', session.user.id),
-        supabase.from('jugadores').select('id,nombre,posicion,precio,lesionado,equipo_real').eq('deporte', salaRow.deporte).eq('competicion', salaRow.competicion).order('precio', { ascending: false }),
+        supabase.from('jugadores').select('id,nombre,posicion,precio,lesionado,equipo_real,baja').eq('deporte', salaRow.deporte).eq('competicion', salaRow.competicion).order('precio', { ascending: false }),
         salaRow.deporte === 'futbol'
           ? supabase.from('cuotas_partido_futbol').select('equipo_local,equipo_visitante,cuota_1,cuota_x,cuota_2').eq('competicion', salaRow.competicion)
           : Promise.resolve({ data: [] as PartidoRow[] }),
@@ -207,7 +207,9 @@ export default function CrearEquipoPage() {
           setCargando(false);
           return;
         }
-        setSelected(equipoEditando.jugadores ?? []);
+        // Si el equipo tenía a un jugador que ha causado baja, ese hueco queda libre para elegir otro.
+        const idsBaja = new Set(((jugData as JugadorRow[]) ?? []).filter((j) => j.baja).map((j) => j.id));
+        setSelected((equipoEditando.jugadores ?? []).filter((id) => !idsBaja.has(id)));
         if (equipoEditando.alineacion) setAlineacion(equipoEditando.alineacion);
       } else {
         // Antes era .maybeSingle() (esperaba 0 o 1 fila) y redirigía siempre
@@ -229,7 +231,8 @@ export default function CrearEquipoPage() {
       }
 
       setSala(salaRow);
-      setJugadores((jugData as JugadorRow[]) ?? []);
+      // Bajas (jugadores que no van a jugar) fuera de la lista: no se pueden fichar.
+      setJugadores(((jugData as JugadorRow[]) ?? []).filter((j) => !j.baja));
       setPartidos((partidosData as PartidoRow[] | null) ?? []);
       setCargando(false);
     }

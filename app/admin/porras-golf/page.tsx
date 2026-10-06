@@ -64,7 +64,7 @@ type PorraGolfAdmin = {
   publicada: boolean;
 };
 
-type JugadorRevision = { id: string; nombre: string; precio: number; es_espanol: boolean };
+type JugadorRevision = { id: string; nombre: string; precio: number; es_espanol: boolean; baja: boolean };
 
 export default function AdminPorrasGolfPage() {
   const router = useRouter();
@@ -98,6 +98,12 @@ export default function AdminPorrasGolfPage() {
   const [cargandoRevision, setCargandoRevision] = useState(false);
   const [guardandoRevision, setGuardandoRevision] = useState(false);
   const [publicandoId, setPublicandoId] = useState<string | null>(null);
+  // Bajas (06/10, urgente): quitar jugadores de una porra/mesas ya creadas.
+  // jugadoresUsados = ids que ya han fichado equipos (no se pueden borrar sin
+  // romper esos equipos); totalEquiposRevision = equipos de la porra + mesas.
+  const [jugadoresUsados, setJugadoresUsados] = useState<Map<string, number>>(new Map());
+  const [totalEquiposRevision, setTotalEquiposRevision] = useState(0);
+  const [quitandoJugadorId, setQuitandoJugadorId] = useState<string | null>(null);
 
   async function cargarPorras() {
     const { data } = await supabase
@@ -327,12 +333,107 @@ export default function AdminPorrasGolfPage() {
     setCargandoRevision(true);
     const { data } = await supabase
       .from('jugadores')
-      .select('id, nombre, precio, es_espanol')
+      .select('id, nombre, precio, es_espanol, baja')
       .eq('deporte', 'golf')
       .eq('competicion', p.competicion ?? '')
       .order('precio', { ascending: false });
     setJugadoresRevision((data as JugadorRevision[]) ?? []);
+
+    // Qué jugadores ya están fichados por algún equipo (de la porra o de las
+    // mesas Drafters de ese torneo).
+    const usados = new Map<string, number>();
+    let totalEquipos = 0;
+    const { data: salasTorneo } = await supabase
+      .from('salas')
+      .select('id')
+      .eq('deporte', 'golf')
+      .eq('competicion', p.competicion ?? '');
+    const idsSalas = ((salasTorneo as { id: string }[] | null) ?? []).map((x) => x.id);
+    const consultas = [supabase.from('equipos').select('jugadores').eq('porra_id', p.id)];
+    if (idsSalas.length > 0) consultas.push(supabase.from('equipos').select('jugadores').in('sala_id', idsSalas));
+    const respuestas = await Promise.all(consultas);
+    respuestas.forEach((r) => {
+      ((r.data as { jugadores: unknown }[] | null) ?? []).forEach((e) => {
+        totalEquipos++;
+        if (Array.isArray(e.jugadores)) {
+          (e.jugadores as unknown[]).forEach((jid) => {
+            if (typeof jid === 'string') usados.set(jid, (usados.get(jid) ?? 0) + 1);
+          });
+        }
+      });
+    });
+    setJugadoresUsados(usados);
+    setTotalEquiposRevision(totalEquipos);
     setCargandoRevision(false);
+  }
+
+  // Baja de un jugador que no va a jugar (06/10, urgente).
+  //  - Si NINGÚN equipo lo ha fichado: se borra la ficha (desaparece de la
+  //    porra y de las mesas del torneo).
+  //  - Si ya lo tienen equipos: esos equipos se quedan tal cual, con él (no se
+  //    tocan). La ficha se marca baja=true: nadie más puede fichar a ese
+  //    jugador, los equipos que lo tienen reciben el aviso "no va a jugar. Haz
+  //    un cambio" y, si empieza el torneo sin cambiarlo, ese jugador no suma
+  //    puntos (no juega). Se puede deshacer con "Deshacer baja".
+  async function quitarJugador(p: PorraGolfAdmin, j: JugadorRevision) {
+    const usos = jugadoresUsados.get(j.id) ?? 0;
+    const aviso =
+      usos > 0
+        ? `¿Marcar a ${j.nombre} como baja en "${p.major}"? Lo tienen ${usos} equipo${usos === 1 ? '' : 's'}: se quedan con él (verán el aviso "no va a jugar, haz un cambio" y pueden cambiarlo hasta el cierre), pero si empieza el torneo sin cambiarlo no sumará puntos. Nadie más podrá fichar a ${j.nombre}.`
+        : `¿Quitar a ${j.nombre} de "${p.major}" y de sus mesas Drafters? Ya no se podrá fichar.`;
+    if (!window.confirm(aviso)) return;
+    setQuitandoJugadorId(j.id);
+    setError(null);
+
+    if (usos > 0) {
+      const { error: bajaError } = await supabase.from('jugadores').update({ baja: true }).eq('id', j.id);
+      setQuitandoJugadorId(null);
+      if (bajaError) {
+        setError(bajaError.message.includes('baja') ? 'Falta ejecutar el SQL nuevo de bajas (columna "baja") en Supabase.' : 'No se ha podido marcar la baja. Inténtalo de nuevo.');
+        return;
+      }
+      setJugadoresRevision((prev) => prev.map((x) => (x.id === j.id ? { ...x, baja: true } : x)));
+      setResultado(`${j.nombre} marcado como baja en "${p.major}": los ${usos} equipo${usos === 1 ? '' : 's'} que lo tienen se quedan con él (verán el aviso) y nadie más puede fichar a ${j.nombre}.`);
+      return;
+    }
+
+    const { error: borrarError } = await supabase.from('jugadores').delete().eq('id', j.id);
+    if (borrarError) {
+      setQuitandoJugadorId(null);
+      setError('No se ha podido quitar al jugador. Inténtalo de nuevo.');
+      return;
+    }
+    const restantes = jugadoresRevision.filter((x) => x.id !== j.id);
+    setJugadoresRevision(restantes);
+
+    // Sin equipos todavía: al cambiar los puestos se recalculan las listas
+    // por color. Con equipos ya creados no se tocan, para no cambiar las
+    // reglas a mitad de partida.
+    let nota = '';
+    if (p.formato === 'clasica' && totalEquiposRevision === 0) {
+      const activos = restantes.filter((x) => !x.baja);
+      const numEspanoles = activos.filter((x) => x.es_espanol).length;
+      await Promise.all(
+        activos.map((x, idx) =>
+          supabase.from('jugadores').update({ grupo_porra: calcularGrupoPorra(idx + 1, x.es_espanol, numEspanoles) }).eq('id', x.id)
+        )
+      );
+      nota = ' Listas por color recalculadas.';
+    }
+    setQuitandoJugadorId(null);
+    setResultado(`${j.nombre} quitado de "${p.major}" (${restantes.length} jugadores).${nota}`);
+  }
+
+  async function deshacerBaja(p: PorraGolfAdmin, j: JugadorRevision) {
+    setQuitandoJugadorId(j.id);
+    const { error: e } = await supabase.from('jugadores').update({ baja: false }).eq('id', j.id);
+    setQuitandoJugadorId(null);
+    if (e) {
+      setError('No se ha podido deshacer la baja. Inténtalo de nuevo.');
+      return;
+    }
+    setJugadoresRevision((prev) => prev.map((x) => (x.id === j.id ? { ...x, baja: false } : x)));
+    setResultado(`Baja de ${j.nombre} deshecha en "${p.major}".`);
   }
 
   function toggleEspanolRevision(id: string) {
@@ -576,15 +677,15 @@ export default function AdminPorrasGolfPage() {
                         )}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                        <button
+                          type="button"
+                          onClick={() => abrirRevision(p)}
+                          style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: '#F0B94D', background: 'transparent', border: '1px solid #F0B94D', borderRadius: 8, padding: '6px 10px', cursor: 'pointer' }}
+                        >
+                          {revisandoId === p.id ? 'Cerrar' : p.publicada ? 'Jugadores' : 'Revisar'}
+                        </button>
                         {!p.publicada && (
                           <>
-                            <button
-                              type="button"
-                              onClick={() => abrirRevision(p)}
-                              style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: '#F0B94D', background: 'transparent', border: '1px solid #F0B94D', borderRadius: 8, padding: '6px 10px', cursor: 'pointer' }}
-                            >
-                              {revisandoId === p.id ? 'Cerrar' : 'Revisar'}
-                            </button>
                             <button
                               type="button"
                               disabled={publicandoId === p.id}
@@ -622,26 +723,57 @@ export default function AdminPorrasGolfPage() {
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, borderTop: `1px solid ${S.CARD_BORDER}`, paddingTop: 10 }}>
                         <p style={{ fontSize: 12, color: S.MUTED_2, margin: 0, lineHeight: 1.5 }}>
                           {p.formato === 'clasica'
-                            ? `Marca "ES" en los jugadores españoles (con ${UMBRAL_MINIMO_ESPANOLES} o más se les crea una lista aparte) y pulsa Guardar. Después, Publicar.`
+                            ? `Marca "ES" en los jugadores españoles (con ${UMBRAL_MINIMO_ESPANOLES} o más se les crea una lista aparte) y pulsa Guardar.${p.publicada ? '' : ' Después, Publicar.'}`
                             : 'Esta porra es de presupuesto: no usa listas por color, no hace falta marcar españoles.'}
+                          {' '}Con la × das de baja a un jugador que no va a jugar: si nadie lo ha fichado desaparece de la porra y de las mesas; si ya lo tienen equipos, se quedan con él (con aviso para que lo cambien) y no suma puntos si no lo cambian. Nadie más podrá fichar a una baja.
                         </p>
                         {cargandoRevision && <p style={{ fontSize: 12, color: S.MUTED_3, margin: 0 }}>Cargando jugadores...</p>}
-                        {p.formato === 'clasica' && (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 320, overflowY: 'auto' }}>
-                            {jugadoresRevision.map((j, idx) => (
-                              <div key={j.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: 12.5, color: S.TEXT }}>
-                                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                  <span style={{ color: S.MUTED_3 }}>{idx + 1}.</span> {j.nombre}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => toggleEspanolRevision(j.id)}
-                                  style={{ ...S.pill(j.es_espanol), padding: '3px 10px', fontSize: 11, flexShrink: 0 }}
-                                >
-                                  ES
-                                </button>
-                              </div>
-                            ))}
+                        {!cargandoRevision && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 360, overflowY: 'auto' }}>
+                            {jugadoresRevision.map((j, idx) => {
+                              const usos = jugadoresUsados.get(j.id) ?? 0;
+                              return (
+                                <div key={j.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: 12.5, color: S.TEXT }}>
+                                  <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    <span style={{ color: S.MUTED_3 }}>{idx + 1}.</span> <span style={{ textDecoration: j.baja ? 'line-through' : 'none', opacity: j.baja ? 0.6 : 1 }}>{j.nombre}</span>
+                                    {usos > 0 && <span style={{ color: '#F0B94D', fontSize: 11 }}> · en {usos} equipo{usos === 1 ? '' : 's'}</span>}
+                                    {j.baja && <span style={{ color: S.ERROR, fontSize: 11, fontWeight: 700 }}> · BAJA</span>}
+                                  </span>
+                                  <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                                    {p.formato === 'clasica' && (
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleEspanolRevision(j.id)}
+                                        style={{ ...S.pill(j.es_espanol), padding: '3px 10px', fontSize: 11 }}
+                                      >
+                                        ES
+                                      </button>
+                                    )}
+                                    {j.baja ? (
+                                      <button
+                                        type="button"
+                                        disabled={quitandoJugadorId === j.id}
+                                        onClick={() => deshacerBaja(p, j)}
+                                        style={{ ...S.pill(false), padding: '3px 10px', fontSize: 11, opacity: quitandoJugadorId === j.id ? 0.5 : 1 }}
+                                      >
+                                        Deshacer baja
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        disabled={quitandoJugadorId === j.id}
+                                        onClick={() => quitarJugador(p, j)}
+                                        aria-label={`Dar de baja a ${j.nombre}`}
+                                        title={usos > 0 ? 'Marcar baja (los equipos que lo tienen se quedan con él, con aviso)' : 'Quitar (baja)'}
+                                        style={{ background: 'transparent', border: `1px solid ${S.BORDER}`, borderRadius: 8, color: S.ERROR, width: 30, height: 28, cursor: 'pointer', opacity: quitandoJugadorId === j.id ? 0.35 : 1 }}
+                                      >
+                                        ×
+                                      </button>
+                                    )}
+                                  </span>
+                                </div>
+                              );
+                            })}
                           </div>
                         )}
                         {p.formato === 'clasica' && jugadoresRevision.length > 0 && (
