@@ -183,6 +183,36 @@ const ALIAS_EQUIPOS: Record<string, string> = {
   'fc porto': 'fc porto',
 };
 
+
+// ----------------------------------------------------------------------------
+// FILIALES (07/10, bug urgente de Iñi: sin jugadores de Real Sociedad ni Celta)
+// ----------------------------------------------------------------------------
+// "Celta Fortuna" y "Real Sociedad B" (equipos de Segunda) llevan el nombre del
+// primer equipo, y la clave de equipo (lib/futbolLaLiga.ts) y la contención de
+// palabras de abajo los trataban como EL MISMO equipo. Al crear la jornada se
+// quedaba el nombre del filial (el primero que aparecía en la plantilla) y se
+// perdían todos los jugadores del primer equipo. Ahora un filial es siempre un
+// equipo distinto y nunca se confunde con el primer equipo.
+const RE_FILIAL = /\b(fortuna|castilla|atletic|promesas|juvenil|sanse)\b|\b(b|c|ii)$|\b(sevilla|valencia|betis|villarreal) atletico$/;
+
+/** ¿Es un equipo filial (B, II, Castilla, Fortuna, Bilbao Athletic...)? */
+export function esEquipoFilial(nombre: string): boolean {
+  const n = normalizarEquipo(nombre);
+  if (!n) return false;
+  return RE_FILIAL.test(n) || n === 'bilbao athletic' || /\bathletic b\b/.test(n);
+}
+
+/** Nombre del primer equipo de un filial ("Celta Fortuna" → "celta"); el propio nombre si no es filial. */
+export function nombreSinFilial(nombre: string): string {
+  if (!esEquipoFilial(nombre)) return nombre;
+  return normalizarEquipo(nombre)
+    .replace(/\b(fortuna|castilla|atletic|promesas|juvenil|sanse)\b/g, ' ')
+    .replace(/\b(b|c|ii)$/, ' ')
+    .replace(/\bbilbao athletic\b/, 'athletic')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /**
  * Empareja el nombre de un equipo (tal y como lo escribe una fuente
  * externa) contra la lista de nombres reales candidatos (normalmente los
@@ -213,7 +243,9 @@ export function emparejarEquipo(nombreOrigen: string, candidatos: string[]): str
   // 3. Contención de palabras significativas, solo si es inequívoca.
   const tokensOrigen = tokensSignificativos(nombreOrigen);
   if (tokensOrigen.length === 0) return null;
+  const origenEsFilial = esEquipoFilial(nombreOrigen);
   const posibles = candidatos.filter((c) => {
+    if (esEquipoFilial(c) !== origenEsFilial) return false; // un filial nunca se confunde con su primer equipo
     const tokensCand = tokensSignificativos(c);
     const [cortos, largos] = tokensOrigen.length <= tokensCand.length ? [tokensOrigen, tokensCand] : [tokensCand, tokensOrigen];
     return cortos.length > 0 && cortos.every((t) => largos.includes(t));

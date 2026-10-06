@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import { origenGuardado, recordarLista, rutaAnterior } from '@/lib/navegacion';
 
 const ACCENT = '#3DDC84';
 
@@ -24,16 +25,25 @@ type Props = {
   // salvo /inicio. Se oculta con sinVolver en las pantallas que ya traen su
   // propia flecha (elección de equipo, enlaces "← Panel de administración").
   sinVolver?: boolean;
+  // Destino de la flecha cuando no se deduce solo de la ruta (p.ej. la sala
+  // vuelve a la lista de SU deporte). Por defecto: lib/navegacion.ts.
+  volverA?: string;
 };
 
 // Cabecera reutilizada en todas las pantallas salvo la portada — misma
 // estructura exacta que la maqueta visual (Main.dc.html): flecha de
 // "volver" (usa el historial del navegador) + wordmark "DRAFTERS" que
 // lleva a la portada.
-export default function DraftersHeader({ saldoLabel, accountInitials, homeHref, sinVolver }: Props) {
+export default function DraftersHeader({ saldoLabel, accountInitials, homeHref, sinVolver, volverA }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const mostrarVolver = !sinVolver && pathname !== '/inicio';
+
+  // Recuerda la última pantalla de lista (Inicio / Mesas / Salas / Porras)
+  // para que la flecha de una sala o porra vuelva por donde se entró.
+  useEffect(() => {
+    recordarLista(pathname, window.location.search);
+  }, [pathname]);
   const destino = homeHref ?? (saldoLabel && accountInitials ? '/inicio' : '/');
   const enAreaDeCuenta = !!(saldoLabel && accountInitials);
 
@@ -181,7 +191,7 @@ export default function DraftersHeader({ saldoLabel, accountInitials, homeHref, 
       <div style={{ padding: '6px 20px 0' }}>
         <button
           type="button"
-          onClick={() => router.back()}
+          onClick={() => router.push(origenGuardado(pathname) ?? volverA ?? rutaAnterior(pathname))}
           aria-label="Volver"
           style={{ width: 34, height: 34, padding: 0, border: 'none', background: 'transparent', color: ACCENT, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 20 }}
         >

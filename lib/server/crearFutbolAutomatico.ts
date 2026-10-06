@@ -181,7 +181,7 @@ async function cuotasDelPartido(slug: string, eventoId: string): Promise<{ c1: n
   }
 }
 
-type FichaJugador = {
+export type FichaJugador = {
   id: string;
   nombre: string;
   equipo_real: string | null;
@@ -195,7 +195,7 @@ type FichaJugador = {
 };
 
 /** Plantilla de la liga: la ficha MÁS RECIENTE de cada jugador (nombre + equipo). */
-async function plantillaDeLaLiga(admin: Admin, prefijo: string): Promise<FichaJugador[]> {
+export async function plantillaDeLaLiga(admin: Admin, prefijo: string): Promise<FichaJugador[]> {
   const filas: FichaJugador[] = [];
   for (let desde = 0; ; desde += 1000) {
     const { data, error } = await admin

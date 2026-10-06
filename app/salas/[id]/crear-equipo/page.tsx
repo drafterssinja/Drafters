@@ -284,16 +284,16 @@ export default function CrearEquipoPage() {
   // `popstate` es quien decide a qué paso volver. Así, "atrás" significa
   // siempre lo mismo, sea la flecha de la cabecera, la flecha propia de
   // cada pantalla o el gesto de "atrás" del propio dispositivo — los tres
-  // acaban llamando a `router.back()`/el historial del navegador, nunca a
-  // un `push` ni a un `setStep` suelto por su cuenta.
+  // acaban en el historial del navegador (ver volverPaso, 07/10: la salida
+  // de la pantalla "info" va a una ruta fija, nunca a `router.back()`).
   useEffect(() => {
     function onPopState(event: PopStateEvent) {
       const paso = (event.state as { paso?: 'draft' | 'confirm' } | null)?.paso;
-      setStep(paso === 'confirm' ? 'confirm' : paso === 'draft' ? 'draft' : 'info');
+      setStep(paso === 'confirm' ? 'confirm' : paso === 'draft' ? 'draft' : modoEdicion ? 'draft' : 'info');
     }
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, []);
+  }, [modoEdicion]);
 
   // Acceso a Mesas Drafters (nuevo, 01/10, pedido de Iñi): mientras no
   // empiece a hacer publicidad, un usuario sin este acceso puede recorrer
@@ -302,6 +302,20 @@ export default function CrearEquipoPage() {
   // tiene_acceso_mesas_drafters() en drafters-schema.sql (mismo bloqueo
   // repetido ahí del lado del servidor).
   const tieneAccesoMesas = !!perfil && (perfil.rol === 'admin' || !!perfil.acceso_mesas_drafters);
+
+  // Flecha de volver paso a paso (07/10, pedido de Iñi con vídeo: las flechas
+  // entraban en bucle). Cada paso tiene una salida fija y nunca se usa
+  // `router.back()` a ciegas:
+  //   confirmar → elegir equipo  (se deshace la entrada que añadió avanzarPaso)
+  //   elegir    → cómo puntúan   (igual; al EDITAR no hay paso previo → sala)
+  //   cómo puntúan → pantalla de la sala (ruta fija, nunca el historial)
+  function volverPaso() {
+    if (step === 'confirm' || (step === 'draft' && !modoEdicion)) {
+      window.history.back();
+    } else {
+      router.push(`/salas/${salaId}`);
+    }
+  }
 
   function avanzarPaso(siguiente: 'draft' | 'confirm') {
     window.history.pushState({ paso: siguiente }, '', window.location.href);
@@ -627,12 +641,12 @@ export default function CrearEquipoPage() {
         `}</style>
 
         {step === 'info' ? (
-          <PuntuacionInfoScreen deporte={sala.deporte} competicion={sala.competicion} onEntendido={() => avanzarPaso('draft')} onVolver={() => router.back()} />
+          <PuntuacionInfoScreen deporte={sala.deporte} competicion={sala.competicion} onEntendido={() => avanzarPaso('draft')} onVolver={volverPaso} />
         ) : step === 'draft' ? (
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 20px 10px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <button type="button" onClick={() => router.push(`/salas/${salaId}`)} style={{ ...backArrowStyle, alignSelf: 'center', margin: 0 }}>
+                <button type="button" onClick={volverPaso} style={{ ...backArrowStyle, alignSelf: 'center', margin: 0 }}>
                   ←
                 </button>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 0, minWidth: 0 }}>
@@ -928,7 +942,7 @@ export default function CrearEquipoPage() {
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 18, padding: '28px 20px 56px' }}>
-            <button type="button" onClick={() => router.back()} style={backArrowStyle}>
+            <button type="button" onClick={volverPaso} style={backArrowStyle}>
               ←
             </button>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>

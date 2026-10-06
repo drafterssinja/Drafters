@@ -234,11 +234,25 @@ export default function CrearEquipoPorraPage() {
   useEffect(() => {
     function onPopState(event: PopStateEvent) {
       const paso = (event.state as { paso?: 'draft' | 'confirm' } | null)?.paso;
-      setStep(paso === 'confirm' ? 'confirm' : paso === 'draft' ? 'draft' : 'info');
+      setStep(paso === 'confirm' ? 'confirm' : paso === 'draft' ? 'draft' : modoEdicion ? 'draft' : 'info');
     }
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, []);
+  }, [modoEdicion]);
+
+  // Flecha de volver paso a paso (07/10, pedido de Iñi con vídeo: las flechas
+  // entraban en bucle). Cada paso tiene una salida fija y nunca se usa
+  // `router.back()` a ciegas:
+  //   confirmar → elegir equipo  (se deshace la entrada que añadió avanzarPaso)
+  //   elegir    → cómo puntúan   (igual; al EDITAR no hay paso previo → sala)
+  //   cómo puntúan → pantalla de la porra (ruta fija, nunca el historial)
+  function volverPaso() {
+    if (step === 'confirm' || (step === 'draft' && !modoEdicion)) {
+      window.history.back();
+    } else {
+      router.push(`/porras/${porraId}`);
+    }
+  }
 
   function avanzarPaso(siguiente: 'draft' | 'confirm') {
     window.history.pushState({ paso: siguiente }, '', window.location.href);
@@ -472,11 +486,11 @@ export default function CrearEquipoPorraPage() {
         <DraftersHeader sinVolver saldoLabel={saldoLabel} accountInitials={initials} />
 
         {step === 'info' ? (
-          <PorraModoInfoScreen porra={porra} hayListaEspanoles={hayListaEspanoles} onEntendido={() => avanzarPaso('draft')} onVolver={() => router.back()} />
+          <PorraModoInfoScreen porra={porra} hayListaEspanoles={hayListaEspanoles} onEntendido={() => avanzarPaso('draft')} onVolver={volverPaso} />
         ) : step === 'draft' ? (
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '20px 20px 24px' }}>
-              <button type="button" onClick={() => router.back()} style={backArrowStyle}>
+              <button type="button" onClick={volverPaso} style={backArrowStyle}>
                 ←
               </button>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -883,7 +897,7 @@ export default function CrearEquipoPorraPage() {
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 18, padding: '28px 20px 56px' }}>
-            <button type="button" onClick={() => router.back()} style={backArrowStyle}>
+            <button type="button" onClick={volverPaso} style={backArrowStyle}>
               ←
             </button>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>

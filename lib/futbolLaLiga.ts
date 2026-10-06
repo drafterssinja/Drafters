@@ -11,7 +11,7 @@
 // fuentes y el emparejado por nombre (jugadores de ESPN ↔ nuestra ficha).
 
 import { normalizarNombre } from './nombreMatch';
-import { normalizarEquipo, canonicoEquipo } from './aliasEquipos';
+import { normalizarEquipo, canonicoEquipo, esEquipoFilial } from './aliasEquipos';
 
 /** Un jugador "externo" a emparejar con nuestra ficha (p.ej. de ESPN). */
 export type FilaFantasy = {
@@ -51,6 +51,10 @@ export function claveEquipoLaLiga(nombre: string | null | undefined): string {
   // football-data.org) para que todas las fuentes den la misma clave.
   const n = canonicoEquipo(nombre ?? '');
   if (!n) return '';
+  // Los filiales (Celta Fortuna, Real Sociedad B...) tienen su propia clave:
+  // antes caían en la regla del primer equipo (/celta/, /sociedad/) y se
+  // mezclaban con él (07/10).
+  if (esEquipoFilial(nombre ?? '')) return `filial ${n}`;
   for (const [clave, re] of REGLAS_EQUIPO) {
     if (re.test(n)) return clave;
   }

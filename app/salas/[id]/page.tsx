@@ -260,7 +260,7 @@ export default function SalaDetallePage() {
   return (
     <main style={S.mainReset}>
       <div style={S.pageFrame}>
-        <DraftersHeader saldoLabel={saldoLabel} accountInitials={initials} />
+        <DraftersHeader saldoLabel={saldoLabel} accountInitials={initials} volverA={`/salas?deporte=${sala.deporte}`} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20, padding: '28px 20px 100px', position: 'relative' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#F0B94D' }}>{sala.competicion}</span>
