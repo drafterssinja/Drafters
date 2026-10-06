@@ -1,0 +1,598 @@
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
+import Link from 'next/link';
+import { supabase } from '@/lib/supabaseClient';
+import DraftersHeader from '@/components/DraftersHeader';
+import AnuncioVideoInline from '@/components/AnuncioVideoInline';
+import * as S from '@/lib/mockupStyles';
+import { formatEuros, parteParaPremios } from '@/lib/salaShared';
+import { calcularReparto, type TipoSala } from '@/lib/repartoPremios';
+import { claveEquipoLaLiga, escudoLaLiga, formatPuntos } from '@/lib/futbolLaLiga';
+import type { LineaDesglose } from '@/lib/futbolPuntuacion';
+
+// ============================================================================
+// CLASIFICACIÓN EN DIRECTO DE UNA MESA DRAFTERS DE FÚTBOL (06/10)
+// ============================================================================
+// Cada jugador puntúa con las tablas de Drafters ("Cómo puntúan los
+// jugadores") calculadas con las estadísticas por jugador de ESPN, en directo
+// (pedido de Iñi, 06/10; antes puntuaba con LaLiga Fantasy). Los datos los
+// escribe el cron (lib/server/sincronizarFutbolEspn.ts) en
+// futbol_puntos_jugador (con el desglose acción a acción) y
+// futbol_partidos_jornada; esta pantalla solo los lee y se refresca sola.
+//
+// Reglas de pantalla pedidas por Iñi:
+// - Nombre del jugador en AMARILLO si el partido de su equipo se está
+//   jugando; en VERDE cuando su partido ha terminado y los puntos son
+//   definitivos (incluidos los 0); en ROJO si todavía no están actualizados.
+// - Al pulsar un jugador, justo debajo se abre su partido: escudos de los dos
+//   equipos, marcador (0-0 si no ha empezado), hora si no ha empezado, minuto
+//   parpadeando si se está jugando, y los goles con minuto, goleador, balón y
+//   —si se sabe— asistente entre paréntesis con una "A" blanca sobre rojo.
+// - Clasificación ordenada por puntuación real (requisito permanente).
+// - Indicar de dónde vienen los puntos.
+
+type SalaMin = {
+  id: string;
+  nombre: string;
+  competicion: string;
+  tipo: string;
+  estado: string;
+  buy_in: number;
+  aforo: number | null;
+  fecha_limite_inscripcion: string | null;
+};
+
+type JugadorF = { id: string; nombre: string; equipo_real: string | null; posicion: string | null };
+type PuntosF = {
+  jugador_id: string;
+  jugo: boolean;
+  minutos: number | null;
+  resultado_equipo: 'G' | 'E' | 'P' | null;
+  puntos_total: number;
+  partido_estado: string;
+  actualizado: boolean;
+  desglose: LineaDesglose[] | null;
+};
+type GolF = { minuto: string; equipo: 'local' | 'visitante'; jugador: string; asistente: string | null; tipo: 'normal' | 'penalti' | 'propia' };
+type PartidoF = {
+  clave_local: string;
+  clave_visitante: string;
+  kickoff: string | null;
+  equipo_local: string;
+  equipo_visitante: string;
+  logo_local: string | null;
+  logo_visitante: string | null;
+  goles_local: number | null;
+  goles_visitante: number | null;
+  estado: 'pendiente' | 'en_juego' | 'finalizado' | 'aplazado';
+  reloj: string | null;
+  goles_detalle: GolF[] | null;
+};
+type EquipoF = { equipoId: string; nombre: string; jugadores: string[]; createdAt: string };
+
+const COLOR_EN_JUEGO = '#F5D547'; // amarillo: partido de su equipo en juego (06/10)
+const POSICION_CORTA: Record<string, string> = { portero: 'POR', defensa: 'DEF', centrocampista: 'MED', delantero: 'DEL' };
+
+function formatoHora(iso: string | null): string {
+  if (!iso) return 'Hora por confirmar';
+  const d = new Date(iso);
+  const dia = new Intl.DateTimeFormat('es-ES', { weekday: 'long', timeZone: 'Europe/Madrid' }).format(d);
+  const hora = new Intl.DateTimeFormat('es-ES', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Europe/Madrid' }).format(d);
+  const fecha = new Intl.DateTimeFormat('es-ES', { day: 'numeric', month: 'short', timeZone: 'Europe/Madrid' }).format(d);
+  return `${dia.charAt(0).toUpperCase()}${dia.slice(1)} ${fecha} a las ${hora}`;
+}
+
+function Escudo({ url, nombre, tam = 26 }: { url: string | null; nombre: string; tam?: number }) {
+  const [falla, setFalla] = useState(false);
+  if (!url || falla) {
+    return (
+      <span
+        style={{
+          width: tam,
+          height: tam,
+          flexShrink: 0,
+          borderRadius: '50%',
+          background: '#1E2723',
+          color: S.MUTED_2,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: Math.max(8, tam * 0.36),
+          fontWeight: 800,
+          fontFamily: "'Manrope', sans-serif",
+        }}
+      >
+        {nombre.slice(0, 3).toUpperCase()}
+      </span>
+    );
+  }
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={url} alt={nombre} width={tam} height={tam} onError={() => setFalla(true)} style={{ width: tam, height: tam, flexShrink: 0, objectFit: 'contain' }} />;
+}
+
+function InsigniaAsistencia() {
+  return (
+    <span
+      title="Asistencia"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 12,
+        height: 12,
+        borderRadius: 3,
+        background: '#E5372E',
+        color: '#fff',
+        fontSize: 8,
+        fontWeight: 800,
+        lineHeight: 1,
+        fontFamily: "'Manrope', sans-serif",
+        flexShrink: 0,
+      }}
+    >
+      A
+    </span>
+  );
+}
+
+function ListaGoles({ goles, lado }: { goles: GolF[]; lado: 'local' | 'visitante' }) {
+  const propios = goles.filter((g) => g.equipo === lado);
+  if (propios.length === 0) return <div style={{ flex: 1, minWidth: 0 }} />;
+  return (
+    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4, alignItems: lado === 'local' ? 'flex-start' : 'flex-end' }}>
+      {propios.map((g, i) => (
+        <div key={`${g.minuto}-${g.jugador}-${i}`} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4, justifyContent: lado === 'local' ? 'flex-start' : 'flex-end', fontSize: 11, color: S.TEXT, lineHeight: 1.3 }}>
+          <span aria-label="Gol" style={{ fontSize: 11 }}>
+            ⚽
+          </span>
+          <span style={{ color: S.MUTED_2, fontWeight: 700 }}>{g.minuto}</span>
+          <span style={{ fontWeight: 700 }}>
+            {g.jugador}
+            {g.tipo === 'penalti' ? ' (p)' : g.tipo === 'propia' ? ' (p.p.)' : ''}
+          </span>
+          {g.asistente && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: S.MUTED }}>
+              (<InsigniaAsistencia />
+              {g.asistente})
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TarjetaPartido({ partido, claveEquipoJugador, escudos }: { partido: PartidoF | null; claveEquipoJugador: string; escudos: Map<string, string> }) {
+  if (!partido) {
+    return (
+      <p style={{ fontSize: 11.5, color: S.MUTED_3, margin: 0 }}>
+        Todavía no tenemos el partido de este jugador (puede estar aplazado o la jornada aún no está publicada).
+      </p>
+    );
+  }
+  const empezado = partido.estado !== 'pendiente';
+  const enDescanso = partido.estado === 'en_juego' && partido.reloj === 'HT';
+  const golesL = empezado ? (partido.goles_local ?? 0) : 0;
+  const golesV = empezado ? (partido.goles_visitante ?? 0) : 0;
+  const goles = partido.goles_detalle ?? [];
+
+  let cabecera: React.ReactNode;
+  if (partido.estado === 'en_juego') {
+    cabecera = enDescanso ? (
+      <span style={{ fontSize: 11, fontWeight: 800, color: '#F0B94D', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Descanso</span>
+    ) : (
+      <span className="drafters-parpadeo" style={{ fontSize: 13, fontWeight: 800, color: '#FF5C5C', fontFamily: "'Barlow Condensed', sans-serif" }}>
+        {partido.reloj ?? 'En juego'}
+      </span>
+    );
+  } else if (partido.estado === 'finalizado') {
+    cabecera = <span style={{ fontSize: 11, fontWeight: 800, color: S.MUTED_2, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Final</span>;
+  } else if (partido.estado === 'aplazado') {
+    cabecera = <span style={{ fontSize: 11, fontWeight: 800, color: '#F0B94D', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Aplazado</span>;
+  } else {
+    cabecera = <span style={{ fontSize: 11.5, fontWeight: 700, color: S.MUTED }}>{formatoHora(partido.kickoff)}</span>;
+  }
+
+  const ladoPropio = partido.clave_local === claveEquipoJugador ? 'local' : 'visitante';
+  const estiloEquipo = (lado: 'local' | 'visitante') => ({
+    flex: 1,
+    minWidth: 0,
+    display: 'flex',
+    flexDirection: 'column' as const,
+    alignItems: 'center' as const,
+    gap: 4,
+    opacity: ladoPropio === lado ? 1 : 0.85,
+  });
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 10px 12px', background: 'rgba(255,255,255,0.03)', border: '1px solid #1E2723', borderRadius: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'center' }}>{cabecera}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={estiloEquipo('local')}>
+          <Escudo url={partido.logo_local ?? escudos.get(partido.clave_local) ?? escudoLaLiga(partido.equipo_local)} nombre={partido.equipo_local} tam={34} />
+          <span style={{ fontSize: 10.5, fontWeight: 700, color: ladoPropio === 'local' ? '#3DDC84' : S.TEXT, textAlign: 'center', lineHeight: 1.2 }}>{partido.equipo_local}</span>
+        </div>
+        <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 26, color: S.TEXT, minWidth: 64, textAlign: 'center' }}>
+          {golesL} - {golesV}
+        </span>
+        <div style={estiloEquipo('visitante')}>
+          <Escudo url={partido.logo_visitante ?? escudos.get(partido.clave_visitante) ?? escudoLaLiga(partido.equipo_visitante)} nombre={partido.equipo_visitante} tam={34} />
+          <span style={{ fontSize: 10.5, fontWeight: 700, color: ladoPropio === 'visitante' ? '#3DDC84' : S.TEXT, textAlign: 'center', lineHeight: 1.2 }}>{partido.equipo_visitante}</span>
+        </div>
+      </div>
+      {goles.length > 0 && (
+        <div style={{ display: 'flex', gap: 10, paddingTop: 6, borderTop: '1px solid #1E2723' }}>
+          <ListaGoles goles={goles} lado="local" />
+          <ListaGoles goles={goles} lado="visitante" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function signo(n: number): string {
+  return `${n > 0 ? '+' : n < 0 ? '−' : ''}${formatPuntos(Math.abs(n))}`;
+}
+
+/** Línea corta bajo el nombre del jugador. */
+function textoResumen(p: PuntosF | undefined, partido: PartidoF | null): string {
+  if (!p) return 'Sin datos todavía';
+  if (p.partido_estado === 'sin_partido') return 'Sin partido esta jornada';
+  if (p.partido_estado === 'aplazado') return 'Partido aplazado';
+  if (p.partido_estado === 'pendiente') return partido ? 'Pendiente de su partido' : 'Sin datos todavía';
+  if (!p.jugo) return p.partido_estado === 'finalizado' ? 'No ha jugado' : 'Todavía no ha jugado';
+  const lineas = p.desglose ?? [];
+  if (lineas.length === 0) return '0 puntos';
+  return lineas.map((l) => `${l.etiqueta}${l.cantidad > 1 ? ` ×${l.cantidad}` : ''} ${signo(l.puntos)}`).join(' · ');
+}
+
+/** Desglose acción a acción de los puntos del jugador (al pulsarlo). */
+function DesglosePuntos({ p }: { p: PuntosF | null }) {
+  if (!p || !p.jugo) return null;
+  const lineas = p.desglose ?? [];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '8px 10px', background: 'rgba(255,255,255,0.03)', border: '1px solid #1E2723', borderRadius: 10 }}>
+      <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>
+        Desglose de puntos{p.partido_estado === 'en_juego' ? ' (en directo)' : ''}
+      </span>
+      {lineas.length === 0 && <span style={{ fontSize: 11.5, color: S.MUTED }}>Todavía sin acciones que puntúen.</span>}
+      {lineas.map((l) => (
+        <div key={l.clave} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: 11.5 }}>
+          <span style={{ color: S.MUTED }}>
+            {l.etiqueta}
+            {l.cantidad > 1 ? ` ×${l.cantidad}` : ''}
+          </span>
+          <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 13, color: l.puntos < 0 ? S.ERROR : '#F0B94D' }}>{signo(l.puntos)}</span>
+        </div>
+      ))}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, borderTop: '1px solid #1E2723', paddingTop: 4, marginTop: 2 }}>
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: S.TEXT }}>Total</span>
+        <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 14, color: S.TEXT }}>{formatPuntos(p.puntos_total)}</span>
+      </div>
+      <span style={{ fontSize: 9.5, color: S.MUTED_3 }}>Portería a cero, victoria y partido completo se suman al terminar el partido.</span>
+    </div>
+  );
+}
+
+function vistaPillStyle(active: boolean) {
+  return {
+    padding: '7px 14px',
+    borderRadius: 999,
+    border: `1px solid ${active ? 'rgba(61,220,132,0.5)' : '#1E2723'}`,
+    background: active ? 'rgba(61,220,132,0.12)' : S.PANEL,
+    color: active ? '#3DDC84' : S.MUTED_2,
+    fontFamily: "'Manrope', sans-serif",
+    fontWeight: 700,
+    fontSize: 12,
+    cursor: 'pointer',
+  } as const;
+}
+
+export default function ClasificacionMesaFutbol({ sala, saldoLabel, initials }: { sala: SalaMin; saldoLabel: string; initials: string }) {
+  const [cargando, setCargando] = useState(true);
+  const [jugadores, setJugadores] = useState<JugadorF[]>([]);
+  const [equipos, setEquipos] = useState<EquipoF[]>([]);
+  const [puntos, setPuntos] = useState<Map<string, PuntosF>>(new Map());
+  const [partidos, setPartidos] = useState<PartidoF[]>([]);
+  const [escudos, setEscudos] = useState<Map<string, string>>(new Map());
+  const [vista, setVista] = useState<'mesa' | 'premios'>('mesa');
+  const [equipoSeleccionadoId, setEquipoSeleccionadoId] = useState<string | null>(null);
+  const [jugadorFocoId, setJugadorFocoId] = useState<string | null>(null);
+
+  // Carga inicial: plantilla de jugadores y equipos de la mesa.
+  useEffect(() => {
+    let activo = true;
+    async function cargar() {
+      const [{ data: jug }, { data: eqs }, { data: esc }] = await Promise.all([
+        supabase.from('jugadores').select('id,nombre,equipo_real,posicion').eq('deporte', 'futbol').eq('competicion', sala.competicion),
+        // Solo devuelve filas cuando la inscripción ya se ha cerrado.
+        supabase.rpc('equipos_sala_clasificacion', { p_sala_id: sala.id }),
+        supabase.from('futbol_escudos').select('clave,logo'),
+      ]);
+      if (!activo) return;
+      setEscudos(new Map(((esc as { clave: string; logo: string }[]) ?? []).map((e) => [e.clave, e.logo])));
+      setJugadores((jug as JugadorF[]) ?? []);
+      const lista = ((eqs as { equipo_id: string; nombre: string; jugadores: string[]; created_at: string }[]) ?? [])
+        .map((f) => ({ equipoId: f.equipo_id, nombre: f.nombre, jugadores: f.jugadores ?? [], createdAt: f.created_at }))
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      setEquipos(lista);
+      if (lista.length > 0) setEquipoSeleccionadoId(lista[0].equipoId);
+      setCargando(false);
+    }
+    cargar();
+    return () => {
+      activo = false;
+    };
+  }, [sala.id, sala.competicion]);
+
+  // Puntos y marcadores: se refrescan solos cada 20 segundos.
+  useEffect(() => {
+    let activo = true;
+    async function refrescar() {
+      const [{ data: pts }, { data: pts2 }] = await Promise.all([
+        supabase
+          .from('futbol_puntos_jugador')
+          .select('jugador_id,jugo,minutos,resultado_equipo,puntos_total,partido_estado,actualizado,desglose')
+          .eq('competicion', sala.competicion),
+        supabase
+          .from('futbol_partidos_jornada')
+          .select('clave_local,clave_visitante,kickoff,equipo_local,equipo_visitante,logo_local,logo_visitante,goles_local,goles_visitante,estado,reloj,goles_detalle')
+          .eq('competicion', sala.competicion),
+      ]);
+      if (!activo) return;
+      setPuntos(new Map(((pts as PuntosF[]) ?? []).map((p) => [p.jugador_id, p])));
+      setPartidos((pts2 as PartidoF[]) ?? []);
+    }
+    refrescar();
+    const intervalo = setInterval(refrescar, 20000);
+    return () => {
+      activo = false;
+      clearInterval(intervalo);
+    };
+  }, [sala.competicion]);
+
+  const jugadoresPorId = useMemo(() => new Map(jugadores.map((j) => [j.id, j])), [jugadores]);
+
+  function totalEquipo(ids: string[]): number {
+    return ids.reduce((acc, id) => acc + (puntos.get(id)?.puntos_total ?? 0), 0);
+  }
+
+  function partidoDe(j: JugadorF): { partido: PartidoF | null; clave: string } {
+    const clave = claveEquipoLaLiga(j.equipo_real);
+    const partido = partidos.find((p) => p.clave_local === clave || p.clave_visitante === clave) ?? null;
+    return { partido, clave };
+  }
+
+  // Más puntos = mejor. Ordenada por puntuación real, nunca por inscripción;
+  // el empate se mantiene por orden de inscripción (sort estable).
+  const equiposPorPuntuacion = useMemo(
+    () => equipos.slice().sort((a, b) => totalEquipo(b.jugadores) - totalEquipo(a.jugadores)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [equipos, puntos]
+  );
+
+  const encabezado = (
+    <>
+      <style>{`@keyframes drafters-parpadeo { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } } .drafters-parpadeo { animation: drafters-parpadeo 1.8s ease-in-out infinite; }`}</style>
+      <DraftersHeader saldoLabel={saldoLabel} accountInitials={initials} />
+    </>
+  );
+
+  if (cargando) {
+    return (
+      <main style={S.mainReset}>
+        <div style={S.pageFrame}>
+          {encabezado}
+          <div style={{ padding: '40px 20px' }}>
+            <p style={{ fontSize: 14, color: S.MUTED }}>Cargando...</p>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (equipos.length === 0) {
+    return (
+      <main style={S.mainReset}>
+        <div style={S.pageFrame}>
+          {encabezado}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '48px 24px', alignItems: 'center', textAlign: 'center' }}>
+            <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT, fontFamily: "'Barlow Condensed', sans-serif" }}>Clasificación en directo</h1>
+            <p style={{ fontSize: 14, color: S.MUTED_2, lineHeight: 1.6 }}>
+              Esta mesa todavía no ha empezado, o todavía no hay equipos inscritos. En cuanto se cierre la inscripción podrás ver aquí la clasificación de todos los participantes.
+            </p>
+            <Link href={`/salas/${sala.id}`} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '12px 24px', textDecoration: 'none', display: 'inline-flex' }}>
+              Volver a la mesa
+            </Link>
+            <div style={{ width: '100%', maxWidth: 420 }}>
+              <AnuncioVideoInline ubicacion="clasificacion" />
+            </div>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  const equipoSeleccionado = equiposPorPuntuacion.find((e) => e.equipoId === equipoSeleccionadoId) ?? equiposPorPuntuacion[0];
+  const jugadoresDelEquipo = equipoSeleccionado.jugadores.map((id) => jugadoresPorId.get(id)).filter((j): j is JugadorF => !!j);
+
+  return (
+    <main style={S.mainReset}>
+      <div style={S.pageFrame}>
+        {encabezado}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '24px 20px 40px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#3DDC84' }}>{sala.nombre}</span>
+            <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT }}>Clasificación en directo</h1>
+            <p style={{ fontSize: 13, color: S.MUTED_2 }}>
+              {equipos.length} equipo{equipos.length === 1 ? '' : 's'} inscrito{equipos.length === 1 ? '' : 's'} · {sala.competicion}
+            </p>
+            {/* De dónde salen los puntos (pedido de Iñi, 30/09 y 06/10). */}
+            <p style={{ fontSize: 11, color: S.MUTED_3, lineHeight: 1.45, margin: 0 }}>
+              Puntos según las tablas de Drafters con las estadísticas de cada jugador en directo. Pulsa un jugador para ver el desglose y su partido. El color del nombre indica el estado de sus puntos (leyenda bajo los jugadores).
+            </p>
+          </div>
+
+          <div style={{ display: 'flex', gap: 6, alignSelf: 'flex-start' }}>
+            <button type="button" onClick={() => setVista('mesa')} style={vistaPillStyle(vista === 'mesa')}>
+              Mesa
+            </button>
+            <button type="button" onClick={() => setVista('premios')} style={vistaPillStyle(vista === 'premios')}>
+              Premios
+            </button>
+          </div>
+
+          {vista === 'mesa' && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+              <div style={{ flexShrink: 0, width: 150, display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 520, overflowY: 'auto' }}>
+                <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Equipos ({equipos.length})</span>
+                {equiposPorPuntuacion.map((eq, i) => {
+                  const activo = eq.equipoId === equipoSeleccionado.equipoId;
+                  return (
+                    <motion.a
+                      layout
+                      transition={{ type: 'spring', stiffness: 420, damping: 38 }}
+                      key={eq.equipoId}
+                      href="#"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setEquipoSeleccionadoId(eq.equipoId);
+                        setJugadorFocoId(null);
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        padding: 8,
+                        background: activo ? 'rgba(61,220,132,0.1)' : S.PANEL,
+                        border: `1px solid ${activo ? 'rgba(61,220,132,0.4)' : '#1E2723'}`,
+                        borderRadius: 9,
+                        textDecoration: 'none',
+                      }}
+                    >
+                      <span style={{ flexShrink: 0, width: 16, textAlign: 'center', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 11, color: S.MUTED_2 }}>{i + 1}</span>
+                      <span style={{ flex: 1, minWidth: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{eq.nombre}</span>
+                      <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 12, color: S.MUTED_2 }}>{formatPuntos(totalEquipo(eq.jugadores))}</span>
+                    </motion.a>
+                  );
+                })}
+              </div>
+
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
+                  <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{equipoSeleccionado.nombre}</span>
+                  <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, color: '#3DDC84' }}>{formatPuntos(totalEquipo(equipoSeleccionado.jugadores))} pts</span>
+                </div>
+
+                {jugadoresDelEquipo.map((j) => {
+                  const p = puntos.get(j.id);
+                  const definitivo = !!p?.actualizado;
+                  const enFoco = jugadorFocoId === j.id;
+                  const { partido, clave } = partidoDe(j);
+                  // 06/10 (Iñi): tercer color — AMARILLO si el partido de su
+                  // equipo se está jugando ahora; verde = terminado y puntos
+                  // actualizados; rojo = todavía sin actualizar.
+                  const enJuego = partido?.estado === 'en_juego';
+                  const colorNombre = enJuego ? COLOR_EN_JUEGO : definitivo ? S.ACCENT : S.ERROR;
+                  const detalle = textoResumen(p, partido);
+                  return (
+                    <motion.div layout transition={{ type: 'spring', stiffness: 420, damping: 38 }} key={j.id} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <a
+                        href="#"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          setJugadorFocoId((prev) => (prev === j.id ? null : j.id));
+                        }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          padding: '9px 10px',
+                          background: enFoco ? 'rgba(61,220,132,0.1)' : S.PANEL,
+                          border: `1px solid ${enFoco ? 'rgba(61,220,132,0.4)' : '#1E2723'}`,
+                          borderRadius: 9,
+                          textDecoration: 'none',
+                        }}
+                      >
+                        <Escudo url={(partido ? (partido.clave_local === clave ? partido.logo_local : partido.logo_visitante) : null) ?? escudos.get(clave) ?? escudoLaLiga(j.equipo_real)} nombre={j.equipo_real ?? '?'} tam={20} />
+                        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                          <span style={{ display: 'flex', alignItems: 'baseline', gap: 5, minWidth: 0 }}>
+                            <span
+                              style={{
+                                minWidth: 0,
+                                flexShrink: 1,
+                                fontFamily: "'Barlow Condensed', sans-serif",
+                                fontWeight: 700,
+                                fontSize: 13,
+                                color: colorNombre,
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                              }}
+                            >
+                              {j.nombre}
+                            </span>
+                            {j.posicion && <span style={{ flexShrink: 0, fontSize: 8.5, fontWeight: 700, color: S.MUTED_3 }}>{POSICION_CORTA[j.posicion] ?? ''}</span>}
+                          </span>
+                          <span style={{ fontSize: 9, color: S.MUTED_3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{detalle}</span>
+                        </div>
+                        <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 14, color: S.TEXT }}>{formatPuntos(p?.puntos_total ?? 0)}</span>
+                      </a>
+                      {enFoco && <DesglosePuntos p={p ?? null} />}
+                      {enFoco && <TarjetaPartido partido={partido} claveEquipoJugador={clave} escudos={escudos} />}
+                    </motion.div>
+                  );
+                })}
+
+                {/* Leyenda de los tres colores (pedido de Iñi, 06/10). */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', padding: '4px 2px 0' }}>
+                  {[
+                    { color: COLOR_EN_JUEGO, texto: 'Partido en juego' },
+                    { color: S.ACCENT, texto: 'Puntos actualizados' },
+                    { color: S.ERROR, texto: 'Sin actualizar' },
+                  ].map((l) => (
+                    <span key={l.texto} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9.5, color: S.MUTED_3 }}>
+                      <span style={{ width: 7, height: 7, borderRadius: 999, background: l.color, flexShrink: 0 }} />
+                      {l.texto}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {vista === 'premios' &&
+            (() => {
+              const bote = parteParaPremios(sala.buy_in) * (sala.aforo ?? equipos.length);
+              const tramos = calcularReparto(sala.tipo as TipoSala, sala.aforo, equipos.length);
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '20px 14px', background: 'rgba(240,185,77,0.1)', border: '1px solid rgba(240,185,77,0.35)', borderRadius: 12 }}>
+                    <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#C9A257' }}>Bote total</span>
+                    <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 30, color: '#F0B94D' }}>{formatEuros(bote)}</span>
+                  </div>
+                  {tramos.length === 0 && <p style={{ fontSize: 13, color: S.MUTED_2 }}>Todavía no hay suficientes equipos inscritos para calcular el reparto.</p>}
+                  {tramos.map((t, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '13px 14px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
+                      <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14, color: S.TEXT }}>{t.desde === t.hasta ? `${t.desde}º` : `${t.desde}º–${t.hasta}º`}</span>
+                      <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 14, color: '#F0B94D' }}>{formatEuros((bote * t.porcentajeCadaUno) / 100)}</span>
+                    </div>
+                  ))}
+                  <p style={{ fontSize: 10.5, color: S.MUTED_3, lineHeight: 1.4, margin: 0 }}>Prueba con dinero ficticio: el pago real de la mesa se confirma a mano.</p>
+                </div>
+              );
+            })()}
+
+          <Link href={`/salas/${sala.id}`} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '12px 24px', textDecoration: 'none', display: 'inline-flex', alignSelf: 'center' }}>
+            Volver a la mesa
+          </Link>
+          <div style={{ width: '100%', maxWidth: 420, alignSelf: 'center' }}>
+            <AnuncioVideoInline ubicacion="clasificacion" />
+          </div>
+        </div>
+      </div>
+    </main>
+  );
+}

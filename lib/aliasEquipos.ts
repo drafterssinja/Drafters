@@ -158,6 +158,29 @@ const ALIAS_EQUIPOS: Record<string, string> = {
   marsella: 'olympique de marseille',
   marseille: 'olympique de marseille',
   monaco: 'as monaco fc',
+  // Nombres tal y como los da ESPN (06/10) para los equipos de la Champions
+  // 2026-27 → nombre de football-data.org. Si alguno no encaja, aparece como
+  // "equipo sin emparejar" en /admin/resultados-futbol y se añade aquí.
+  'aek athens': 'aek athens fc',
+  'as roma': 'as roma',
+  'atletico madrid': 'club atletico de madrid',
+  'bodo glimt': 'fk bodo glimt',
+  como: 'como 1907',
+  fenerbahce: 'fenerbahce sk',
+  'lask linz': 'lask',
+  lens: 'rc lens',
+  lille: 'lille osc',
+  'feyenoord rotterdam': 'feyenoord rotterdam',
+  internazionale: 'fc internazionale milano',
+  'sabah fk': 'sabah fk',
+  'shakhtar donetsk': 'fc shakhtar donetsk',
+  'slavia prague': 'sk slavia praha',
+  'slovan bratislava': 'sk slovan bratislava',
+  'vfb stuttgart': 'vfb stuttgart',
+  'viking fk': 'viking fk',
+  'real madrid': 'real madrid cf',
+  'psv eindhoven': 'psv eindhoven',
+  'fc porto': 'fc porto',
 };
 
 /**
@@ -201,4 +224,13 @@ export function emparejarEquipo(nombreOrigen: string, candidatos: string[]): str
 // Exportado por si algún cargador necesita normalizar dos nombres sueltos
 // para compararlos sin pasar por la lista de candidatos (p.ej. detectar que
 // dos filas del mismo pegado se refieren al mismo equipo).
+/** Nombre "canónico" (normalizado) de un equipo: si es un alias conocido
+ * (p.ej. "Bayern Munich" de ESPN) devuelve el nombre de football-data.org
+ * normalizado; si no, el propio nombre normalizado. Sirve para construir una
+ * clave de equipo común entre fuentes (ver claveEquipoFutbol). */
+export function canonicoEquipo(nombre: string): string {
+  const n = normalizarEquipo(nombre);
+  return ALIAS_EQUIPOS[n] ?? n;
+}
+
 export { normalizarEquipo };

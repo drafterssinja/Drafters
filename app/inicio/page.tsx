@@ -155,6 +155,89 @@ export default function InicioPage() {
             </p>
           </div>
 
+          {/* Los dos únicos recuadros de más abajo (pedido de Iñi, 27/09):
+              izquierda = Mesas Drafters (todo lo construido hasta ahora,
+              salas + maratón, sin porras), derecha = Porras clásicas de
+              golf. Ocupan cada uno la mitad del ancho, con bastante alto
+              para que sean lo único que se vea debajo de "mis equipos". */}
+          <div style={{ display: 'flex', gap: 12 }}>
+            <Link
+              href="/mesas"
+              style={{
+                flex: 1,
+                minWidth: 0,
+                position: 'relative',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'flex-end',
+                height: 240,
+                borderRadius: 18,
+                overflow: 'hidden',
+                border: `1px solid rgba(61,220,132,0.35)`,
+                background: 'linear-gradient(135deg, #0B2318 0%, #0F3320 55%, #12452A 100%)',
+                padding: '18px 16px',
+                textDecoration: 'none',
+              }}
+            >
+              <span
+                style={{
+                  fontFamily: "'Barlow Condensed', sans-serif",
+                  fontWeight: 800,
+                  fontStyle: 'italic',
+                  fontSize: 26,
+                  lineHeight: 1.05,
+                  color: ACCENT,
+                  textShadow: '0 3px 0 rgba(0,0,0,0.45), 0 6px 16px rgba(0,0,0,0.55)',
+                }}
+              >
+                MESAS
+                <br />
+                DRAFTERS
+              </span>
+              <span style={{ marginTop: 8, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 12, color: 'rgba(245,247,245,0.75)' }}>
+                Fútbol, golf y tenis. Salas, maratón y draft de fantasía.
+              </span>
+            </Link>
+
+            <Link
+              href="/porras"
+              style={{
+                flex: 1,
+                minWidth: 0,
+                position: 'relative',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'flex-end',
+                height: 240,
+                borderRadius: 18,
+                overflow: 'hidden',
+                border: `1px solid rgba(255,122,69,0.35)`,
+                background: 'linear-gradient(135deg, #241505 0%, #3B230A 55%, #4A2A0A 100%)',
+                padding: '18px 16px',
+                textDecoration: 'none',
+              }}
+            >
+              <span
+                style={{
+                  fontFamily: "'Barlow Condensed', sans-serif",
+                  fontWeight: 800,
+                  fontStyle: 'italic',
+                  fontSize: 26,
+                  lineHeight: 1.05,
+                  color: PORRAS_COLOR,
+                  textShadow: '0 3px 0 rgba(0,0,0,0.45), 0 6px 16px rgba(0,0,0,0.55)',
+                }}
+              >
+                PORRAS
+                <br />
+                CLÁSICAS DE GOLF
+              </span>
+              <span style={{ marginTop: 8, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 12, color: 'rgba(245,247,245,0.75)' }}>
+                La porra de toda la vida: elige tu equipo por grupos.
+              </span>
+            </Link>
+          </div>
+
           {equipos.length === 0 && (
             <div
               style={{
@@ -315,88 +398,6 @@ export default function InicioPage() {
             </div>
           )}
 
-          {/* Los dos únicos recuadros de más abajo (pedido de Iñi, 27/09):
-              izquierda = Mesas Drafters (todo lo construido hasta ahora,
-              salas + maratón, sin porras), derecha = Porras clásicas de
-              golf. Ocupan cada uno la mitad del ancho, con bastante alto
-              para que sean lo único que se vea debajo de "mis equipos". */}
-          <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
-            <Link
-              href="/mesas"
-              style={{
-                flex: 1,
-                minWidth: 0,
-                position: 'relative',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'flex-end',
-                height: 240,
-                borderRadius: 18,
-                overflow: 'hidden',
-                border: `1px solid rgba(61,220,132,0.35)`,
-                background: 'linear-gradient(135deg, #0B2318 0%, #0F3320 55%, #12452A 100%)',
-                padding: '18px 16px',
-                textDecoration: 'none',
-              }}
-            >
-              <span
-                style={{
-                  fontFamily: "'Barlow Condensed', sans-serif",
-                  fontWeight: 800,
-                  fontStyle: 'italic',
-                  fontSize: 26,
-                  lineHeight: 1.05,
-                  color: ACCENT,
-                  textShadow: '0 3px 0 rgba(0,0,0,0.45), 0 6px 16px rgba(0,0,0,0.55)',
-                }}
-              >
-                MESAS
-                <br />
-                DRAFTERS
-              </span>
-              <span style={{ marginTop: 8, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 12, color: 'rgba(245,247,245,0.75)' }}>
-                Fútbol, golf y tenis. Salas, maratón y draft de fantasía.
-              </span>
-            </Link>
-
-            <Link
-              href="/porras"
-              style={{
-                flex: 1,
-                minWidth: 0,
-                position: 'relative',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'flex-end',
-                height: 240,
-                borderRadius: 18,
-                overflow: 'hidden',
-                border: `1px solid rgba(255,122,69,0.35)`,
-                background: 'linear-gradient(135deg, #241505 0%, #3B230A 55%, #4A2A0A 100%)',
-                padding: '18px 16px',
-                textDecoration: 'none',
-              }}
-            >
-              <span
-                style={{
-                  fontFamily: "'Barlow Condensed', sans-serif",
-                  fontWeight: 800,
-                  fontStyle: 'italic',
-                  fontSize: 26,
-                  lineHeight: 1.05,
-                  color: PORRAS_COLOR,
-                  textShadow: '0 3px 0 rgba(0,0,0,0.45), 0 6px 16px rgba(0,0,0,0.55)',
-                }}
-              >
-                PORRAS
-                <br />
-                CLÁSICAS DE GOLF
-              </span>
-              <span style={{ marginTop: 8, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 12, color: 'rgba(245,247,245,0.75)' }}>
-                La porra de toda la vida: elige tu equipo por grupos.
-              </span>
-            </Link>
-          </div>
         </div>
       </div>
     </main>

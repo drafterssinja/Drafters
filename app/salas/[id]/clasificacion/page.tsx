@@ -15,6 +15,7 @@ import { cargarFavoritos, alternarFavoritoEquipo } from '@/lib/favoritosEquipo';
 import { cargarFavoritosJugador } from '@/lib/favoritosJugador';
 import { cargarParesBiblioteca } from '@/lib/paresBiblioteca';
 import EstrellaFavorito from '@/components/EstrellaFavorito';
+import ClasificacionMesaFutbol from '@/components/ClasificacionMesaFutbol';
 import TablaHoyoAHoyo, { type CasillaHoyo, type FilaRondaTabla } from '@/components/TablaHoyoAHoyo';
 
 // ============================================================================
@@ -403,8 +404,14 @@ export default function SalaClasificacionPage() {
     );
   }
 
-  // Fútbol/tenis: todavía sin motor de resultados en directo (30/09,
-  // decisión explícita de Iñi — ver la cabecera de este archivo).
+  // Fútbol (06/10): clasificación con la puntuación Drafters calculada con ESPN (LaLiga y Champions).
+  // victoria/empate y marcador en vivo — ver components/ClasificacionMesaFutbol.tsx.
+  if (sala.deporte === 'futbol') {
+    return <ClasificacionMesaFutbol sala={sala} saldoLabel={saldoLabel} initials={initials} />;
+  }
+
+  // Tenis: todavía sin motor de resultados en directo (30/09, decisión
+  // explícita de Iñi — ver la cabecera de este archivo).
   if (sala.deporte !== 'golf') {
     return (
       <main style={S.mainReset}>

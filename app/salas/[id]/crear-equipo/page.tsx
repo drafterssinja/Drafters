@@ -10,6 +10,8 @@ import * as S from '@/lib/mockupStyles';
 import { EQUIPO_PRESUPUESTO, TAMANO_EQUIPO_GOLF_TENIS, FORMACIONES_FUTBOL, colorPresupuesto } from '@/lib/draftConfig';
 import { formatEuros, inicialesJugador, huecosPorLinea, lineaDePosicion, type LineaFutbol } from '@/lib/salaShared';
 import { tablaPuntuacionPorDeporte } from '@/lib/puntuaciones';
+import { escudoLaLiga, claveEquipoFutbol } from '@/lib/futbolLaLiga';
+import EscudoEquipo from '@/components/EscudoEquipo';
 
 // ============================================================================
 // CREAR EQUIPO EN UNA SALA (isCrearEquipo + isConfirmarEquipo de Main.dc.html,
@@ -97,6 +99,22 @@ export default function CrearEquipoPage() {
   const [jugadores, setJugadores] = useState<JugadorRow[]>([]);
   const [partidos, setPartidos] = useState<PartidoRow[]>([]);
   const [partidosSeleccionados, setPartidosSeleccionados] = useState<Set<string>>(new Set());
+  // Escudos de los equipos (tabla futbol_escudos, rellenada desde ESPN para
+  // LaLiga, Champions y Premier; 06/10). Si falta alguno se usa el mapa fijo.
+  const [escudosBD, setEscudosBD] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    let activo = true;
+    supabase
+      .from('futbol_escudos')
+      .select('clave,logo')
+      .then(({ data }) => {
+        if (activo) setEscudosBD(new Map(((data as { clave: string; logo: string }[]) ?? []).map((e) => [e.clave, e.logo])));
+      });
+    return () => {
+      activo = false;
+    };
+  }, []);
+  const escudoDe = (nombre: string): string | null => escudosBD.get(claveEquipoFutbol(nombre)) ?? escudoLaLiga(nombre);
   const [selected, setSelected] = useState<string[]>([]);
   const [alineacion, setAlineacion] = useState<string>('4-3-3');
   // 'info' (25/09, tercera vuelta): pantalla previa "cómo puntúan los
@@ -670,9 +688,14 @@ export default function CrearEquipoPage() {
                               cursor: 'pointer',
                             }}
                           >
-                            <span>{p.equipo_local}</span>
+                            {/* 06/10 (Iñi): escudo vs escudo en vez de los nombres. */}
+                            <span style={{ display: 'flex', justifyContent: 'center' }}>
+                              <EscudoEquipo url={escudoDe(p.equipo_local)} nombre={p.equipo_local} tam={30} />
+                            </span>
                             <span style={{ color: S.MUTED_3, fontSize: 8, fontWeight: 600 }}>vs</span>
-                            <span>{p.equipo_visitante}</span>
+                            <span style={{ display: 'flex', justifyContent: 'center' }}>
+                              <EscudoEquipo url={escudoDe(p.equipo_visitante)} nombre={p.equipo_visitante} tam={30} />
+                            </span>
                           </button>
                         );
                       })}
@@ -955,16 +978,33 @@ function PuntuacionInfoScreen({ deporte, competicion, onEntendido, onVolver }: {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#F0B94D' }}>{competicion}</span>
         <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT }}>Cómo puntúan los jugadores</h1>
-        <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>Todas las formas de puntuar, antes de elegir tu equipo.</p>
+        <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>
+          Todas las formas de puntuar, antes de elegir tu equipo.
+        </p>
       </div>
+
+      {deporte === 'futbol' && (
+        <div style={{ background: S.PANEL, border: `1px solid ${S.BORDER}`, borderRadius: 12, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <p style={{ fontSize: 12.5, color: S.MUTED, lineHeight: 1.55, margin: 0 }}>
+            Cada jugador suma puntos por lo que hace en <strong style={{ color: S.TEXT }}>su partido</strong> de la jornada, en tiempo real, y tu equipo puntúa la suma de sus 11 jugadores. Los puntos por <strong style={{ color: S.TEXT }}>portería a cero, victoria del equipo y partido completo</strong> se suman cuando el partido termina.
+          </p>
+          <p style={{ fontSize: 12.5, color: S.MUTED, lineHeight: 1.55, margin: 0 }}>
+            Las acciones marcadas como <strong style={{ color: '#F0B94D' }}>Próximamente</strong> todavía no se leen de la fuente de datos y no se tienen en cuenta.
+          </p>
+        </div>
+      )}
 
       {tablas.map((tabla) => (
         <div key={tabla.titulo} style={{ background: S.PANEL, border: `1px solid ${S.BORDER}`, borderRadius: 12, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 12, color: S.TEXT, marginBottom: 4 }}>{tabla.titulo}</span>
           {tabla.filas.map((fila) => (
-            <div key={fila.accion} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '4px 0', borderTop: `1px solid ${S.BORDER}` }}>
+            <div key={fila.accion} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '4px 0', borderTop: `1px solid ${S.BORDER}`, opacity: fila.proximamente ? 0.6 : 1 }}>
               <span style={{ fontSize: 12.5, color: S.MUTED }}>{fila.accion}</span>
-              <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 13, color: '#F0B94D' }}>{fila.puntos}</span>
+              {fila.proximamente ? (
+                <span style={{ flexShrink: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10.5, color: '#F0B94D', border: '1px solid rgba(240,185,77,0.4)', borderRadius: 999, padding: '2px 8px' }}>Próximamente</span>
+              ) : (
+                <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 13, color: '#F0B94D' }}>{fila.puntos}</span>
+              )}
             </div>
           ))}
         </div>

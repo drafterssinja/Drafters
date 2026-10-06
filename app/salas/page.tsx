@@ -61,6 +61,7 @@ function SalasPageInner() {
   const [tipo, setTipo] = useState<TipoSala | 'todas'>('todas');
   const [buyin, setBuyin] = useState<NivelBuyIn | 'cualquiera'>('cualquiera');
   const [plazas, setPlazas] = useState<PlazasFiltro>('cualquiera');
+  const [filtroAbierto, setFiltroAbierto] = useState<'tipo' | 'buyin' | 'plazas' | null>(null);
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortAsc, setSortAsc] = useState(true);
 
@@ -267,6 +268,49 @@ function SalasPageInner() {
     );
   }
 
+  const PLAZAS_LABELS: Record<PlazasFiltro, string> = { cualquiera: 'Cualquiera', libres: 'Con plazas libres', casi: 'Casi llenas' };
+  const filtrosDesplegables: {
+    id: 'tipo' | 'buyin' | 'plazas';
+    titulo: string;
+    activo: boolean;
+    opciones: { valor: string; etiqueta: string; seleccionada: boolean; aplicar: () => void }[];
+  }[] = [
+    {
+      id: 'tipo',
+      titulo: tipo === 'todas' ? 'Tipo de sala' : TIPO_SALA_LABELS[tipo],
+      activo: tipo !== 'todas',
+      opciones: [
+        { valor: 'todas', etiqueta: 'Todas', seleccionada: tipo === 'todas', aplicar: () => setTipo('todas') },
+        ...TIPOS_SALA_FIJA.map((t) => ({ valor: t, etiqueta: TIPO_SALA_LABELS[t], seleccionada: tipo === t, aplicar: () => setTipo(t) })),
+      ],
+    },
+    {
+      id: 'buyin',
+      titulo: buyin === 'cualquiera' ? 'Buy-in' : BUYIN_LABELS[buyin],
+      activo: buyin !== 'cualquiera',
+      opciones: [
+        { valor: 'cualquiera', etiqueta: 'Cualquiera', seleccionada: buyin === 'cualquiera', aplicar: () => setBuyin('cualquiera') },
+        ...(Object.keys(BUYIN_LABELS) as NivelBuyIn[]).map((nivel) => ({
+          valor: nivel,
+          etiqueta: BUYIN_LABELS[nivel],
+          seleccionada: buyin === nivel,
+          aplicar: () => setBuyin(nivel),
+        })),
+      ],
+    },
+    {
+      id: 'plazas',
+      titulo: plazas === 'cualquiera' ? 'Jugadores inscritos' : PLAZAS_LABELS[plazas],
+      activo: plazas !== 'cualquiera',
+      opciones: (['cualquiera', 'libres', 'casi'] as PlazasFiltro[]).map((p) => ({
+        valor: p,
+        etiqueta: PLAZAS_LABELS[p],
+        seleccionada: plazas === p,
+        aplicar: () => setPlazas(p),
+      })),
+    },
+  ];
+
   return (
     <main style={S.mainReset}>
       <div style={S.pageFrame}>
@@ -285,47 +329,69 @@ function SalasPageInner() {
             ))}
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <span style={S.sectionLabel}>Tipo de sala</span>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              <button type="button" onClick={() => setTipo('todas')} style={pillButtonStyle(tipo === 'todas')}>
-                Todas
-              </button>
-              {TIPOS_SALA_FIJA.map((t) => (
-                <button key={t} type="button" onClick={() => setTipo(t)} style={pillButtonStyle(tipo === t)}>
-                  {TIPO_SALA_LABELS[t]}
+          {/* 06/10 (Iñi): los tres filtros van en UNA fila de pestañitas
+              desplegables, cerradas hasta que se pulsan. Al elegir una opción
+              se aplica el filtro y el desplegable se cierra. */}
+          <div style={{ position: 'relative' }}>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {filtrosDesplegables.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setFiltroAbierto(filtroAbierto === f.id ? null : f.id)}
+                  style={chipFiltroStyle(f.activo, filtroAbierto === f.id)}
+                >
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.titulo}</span>
+                  <span style={{ fontSize: 9, flexShrink: 0 }}>{filtroAbierto === f.id ? '▲' : '▼'}</span>
                 </button>
               ))}
             </div>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <span style={S.sectionLabel}>Buy-in</span>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              <button type="button" onClick={() => setBuyin('cualquiera')} style={pillButtonStyle(buyin === 'cualquiera')}>
-                Cualquiera
-              </button>
-              {(Object.keys(BUYIN_LABELS) as NivelBuyIn[]).map((nivel) => (
-                <button key={nivel} type="button" onClick={() => setBuyin(nivel)} style={pillButtonStyle(buyin === nivel)}>
-                  {BUYIN_LABELS[nivel]}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <span style={S.sectionLabel}>Jugadores inscritos</span>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              <button type="button" onClick={() => setPlazas('cualquiera')} style={pillButtonStyle(plazas === 'cualquiera')}>
-                Cualquiera
-              </button>
-              <button type="button" onClick={() => setPlazas('libres')} style={pillButtonStyle(plazas === 'libres')}>
-                Con plazas libres
-              </button>
-              <button type="button" onClick={() => setPlazas('casi')} style={pillButtonStyle(plazas === 'casi')}>
-                Casi llenas
-              </button>
-            </div>
+            {filtroAbierto && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 6px)',
+                  left: 0,
+                  right: 0,
+                  zIndex: 20,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 2,
+                  padding: 6,
+                  borderRadius: 12,
+                  border: `1px solid ${S.BORDER}`,
+                  background: '#101614',
+                  boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
+                }}
+              >
+                {filtrosDesplegables
+                  .find((f) => f.id === filtroAbierto)!
+                  .opciones.map((o) => (
+                    <button
+                      key={o.valor}
+                      type="button"
+                      onClick={() => {
+                        o.aplicar();
+                        setFiltroAbierto(null);
+                      }}
+                      style={{
+                        textAlign: 'left',
+                        padding: '10px 12px',
+                        borderRadius: 8,
+                        border: 'none',
+                        background: o.seleccionada ? 'rgba(61,220,132,0.12)' : 'transparent',
+                        color: o.seleccionada ? '#3DDC84' : S.TEXT,
+                        fontFamily: "'Manrope', sans-serif",
+                        fontWeight: o.seleccionada ? 700 : 500,
+                        fontSize: 14,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {o.etiqueta}
+                    </button>
+                  ))}
+              </div>
+            )}
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -387,6 +453,29 @@ function pillButtonStyle(active: boolean): CSSProperties {
     border: `1px solid ${active ? '#3DDC84' : S.BORDER}`,
     background: active ? 'rgba(61,220,132,0.12)' : 'transparent',
     color: active ? '#3DDC84' : S.MUTED,
+    cursor: 'pointer',
+  };
+}
+
+function chipFiltroStyle(activo: boolean, abierto: boolean): CSSProperties {
+  const resaltado = activo || abierto;
+  return {
+    flex: 1,
+    minWidth: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 6,
+    fontFamily: "'Barlow Condensed', sans-serif",
+    fontWeight: 700,
+    fontSize: 14,
+    textTransform: 'uppercase',
+    letterSpacing: '0.03em',
+    padding: '9px 12px',
+    borderRadius: 999,
+    border: `1px solid ${resaltado ? '#3DDC84' : S.BORDER}`,
+    background: activo ? 'rgba(61,220,132,0.12)' : 'transparent',
+    color: resaltado ? '#3DDC84' : S.MUTED,
     cursor: 'pointer',
   };
 }

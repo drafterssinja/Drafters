@@ -78,6 +78,9 @@ const TARJETAS_GESTION: { href: string; titulo: string; subtitulo: string }[] = 
   // Nueva (29/09, pedido de Iñi): porra de fútbol de Primera División por
   // jornada — ver app/admin/porras-futbol.
   { href: '/admin/porras-futbol', titulo: 'Porras de fútbol', subtitulo: 'Crear la porra de cada jornada, cargar los 10 partidos y marcar resultados' },
+  // Nueva (06/10, pedido de Iñi): puntos de LaLiga Fantasy + marcadores en
+  // vivo para las mesas de fútbol — ver app/admin/resultados-futbol.
+  { href: '/admin/resultados-futbol', titulo: 'Resultados de fútbol en vivo', subtitulo: 'Puntos Drafters con datos de ESPN (LaLiga y Champions), marcadores y emparejar jugadores' },
   { href: '/admin/rankings', titulo: 'Ranking de jugadores', subtitulo: 'Ranking mundial de golf y tenis' },
   // Nueva (29/09, pedido de Iñi): "diseña lo que haga falta para que esos
   // pagos... queden hechos" — ver app/admin/pagos-pendientes.

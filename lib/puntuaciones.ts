@@ -25,7 +25,9 @@
 // existente en la app, así que no se incluyen aquí (si algún día se monta
 // un torneo de ese formato, se añaden entonces).
 
-export type FilaPuntuacion = { accion: string; puntos: string };
+// `proximamente`: acción de la tabla que todavía no se lee de la fuente de
+// datos (ESPN no la da): se enseña con la etiqueta "Próximamente" y NO puntúa.
+export type FilaPuntuacion = { accion: string; puntos: string; proximamente?: boolean };
 export type TablaPuntuacion = { titulo: string; filas: FilaPuntuacion[] };
 
 export const PUNTUACION_FUTBOL: TablaPuntuacion[] = [
@@ -42,21 +44,23 @@ export const PUNTUACION_FUTBOL: TablaPuntuacion[] = [
       { accion: 'Disparo a puerta — defensa', puntos: '+1,5' },
       { accion: 'Disparo fuera de puerta — delantero / centrocampista', puntos: '+0,5' },
       { accion: 'Disparo fuera de puerta — defensa', puntos: '+1' },
-      { accion: 'Centro clave (acaba en remate) — centrocampista', puntos: '+1' },
-      { accion: 'Centro clave (acaba en remate) — defensa', puntos: '+1' },
+      { accion: 'Centro clave (acaba en remate) — centrocampista', puntos: '+1', proximamente: true },
+      { accion: 'Centro clave (acaba en remate) — defensa', puntos: '+1', proximamente: true },
       { accion: 'Penalti fallado — cualquier posición', puntos: '−4' },
+      { accion: 'Gol en propia puerta — cualquier posición', puntos: '−4' },
     ],
   },
   {
     titulo: 'Acciones defensivas (según posición)',
     filas: [
-      { accion: 'Entrada ganada — centrocampista / defensa', puntos: '+1' },
-      { accion: 'Pase interceptado — centrocampista', puntos: '+0,5' },
-      { accion: 'Pase interceptado — defensa', puntos: '+1' },
-      { accion: 'Despeje clave — defensa', puntos: '+0,5' },
+      { accion: 'Entrada ganada — centrocampista / defensa', puntos: '+1', proximamente: true },
+      { accion: 'Pase interceptado — centrocampista', puntos: '+0,5', proximamente: true },
+      { accion: 'Pase interceptado — defensa', puntos: '+1', proximamente: true },
+      { accion: 'Despeje clave — defensa', puntos: '+0,5', proximamente: true },
       { accion: 'Falta cometida — cualquier posición', puntos: '−0,5' },
       { accion: 'Tarjeta amarilla — cualquier posición', puntos: '−1,5' },
       { accion: 'Tarjeta roja (directa o 2ª amarilla) — cualquier posición', puntos: '−4' },
+      { accion: 'Dos amarillas (= expulsión): solo −4 en total, sin sumar las amarillas', puntos: '−4' },
     ],
   },
   {
@@ -67,7 +71,7 @@ export const PUNTUACION_FUTBOL: TablaPuntuacion[] = [
       { accion: 'Gol encajado', puntos: '−2' },
       { accion: 'Victoria del equipo', puntos: '+5' },
       { accion: 'Penalti parado', puntos: '+5' },
-      { accion: 'Salida aérea ganada', puntos: '+0,5' },
+      { accion: 'Salida aérea ganada', puntos: '+0,5', proximamente: true },
     ],
   },
   {
@@ -82,13 +86,13 @@ export const PUNTUACION_FUTBOL: TablaPuntuacion[] = [
     titulo: 'Defensas (bonus adicional)',
     filas: [
       { accion: 'Portería a cero (60+ minutos jugados)', puntos: '+4' },
-      { accion: 'Duelo aéreo ganado', puntos: '+0,3' },
+      { accion: 'Duelo aéreo ganado', puntos: '+0,3', proximamente: true },
     ],
   },
   {
     titulo: 'Bonus para todos los jugadores',
     filas: [
-      { accion: 'MVP del partido', puntos: '+3' },
+      { accion: 'MVP del partido', puntos: '+3', proximamente: true },
       { accion: 'Hat-trick (3 goles en el mismo partido)', puntos: '+5 adicionales' },
       { accion: 'Doblete (2 goles en el mismo partido)', puntos: '+2 adicionales' },
       { accion: 'Partido completo jugado (90 min.)', puntos: '+1' },
