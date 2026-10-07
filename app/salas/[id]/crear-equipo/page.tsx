@@ -45,6 +45,8 @@ type SalaRow = {
   fecha_limite_inscripcion: string | null;
 };
 
+type EquipoHecho = { id: string; etiqueta: string; jugadores: string[]; alineacion: string | null };
+
 type JugadorRow = { id: string; nombre: string; posicion: string | null; precio: number; lesionado: boolean; equipo_real: string | null; baja?: boolean };
 type PartidoRow = { equipo_local: string; equipo_visitante: string; cuota_1: number; cuota_x: number; cuota_2: number };
 
@@ -122,6 +124,14 @@ export default function CrearEquipoPage() {
   const escudoAlternativo = (nombre: string): string | null => escudoLaLiga(esEquipoFilial(nombre) ? nombrePrimerEquipo(nombre) : nombre);
   const [selected, setSelected] = useState<string[]>([]);
   const [alineacion, setAlineacion] = useState<string>('4-3-3');
+  // Equipos ya hechos por el usuario en OTRAS mesas de esta misma jornada /
+  // torneo (07/10, pedido de Iñi): se pueden repetir sin montarlos de cero. Son
+  // los equipos de la tabla `equipos` (se guardan solos al inscribirse); como
+  // cada jornada/torneo tiene sus propios jugadores y precios, solo se ofrecen
+  // los de la misma competición — la jornada siguiente ya no aparecen.
+  const [equiposHechos, setEquiposHechos] = useState<EquipoHecho[]>([]);
+  const [equipoHechoElegido, setEquipoHechoElegido] = useState('');
+  const [avisoEquipoHecho, setAvisoEquipoHecho] = useState<string | null>(null);
   // 'info' (25/09, tercera vuelta): pantalla previa "cómo puntúan los
   // jugadores" que se ve siempre antes de la selección — pedido de Iñi
   // "para que la gente se vaya conociéndolo" — con un botón "Entendido" que
@@ -197,7 +207,7 @@ export default function CrearEquipoPage() {
         return;
       }
 
-      const [{ data: misEquiposData }, { data: jugData }, { data: partidosData }, { data: equipoEditandoData }] = await Promise.all([
+      const [{ data: misEquiposData }, { data: jugData }, { data: partidosData }, { data: equipoEditandoData }, { data: hechosData }] = await Promise.all([
         supabase.from('equipos').select('id, inscripciones(estado)').eq('sala_id', salaId).eq('usuario_id', session.user.id),
         supabase.from('jugadores').select('id,nombre,posicion,precio,lesionado,equipo_real,baja').eq('deporte', salaRow.deporte).eq('competicion', salaRow.competicion).order('precio', { ascending: false }),
         salaRow.deporte === 'futbol'
@@ -219,6 +229,14 @@ export default function CrearEquipoPage() {
               .eq('usuario_id', session.user.id)
               .maybeSingle()
           : Promise.resolve({ data: null as { id: string; jugadores: string[]; alineacion: string | null } | null }),
+        supabase
+          .from('equipos')
+          .select('id, nombre_equipo, jugadores, alineacion, sala_id, created_at, salas!inner(nombre, competicion, deporte, aforo)')
+          .eq('usuario_id', session.user.id)
+          .neq('sala_id', salaId)
+          .eq('salas.competicion', salaRow.competicion)
+          .eq('salas.deporte', salaRow.deporte)
+          .order('created_at', { ascending: false }),
       ]);
 
       if (!activo) return;
@@ -251,6 +269,23 @@ export default function CrearEquipoPage() {
           router.replace(`/salas/${salaId}`);
           return;
         }
+      }
+
+      {
+        type FilaHecho = { id: string; nombre_equipo: string | null; jugadores: string[] | null; alineacion: string | null; salas: { nombre: string; aforo: number | null } | { nombre: string; aforo: number | null }[] | null };
+        const vistos = new Set<string>();
+        const hechos: EquipoHecho[] = [];
+        for (const e of (hechosData as FilaHecho[] | null) ?? []) {
+          const jugs = Array.isArray(e.jugadores) ? e.jugadores : [];
+          if (jugs.length === 0) continue;
+          const firma = `${[...jugs].sort().join(',')}|${e.alineacion ?? ''}`;
+          if (vistos.has(firma)) continue; // el mismo equipo en varias mesas: una sola vez
+          vistos.add(firma);
+          const s0 = Array.isArray(e.salas) ? e.salas[0] : e.salas;
+          const mesa = s0 ? `${s0.nombre}${s0.aforo ? ` (${s0.aforo} jugadores)` : ''}` : 'otra mesa';
+          hechos.push({ id: e.id, etiqueta: `${e.nombre_equipo ? `${e.nombre_equipo} · ` : ''}equipo de ${mesa}`, jugadores: jugs, alineacion: e.alineacion });
+        }
+        setEquiposHechos(hechos);
       }
 
       setSala(salaRow);
@@ -475,7 +510,7 @@ export default function CrearEquipoPage() {
   const tarjetaTopRef = useRef<HTMLDivElement | null>(null);
   const [altoTarjetaTop, setAltoTarjetaTop] = useState(76);
   useEffect(() => {
-    if (!isFutbol || step !== 'draft') return;
+    if (step !== 'draft' || cargando) return;
     const el = tarjetaTopRef.current;
     if (!el) return;
     const medir = () => setAltoTarjetaTop(el.offsetHeight);
@@ -483,7 +518,33 @@ export default function CrearEquipoPage() {
     const observer = new ResizeObserver(medir);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [isFutbol, step]);
+  }, [step, cargando]);
+
+  // 07/10 (Iñi): "la pestaña del presupuesto que te queda tiene que quedar fija
+  // en la parte superior". El `position: sticky` no la mantenía siempre a la
+  // vista, así que en cuanto su sitio sale por arriba de la pantalla pasa a
+  // `position: fixed` (arriba del todo, mismo ancho que la app) y se deja un
+  // hueco de su misma altura para que la lista no salte. Vale para los tres deportes.
+  const marcaTarjetaRef = useRef<HTMLDivElement | null>(null);
+  const [tarjetaFija, setTarjetaFija] = useState(false);
+  useEffect(() => {
+    if (step !== 'draft' || cargando) {
+      setTarjetaFija(false);
+      return;
+    }
+    const comprobar = () => {
+      const marca = marcaTarjetaRef.current;
+      if (!marca) return;
+      setTarjetaFija(marca.getBoundingClientRect().top < 0);
+    };
+    comprobar();
+    window.addEventListener('scroll', comprobar, { passive: true });
+    window.addEventListener('resize', comprobar);
+    return () => {
+      window.removeEventListener('scroll', comprobar);
+      window.removeEventListener('resize', comprobar);
+    };
+  }, [step, cargando]);
 
   // Alto REAL visible (en el móvil 100vh incluye la barra del navegador y las
   // columnas quedaban tapadas por la barra inferior).
@@ -517,7 +578,20 @@ export default function CrearEquipoPage() {
   }, [isFutbol, step, cargando]);
 
   const altoColumnas = `${Math.max(180, altoVentana - altoTarjetaTop - 12 - altoBarraInferior)}px`;
-  const topColumnas = altoTarjetaTop + 4;
+  const topColumnas = altoTarjetaTop + 4; // las columnas se pegan justo debajo de la tarjeta fija
+
+  function usarEquipoHecho(id: string) {
+    setEquipoHechoElegido(id);
+    setAvisoEquipoHecho(null);
+    const e = equiposHechos.find((x) => x.id === id);
+    if (!e) return;
+    const disponibles = new Set(jugadores.map((j) => j.id));
+    const validos = e.jugadores.filter((jid) => disponibles.has(jid));
+    if (isFutbol && e.alineacion) setAlineacion(e.alineacion);
+    setSelected(validos);
+    const fuera = e.jugadores.length - validos.length;
+    if (fuera > 0) setAvisoEquipoHecho(`${fuera === 1 ? 'Un jugador de ese equipo ya no está disponible (baja)' : `${fuera} jugadores de ese equipo ya no están disponibles (bajas)`}: elige quién le sustituye.`);
+  }
 
   function cambiarFormacion(nuevaAlineacion: string) {
     const nuevosHuecos = huecosPorLinea(nuevaAlineacion);
@@ -660,11 +734,19 @@ export default function CrearEquipoPage() {
                 </div>
               </div>
 
-              <div ref={tarjetaTopRef} style={{ position: 'sticky', top: 0, zIndex: 5, background: S.BG, paddingTop: 2, paddingBottom: 4, margin: '0 -20px', paddingLeft: 20, paddingRight: 20 }}>
+              <div ref={marcaTarjetaRef} style={{ height: tarjetaFija ? altoTarjetaTop : 0, margin: tarjetaFija ? 0 : '0 0 -8px' }} aria-hidden="true" />
+              <div
+                ref={tarjetaTopRef}
+                style={
+                  tarjetaFija
+                    ? { position: 'fixed', top: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 'var(--page-max-width)', zIndex: 30, background: S.BG, paddingTop: 6, paddingBottom: 4, paddingLeft: 20, paddingRight: 20, boxSizing: 'border-box' }
+                    : { position: 'relative', zIndex: 5, background: S.BG, paddingTop: 2, paddingBottom: 4, margin: '0 -20px', paddingLeft: 20, paddingRight: 20 }
+                }
+              >
                 <div style={{ background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10, padding: '7px 12px 8px', display: 'flex', flexDirection: 'column', gap: 4, boxShadow: '0 10px 14px -8px rgba(0,0,0,0.5)' }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
                     <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_2 }}>Presupuesto disponible</span>
-                    <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 21, lineHeight: 1, color }}>{formatEuros(restante)}</span>
+                    <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 27, lineHeight: 1, color }}>{formatEuros(restante)}</span>
                     <span style={{ fontSize: 10.5, color: S.MUTED_3, whiteSpace: 'nowrap' }}>
                       {selected.length}/{isFutbol ? totalHuecos : TAMANO_EQUIPO_GOLF_TENIS} elegidos
                     </span>
@@ -672,12 +754,60 @@ export default function CrearEquipoPage() {
                   <div style={{ height: 4, borderRadius: 999, background: '#1B2420', overflow: 'hidden' }}>
                     <div style={{ height: '100%', width: `${spentPct}%`, background: color, borderRadius: 999 }} />
                   </div>
+                  {/* Media disponible por jugador que falta (07/10, pedido de Iñi):
+                      "si te quedan 7 jugadores y 70.000 €, que te diga que tienes
+                      una media de 10.000 € para gastar" — se recalcula con cada fichaje. */}
+                  {(() => {
+                    const faltan = (isFutbol ? totalHuecos : TAMANO_EQUIPO_GOLF_TENIS) - selected.length;
+                    if (faltan <= 0) {
+                      return <span style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12.5, fontWeight: 700, color: overBudget ? '#FF5C5C' : '#3DDC84' }}>{overBudget ? 'Equipo completo, pero te has pasado del presupuesto' : 'Equipo completo'}</span>;
+                    }
+                    const media = Math.max(0, restante) / faltan;
+                    return (
+                      <span style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12.5, fontWeight: 600, color: S.TEXT, lineHeight: 1.3 }}>
+                        Te {faltan === 1 ? 'falta 1 jugador' : `faltan ${faltan} jugadores`}: tienes una media de{' '}
+                        <strong style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 17, color: restante <= 0 ? '#FF5C5C' : '#F0B94D' }}>{formatEuros(Math.floor(media))}</strong>{' '}
+                        {faltan === 1 ? 'para gastar' : 'por jugador'}
+                      </span>
+                    );
+                  })()}
                 </div>
               </div>
 
               {overBudget && (
                 <div style={{ background: 'rgba(255,92,92,0.1)', border: '1px solid rgba(255,92,92,0.35)', borderRadius: 10, padding: '8px 12px' }}>
                   <span style={{ fontSize: 11, color: '#FF5C5C', fontWeight: 600 }}>Te has pasado del presupuesto de {formatEuros(EQUIPO_PRESUPUESTO)}. No podrás inscribir este equipo hasta que bajes del límite.</span>
+                </div>
+              )}
+
+              {equiposHechos.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <select
+                    value={equipoHechoElegido}
+                    onChange={(e) => usarEquipoHecho(e.target.value)}
+                    aria-label="Repetir un equipo que ya has hecho en esta jornada"
+                    style={{
+                      width: '100%',
+                      fontFamily: "'Manrope', sans-serif",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      color: equipoHechoElegido ? S.TEXT : '#F0B94D',
+                      background: 'rgba(240,185,77,0.08)',
+                      border: '1px solid rgba(240,185,77,0.45)',
+                      borderRadius: 10,
+                      padding: '10px 12px',
+                    }}
+                  >
+                    <option value="" disabled>
+                      {isFutbol ? 'Repite un equipo que ya has hecho en esta jornada' : 'Repite un equipo que ya has hecho en este torneo'}
+                    </option>
+                    {equiposHechos.map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.etiqueta}
+                      </option>
+                    ))}
+                  </select>
+                  {avisoEquipoHecho && <span style={{ fontSize: 11, color: '#F0B94D' }}>{avisoEquipoHecho}</span>}
                 </div>
               )}
 
@@ -853,7 +983,7 @@ export default function CrearEquipoPage() {
                     )}
                   </div>
 
-                  <div style={{ flexShrink: 0, width: 96, display: 'flex', flexDirection: 'column', gap: 6, position: 'sticky', top: 128 }}>
+                  <div style={{ flexShrink: 0, width: 96, display: 'flex', flexDirection: 'column', gap: 6, position: 'sticky', top: altoTarjetaTop + 8 }}>
                     <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3, textAlign: 'center' }}>Tu equipo</span>
                     {Array.from({ length: TAMANO_EQUIPO_GOLF_TENIS }).map((_, i) => {
                       const j = seleccionados[i];
