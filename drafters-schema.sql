@@ -1046,59 +1046,63 @@ revoke all on function public.consolidar_salas_incompletas() from public, anon, 
 -- respeta en el conteo de estadísticas del admin (ver app/admin/page.tsx).
 
 -- ============================================================================
--- DISPONIBILIDAD DE MESAS: al cerrarse una sala, se regeneran del mismo tipo
+-- MESA LLENA → SE CREA OTRA IGUAL Y VACÍA (07/10, pedido de Iñi)
 -- ============================================================================
--- Pedido por Iñi: nunca puede haber un único formato de mesa disponible —
--- si a alguien no le convence la mesa que ve (por los rivales, el buy-in...)
--- tiene que poder elegir otra igual. Por eso, cada vez que una sala pasa a
--- 'finalizada', este disparador crea automáticamente mesas nuevas y vacías
--- del mismo deporte + tipo + competición hasta que vuelva a haber al menos
--- MINIMO_ABIERTAS abiertas (contando las que ya hubiera, sin contar la que
--- se acaba de cerrar) — cubre tanto "reponer la que se cierra" como
--- "asegurar que siempre haya más de una a la vez".
+-- "Cuando una mesa Drafters de fútbol o de golf se complete, automáticamente se
+-- genere una nueva exactamente igual que la que ya se ha completado, pero vacía."
 --
--- Excepción: 'maraton'. Es una sala única de inscripción abierta por
--- torneo/jornada (igual que una porra clásica, no como el resto de tipos,
--- que son varias mesas en paralelo) — no tiene sentido clonarla al
--- cerrarse, así que este disparador la ignora por completo.
+-- Sustituye al disparador antiguo trg_salas_mantener_disponibles, que clonaba
+-- las mesas al FINALIZAR (al terminar la jornada/torneo), creando mesas vacías
+-- sin fecha límite en competiciones ya acabadas. Ahora:
+--   - Se dispara cuando una mesa pasa a 'completa'.
+--   - Crea UNA mesa nueva idéntica (nombre, deporte, competición, tipo, aforo,
+--     importe, fecha límite, publicada, circuito) y vacía.
+--   - No se crea si ya ha pasado la fecha límite de inscripción, si es
+--     Maratón (no tiene aforo), o si ya hay otra mesa igual con hueco
+--     (abierta o casi llena) — así no se duplican si alguien se desapunta y
+--     la mesa se vuelve a llenar.
+-- Ejecutar una vez. No hace falta volver a desplegar la app.
+
 create or replace function public.mantener_mesas_disponibles()
 returns trigger
 language plpgsql
+security definer
+set search_path = public
 as $$
-declare
-  minimo_abiertas constant int := 2;
-  abiertas_restantes int;
-  faltan int;
 begin
-  if new.tipo = 'maraton' then
+  if new.tipo = 'maraton' or new.aforo is null then
+    return new;
+  end if;
+  if not (new.estado = 'completa' and old.estado is distinct from 'completa') then
+    return new;
+  end if;
+  if new.fecha_limite_inscripcion is not null and new.fecha_limite_inscripcion <= now() then
+    return new;
+  end if;
+  if exists (
+    select 1 from public.salas s
+     where s.id <> new.id
+       and s.deporte = new.deporte
+       and s.competicion = new.competicion
+       and s.tipo = new.tipo
+       and s.aforo = new.aforo
+       and s.buy_in = new.buy_in
+       and s.estado in ('abierta', 'casi_llena')
+  ) then
     return new;
   end if;
 
-  if new.estado = 'finalizada' and old.estado is distinct from 'finalizada' then
-    select count(*) into abiertas_restantes
-    from public.salas
-    where deporte = new.deporte
-      and tipo = new.tipo
-      and competicion = new.competicion
-      and estado in ('abierta', 'casi_llena')
-      and id <> new.id;
-
-    -- greatest(...,1): como mínimo, siempre se repone la que se cierra.
-    faltan := greatest(minimo_abiertas - abiertas_restantes, 1);
-
-    for i in 1..faltan loop
-      insert into public.salas (nombre, deporte, competicion, tipo, aforo, buy_in, estado)
-      values (new.nombre, new.deporte, new.competicion, new.tipo, new.aforo, new.buy_in, 'abierta');
-    end loop;
-  end if;
+  insert into public.salas (nombre, deporte, competicion, tipo, aforo, buy_in, estado, fecha_limite_inscripcion, publicada, circuito)
+  values (new.nombre, new.deporte, new.competicion, new.tipo, new.aforo, new.buy_in, 'abierta', new.fecha_limite_inscripcion, new.publicada, new.circuito);
   return new;
 end;
 $$;
 
 drop trigger if exists trg_salas_mantener_disponibles on public.salas;
 create trigger trg_salas_mantener_disponibles
-  after update on public.salas
+  after update of estado on public.salas
   for each row execute function public.mantener_mesas_disponibles();
+
 
 -- ============================================================================
 -- ROW LEVEL SECURITY — cada usuario solo ve y toca sus propios datos;

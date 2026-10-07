@@ -7,15 +7,17 @@
 --
 -- ORDEN: ejecutar ESTE archivo (una vez) y después desplegar la app.
 --
--- SE QUEDAN (de 10 €):
+-- SE QUEDAN (de 10, 25 y 50 €, una de cada tipo — ampliado el 07/10):
 --   Doble o Nada de 2 y de 4 jugadores · Triple o Nada de 3 y de 6 ·
---   Oro y Plata de 5 · Tridente de 10 · Maratón.
+--   Oro y Plata de 5 · Tridente de 10 · y el Maratón (solo 10 €).
+-- Es IDEMPOTENTE: se puede ejecutar aunque ya se ejecutara la versión anterior
+-- (la de solo 10 €); en ese caso solo añade las mesas de 25 y 50 que falten.
 -- SE BORRAN: el resto de mesas de golf NO finalizadas (otros importes, otros
 --   aforos, otros tipos). Las FINALIZADAS no se tocan (premios ya repartidos).
 --   No toca el tenis ni las porras de golf (que no son mesas).
 -- Las mesas que se quedan conservan sus inscritos.
--- Antes de borrar, completa las competiciones abiertas (golf y fútbol) con las
--- mesas del conjunto acordado que les falten, entre ellas la nueva Tridente.
+-- Antes de borrar, completa las competiciones abiertas (golf y fútbol, plazo
+-- vigente) con las mesas del conjunto que les falten: cada tipo a 10, 25 y 50 €.
 
 do $$
 declare
@@ -25,7 +27,7 @@ begin
   --    todavía vigente) con las mesas que les falten del conjunto acordado, entre
   --    ellas la nueva Tridente de 10 jugadores y 3 ganadores.
   insert into public.salas (nombre, deporte, competicion, tipo, aforo, buy_in, fecha_limite_inscripcion, publicada, circuito)
-  select v.nombre, c.deporte, c.competicion, v.tipo, v.aforo, 10, c.fecha_limite_inscripcion, c.publicada, c.circuito
+  select v.nombre || ' · ' || b.buy_in || '€', c.deporte, c.competicion, v.tipo, v.aforo, b.buy_in, c.fecha_limite_inscripcion, c.publicada, c.circuito
     from (
       select distinct on (deporte, competicion) deporte, competicion, fecha_limite_inscripcion, publicada, circuito
         from public.salas
@@ -35,17 +37,18 @@ begin
        order by deporte, competicion, created_at
     ) c
     cross join (values
-      ('Doble o Nada · 10€',  'doble_o_nada',  2),
-      ('Doble o Nada · 10€',  'doble_o_nada',  4),
-      ('Triple o Nada · 10€', 'triple_o_nada', 3),
-      ('Triple o Nada · 10€', 'triple_o_nada', 6),
-      ('Oro y Plata · 10€',   'oro_y_plata',   5),
-      ('Tridente · 10€',      'tridente',      10)
+      ('Doble o Nada',  'doble_o_nada',  2),
+      ('Doble o Nada',  'doble_o_nada',  4),
+      ('Triple o Nada', 'triple_o_nada', 3),
+      ('Triple o Nada', 'triple_o_nada', 6),
+      ('Oro y Plata',   'oro_y_plata',   5),
+      ('Tridente',      'tridente',      10)
     ) as v(nombre, tipo, aforo)
+    cross join (values (10), (25), (50)) as b(buy_in)
    where not exists (
      select 1 from public.salas t
       where t.deporte = c.deporte and t.competicion = c.competicion
-        and t.tipo = v.tipo and t.aforo = v.aforo and t.buy_in = 10
+        and t.tipo = v.tipo and t.aforo = v.aforo and t.buy_in = b.buy_in
    );
 
   -- 1) Reembolso íntegro a las inscripciones activas de las mesas que se borran.
@@ -57,8 +60,8 @@ begin
      where s.deporte = 'golf'
        and s.estado <> 'finalizada'
        and not (
-         s.buy_in = 10 and (
-           s.tipo = 'maraton'
+         s.buy_in in (10, 25, 50) and (
+           (s.tipo = 'maraton' and s.buy_in = 10)
            or (s.tipo = 'doble_o_nada'  and s.aforo in (2, 4))
            or (s.tipo = 'triple_o_nada' and s.aforo in (3, 6))
            or (s.tipo = 'oro_y_plata'   and s.aforo = 5)
@@ -84,8 +87,8 @@ begin
    where s.deporte = 'golf'
      and s.estado <> 'finalizada'
      and not (
-       s.buy_in = 10 and (
-         s.tipo = 'maraton'
+       s.buy_in in (10, 25, 50) and (
+         (s.tipo = 'maraton' and s.buy_in = 10)
          or (s.tipo = 'doble_o_nada'  and s.aforo in (2, 4))
          or (s.tipo = 'triple_o_nada' and s.aforo in (3, 6))
          or (s.tipo = 'oro_y_plata'   and s.aforo = 5)
@@ -95,5 +98,5 @@ begin
 
 end $$;
 
--- Comprobación: solo deberían quedar las mesas de 10 € de los tipos acordados (y las finalizadas).
+-- Comprobación: solo deberían quedar las mesas de 10/25/50 € de los tipos acordados (y las finalizadas).
 select tipo, aforo, buy_in, estado, count(*) from public.salas where deporte = 'golf' group by tipo, aforo, buy_in, estado order by tipo, aforo;

@@ -118,6 +118,10 @@ export const MARATON_BUY_IN = 10; // provisional — sin escalones, sala única
 // fútbol y en golf. El tenis sigue con todas las variantes de arriba hasta que
 // se haga su creación automática.
 export const BUY_IN_FUTBOL = 10;
+// 07/10, pedido de Iñi: "lo mismo que hemos creado para los 10 euros, me vas a
+// crear para 25 y para 50... una de cada tipo" — fútbol y golf. El Maratón
+// sigue siendo una sola sala de 10 € por jornada/torneo.
+export const BUY_INS_REDUCIDOS: number[] = [10, 25, 50];
 export const VARIANTES_FUTBOL: { tipo: TipoSala; label: string; aforo: number }[] = [
   { tipo: 'doble_o_nada', label: 'Doble o Nada', aforo: 2 },
   { tipo: 'doble_o_nada', label: 'Doble o Nada', aforo: 4 },
@@ -151,16 +155,18 @@ export function generarSalasParaTorneo(params: {
   // Fútbol: solo el conjunto reducido de VARIANTES_FUTBOL (ver arriba) más la
   // sala Maratón (decisión de Iñi 06/10: "mesas solo de 10€, pero que sí haya Maratón").
   if (deporte === 'futbol' || deporte === 'golf') {
-    const mesas = VARIANTES_FUTBOL.map(
-      (v): SalaNueva => ({
-        nombre: `${v.label} · ${BUY_IN_FUTBOL}€`,
-        deporte,
-        competicion: competicionLabel,
-        tipo: v.tipo,
-        aforo: v.aforo,
-        buy_in: BUY_IN_FUTBOL,
-        fecha_limite_inscripcion: fechaLimiteIso,
-      })
+    const mesas = BUY_INS_REDUCIDOS.flatMap((buyIn) =>
+      VARIANTES_FUTBOL.map(
+        (v): SalaNueva => ({
+          nombre: `${v.label} · ${buyIn}€`,
+          deporte,
+          competicion: competicionLabel,
+          tipo: v.tipo,
+          aforo: v.aforo,
+          buy_in: buyIn,
+          fecha_limite_inscripcion: fechaLimiteIso,
+        })
+      )
     );
     mesas.push({
       nombre: MARATON_LABEL,
