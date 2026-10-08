@@ -38,7 +38,7 @@ type SalaRow = { id: string; nombre: string; tipo: TipoSala; aforo: number | nul
 type EquipoRow = { id: string; nombre_equipo: string | null; usuario_id: string; jugadores: string[] };
 // CAMBIO 03/10 (pedido de Iñi): el desempate del bono de podio ya no mira el
 // grupo del jugador, mira su precio — ver lib/golfScoring.ts.
-type JugadorLive = { id: string; resultado_en_vivo_total: number | null; resultado_en_vivo_posicion: string | null; precio: number };
+type JugadorLive = { id: string; resultado_en_vivo_total: number | null; resultado_en_vivo_posicion: string | null; resultado_en_vivo_thru: number | null; resultado_en_vivo_ronda: number | null; precio: number };
 type FutbolClasificacionFila = { equipo_id: string; nombre_equipo: string; aciertos: number; partidos_resueltos: number; total_partidos: number };
 
 export default function AdminLiquidarPage() {
@@ -117,7 +117,7 @@ export default function AdminLiquidarPage() {
         } else if (porraRow.competicion) {
           const { data: jugData } = await supabase
             .from('jugadores')
-            .select('id, resultado_en_vivo_total, resultado_en_vivo_posicion, precio')
+            .select('id, resultado_en_vivo_total, resultado_en_vivo_posicion, resultado_en_vivo_thru, resultado_en_vivo_ronda, precio')
             .eq('deporte', 'golf')
             .eq('competicion', porraRow.competicion);
           if (!activo) return;

@@ -154,10 +154,12 @@ export default function PorraClasificacionPage() {
   // haber una pestaña que si yo pulso la pestaña se esté restando esos
   // menos 10, menos 5, menos 3... y que si yo quito la pestaña, que se
   // elimine [de lo que se ve]". Por eso `mostrarBono` sigue existiendo
-  // (empieza en true, ya que es la regla real) y decide qué se pinta en
+  // (desde el 08/10 empieza en false, ver abajo) y decide qué se pinta en
   // esta pantalla — la liquidación real (admin/pagos-pendientes) nunca
   // depende de este estado, solo del cálculo incondicional.
-  const [mostrarBono, setMostrarBono] = useState(true);
+  // 08/10 (Iñi): "que el bono de podio venga por defecto deshabilitado" —
+  // la pantalla arranca en OFF y cada uno lo enciende si quiere verlo.
+  const [mostrarBono, setMostrarBono] = useState(false);
   // Info del bono de podio (02/10): además del interruptor de arriba, un
   // botón "i" que de primeras no muestra ningún texto y, al pasar el
   // ratón (o pulsarlo en móvil, donde no hay hover), despliega una
@@ -374,7 +376,7 @@ export default function PorraClasificacionPage() {
   // TODOS los jugadores empatados, estén o no en la misma porra.
   const mapaBonosPodio = useMemo(() => calcularBonosPodio(jugadores), [jugadores]);
   // Lo que de verdad se pinta en esta pantalla (02/10): el bono completo
-  // si `mostrarBono` está activado (el valor de partida, y lo que se
+  // si `mostrarBono` está activado (lo que se
   // aplica siempre al liquidar), o un mapa vacío si Iñi lo apaga para ver
   // la clasificación "en crudo", sin el bono restado.
   const bonosParaMostrar = useMemo(() => (mostrarBono ? mapaBonosPodio : new Map<string, number>()), [mostrarBono, mapaBonosPodio]);

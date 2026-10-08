@@ -502,7 +502,7 @@ export default function CrearEquipoPage() {
     const observer = new ResizeObserver(medir);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [isFutbol, step]);
+  }, [isFutbol, step, cargando]);
 
   // 06/10 (Iñi): pantalla más compacta. Se mide también la tarjeta fija de
   // arriba (presupuesto) para que las columnas de partidos y jugadores
@@ -1015,7 +1015,12 @@ export default function CrearEquipoPage() {
             </div>
 
             {isFutbol && (
-              <div ref={barraInferiorRef} style={{ position: 'sticky', bottom: 0, zIndex: 10, background: S.BG, borderTop: '1px solid #1E2723', boxShadow: '0 -10px 24px rgba(0,0,0,0.5)', padding: '5px 20px 6px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+              // Barra de abajo (alineación + campo + botón) FIJA en pantalla (07/10, Iñi:
+              // el botón de seguir con la inscripción siempre a la vista). El hueco de
+              // su altura evita que tape el final de la lista.
+              <>
+              <div style={{ height: altoBarraInferior }} aria-hidden="true" />
+              <div ref={barraInferiorRef} style={{ position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 'var(--page-max-width)', boxSizing: 'border-box', zIndex: 30, background: S.BG, borderTop: '1px solid #1E2723', boxShadow: '0 -10px 24px rgba(0,0,0,0.5)', padding: '5px 20px calc(6px + env(safe-area-inset-bottom))', display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, overflowX: 'auto' }}>
                   <span style={{ flexShrink: 0, fontSize: 7.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Alineación</span>
                   <div style={{ display: 'flex', gap: 4 }}>
@@ -1065,18 +1070,22 @@ export default function CrearEquipoPage() {
                   {equipoCompleto ? (overBudget ? 'Supera el presupuesto' : textoRevisar) : `Faltan ${totalHuecos - selected.length} jugadores`}
                 </button>
               </div>
+              </>
             )}
 
             {!isFutbol && (
-              <div style={{ position: 'sticky', bottom: 0, padding: '8px 20px 12px', background: 'linear-gradient(180deg, rgba(11,15,14,0) 0%, #0B0F0E 40%)' }}>
+              <>
+              <div style={{ height: 76 }} aria-hidden="true" />
+              <div style={{ position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 'var(--page-max-width)', boxSizing: 'border-box', zIndex: 30, padding: '8px 20px calc(12px + env(safe-area-inset-bottom))', background: 'linear-gradient(180deg, rgba(11,15,14,0) 0%, #0B0F0E 40%)' }}>
                 <button type="button" disabled={!puedeConfirmar} onClick={() => avanzarPaso('confirm')} style={submitButtonStyle(puedeConfirmar)}>
                   {equipoCompleto ? (overBudget ? 'Supera el presupuesto' : textoRevisar) : `Faltan ${TAMANO_EQUIPO_GOLF_TENIS - selected.length} jugadores`}
                 </button>
               </div>
+              </>
             )}
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 18, padding: '28px 20px 56px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 18, padding: `28px 20px ${tieneAccesoMesas ? 130 : 56}px` }}>
             <button type="button" onClick={volverPaso} style={backArrowStyle}>
               ←
             </button>
@@ -1132,12 +1141,34 @@ export default function CrearEquipoPage() {
               </p>
             )}
 
-            {errorEnvio && <p style={S.errorText}>{errorEnvio}</p>}
-
             {tieneAccesoMesas ? (
-              <button type="button" disabled={enviando} onClick={confirmarInscripcion} style={{ ...submitButtonStyle(true), opacity: enviando ? 0.7 : 1 }}>
-                {enviando ? (modoEdicion ? 'Guardando...' : 'Inscribiendo...') : modoEdicion ? 'Guardar cambios' : 'Confirmar inscripción'}
-              </button>
+              // Botón de confirmar FIJO abajo (07/10, Iñi: "tiene que estar fijo en la
+              // parte de abajo, que se vea; si no, alguno puede no confirmar la
+              // inscripción"). El error del envío va dentro de la barra para que se vea.
+              <div
+                style={{
+                  position: 'fixed',
+                  bottom: 0,
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  width: '100%',
+                  maxWidth: 'var(--page-max-width)',
+                  boxSizing: 'border-box',
+                  zIndex: 30,
+                  padding: '12px 20px calc(14px + env(safe-area-inset-bottom))',
+                  background: '#0B0F0E',
+                  borderTop: '1px solid #1E2723',
+                  boxShadow: '0 -10px 24px rgba(0,0,0,0.55)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 6,
+                }}
+              >
+                {errorEnvio && <p style={{ ...S.errorText, margin: 0 }}>{errorEnvio}</p>}
+                <button type="button" disabled={enviando} onClick={confirmarInscripcion} style={{ ...submitButtonStyle(true), opacity: enviando ? 0.7 : 1 }}>
+                  {enviando ? (modoEdicion ? 'Guardando...' : 'Inscribiendo...') : modoEdicion ? 'Guardar cambios' : 'Confirmar inscripción'}
+                </button>
+              </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ background: 'rgba(240,185,77,0.08)', border: '1px solid rgba(240,185,77,0.3)', borderRadius: 10, padding: '10px 12px' }}>
