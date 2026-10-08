@@ -117,7 +117,26 @@ export type JugadorParaBonoPodio = {
   resultado_en_vivo_total: number | null;
   resultado_en_vivo_posicion: string | null;
   precio: number;
+  /** Hoyos completados en la ronda actual (ver haEmpezadoTorneo). */
+  resultado_en_vivo_thru?: number | null;
+  /** Ronda en la que va el jugador (ver haEmpezadoTorneo). */
+  resultado_en_vivo_ronda?: number | null;
 };
+
+// FIX 08/10 (Iñi: "hay jugadores que salen con -2.2, ¡ni siquiera han
+// empezado!"): antes de salir al campo, Data Golf ya da a todo el campo un
+// resultado de 0 ("E", Thru 0) — y como el bono de podio se calculaba con
+// cualquiera que tuviera resultado, TODO el campo quedaba empatado en el 1er
+// puesto, el desempate por precio dejaba arriba al grupo de los más baratos
+// y se repartían entre ellos el -10/-5/-3 (-18 entre 8 = -2,2). Ahora solo
+// cuenta para el podio quien de verdad ha empezado a jugar: ha completado
+// al menos un hoyo en la ronda actual o ya va por la 2ª ronda o siguientes.
+// Si nadie ha empezado todavía, no hay bono para nadie.
+export function haEmpezadoTorneo(j: Pick<JugadorParaBonoPodio, 'resultado_en_vivo_thru' | 'resultado_en_vivo_ronda'>): boolean {
+  const thru = j.resultado_en_vivo_thru ?? 0;
+  const ronda = j.resultado_en_vivo_ronda ?? 0;
+  return thru > 0 || ronda > 1;
+}
 
 // Corrección 02/10 (Iñi detectó, probando con la porra en marcha, que al
 // jugador que iba 1º del torneo de verdad no se le estaba restando el
@@ -153,7 +172,7 @@ export function calcularBonosPodio(campo: JugadorParaBonoPodio[]): Map<string, n
   // numérica real) — de esos, el orden real lo da el resultado en vivo, no
   // la posición de ESPN (que es solo para filtrar quién sigue en pie).
   const enJuego = campo
-    .filter((j) => j.resultado_en_vivo_total !== null && sigueCompitiendo(j.resultado_en_vivo_posicion))
+    .filter((j) => j.resultado_en_vivo_total !== null && haEmpezadoTorneo(j) && sigueCompitiendo(j.resultado_en_vivo_posicion))
     .sort((a, b) => (a.resultado_en_vivo_total as number) - (b.resultado_en_vivo_total as number));
 
   let puesto = 1;

@@ -43,7 +43,7 @@ export async function liquidarPorrasGolfDeCompeticion(
 
   const { data: jugData, error: jugError } = await admin
     .from('jugadores')
-    .select('id, resultado_en_vivo_total, resultado_en_vivo_posicion, precio')
+    .select('id, resultado_en_vivo_total, resultado_en_vivo_posicion, resultado_en_vivo_thru, resultado_en_vivo_ronda, precio')
     .eq('deporte', 'golf')
     .eq('competicion', competicion);
   if (jugError) throw new Error(`No se han podido leer los jugadores de "${competicion}": ${jugError.message}`);
