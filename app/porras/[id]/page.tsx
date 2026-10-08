@@ -1,5 +1,6 @@
 'use client';
 
+import { etiquetasPosicion } from '@/lib/posicionesEmpate';
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -440,7 +441,7 @@ export default function PorraDetallePage() {
                 {signedUp} equipo{signedUp === 1 ? '' : 's'} inscrito{signedUp === 1 ? '' : 's'} · clasificación por aciertos
               </span>
               {clasificacionFutbol.length === 0 && <p style={{ fontSize: 13, color: S.MUTED_2 }}>Todavía no hay ningún equipo inscrito.</p>}
-              {clasificacionFutbol.map((c, i) => (
+              {clasificacionFutbol.map((c, i, lista) => (
                 <div key={c.equipo_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
                   <span
                     style={{
@@ -458,7 +459,7 @@ export default function PorraDetallePage() {
                       justifyContent: 'center',
                     }}
                   >
-                    {i + 1}
+                    {etiquetasPosicion(lista, (x) => x.aciertos)[i]}
                   </span>
                   <span style={{ flex: 1, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 13.5, color: S.TEXT }}>{c.nombre_equipo}</span>
                   <span style={{ fontSize: 12, fontWeight: 700, color: '#F0B94D' }}>

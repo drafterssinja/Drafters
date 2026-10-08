@@ -13,6 +13,7 @@ import { GRUPO_PORRA_LABELS, ORDEN_GRUPOS, COLOR_GRUPO, type GrupoPorra } from '
 import { formatGolfScore, calcularBonosPodio, COLOR_TIPO_RESULTADO, ETIQUETA_TIPO_RESULTADO, type TipoResultadoHoyo } from '@/lib/golfScoring';
 import { normalizarNombre } from '@/lib/nombreMatch';
 import { calcularTramosPorInscritos, repartirPremiosConEmpates, type ClasificacionEntrada } from '@/lib/repartoPremios';
+import { etiquetasPosicion, etiquetaPuestoPremio } from '@/lib/posicionesEmpate';
 import { cargarFavoritos, alternarFavoritoEquipo } from '@/lib/favoritosEquipo';
 import { cargarFavoritosJugador, alternarFavoritoJugador } from '@/lib/favoritosJugador';
 import { reproducirSonidoAviso, leerPreferenciaSonido, guardarPreferenciaSonido } from '@/lib/sonidoAviso';
@@ -414,6 +415,13 @@ export default function PorraClasificacionPage() {
       return diff !== 0 ? diff : a.createdAt.localeCompare(b.createdAt);
     });
   }, [equipos, jugadoresPorId, bonosParaMostrar]);
+  // Puesto de cada equipo con "T" si hay empate (08/10, ver lib/posicionesEmpate.ts).
+  const etiquetasEquipos = useMemo(
+    () => etiquetasPosicion(equiposOrdenados, (eq) => totalEquipo(eq.jugadores, jugadoresPorId, bonosParaMostrar)),
+    [equiposOrdenados, jugadoresPorId, bonosParaMostrar]
+  );
+  // Igual en la vista "Torneo": jugadores empatados a golpes, "T" como en golf.
+  const etiquetasCampo = useMemo(() => etiquetasPosicion(campoOrdenado, (j) => j.resultado_en_vivo_total ?? 0), [campoOrdenado]);
 
   // Hoyo a hoyo del jugador con el foco puesto — extraído a su propia
   // función (03/10) para poder llamarla también desde el refresco
@@ -503,6 +511,14 @@ export default function PorraClasificacionPage() {
   // con sonido. Usa refs para que el intervalo (creado una sola vez) lea
   // siempre el estado más reciente sin tener que recrearse.
   const sonidoActivadoRef = useRef(sonidoActivado);
+  // FIX 08/10 (Iñi: "me ha saltado notificación de Hoshino, que ha hecho
+  // bogey, y no lo tengo de favorito"): los avisos salían para CUALQUIER
+  // jugador del campo. Ahora solo para los jugadores que el usuario tiene
+  // marcados como favoritos (con la estrella) en ESTA porra — los de su
+  // equipo vienen marcados de serie y los puede quitar. Ref para leer el
+  // valor actual desde dentro del intervalo.
+  const favoritosJugadorRef = useRef(favoritosJugador);
+  favoritosJugadorRef.current = favoritosJugador;
   sonidoActivadoRef.current = sonidoActivado;
   const jugadorFocoIdRef = useRef(jugadorFocoId);
   jugadorFocoIdRef.current = jugadorFocoId;
@@ -529,17 +545,19 @@ export default function PorraClasificacionPage() {
       if (idsActuales.length > 0) setPenalizacionCorte(await cargarPenalizacionCorte(idsActuales));
       const desde = ultimaRevisionRef.current;
       const ahora = new Date().toISOString();
-      if (desde && idsActuales.length > 0) {
+      // Solo favoritos de esta porra (ver favoritosJugadorRef más arriba).
+      const idsAvisables = idsActuales.filter((id) => favoritosJugadorRef.current.has(id));
+      if (desde && idsAvisables.length > 0) {
         const { data: hoyosNuevos } = await supabase
           .from('resultados_golf_hoyo')
           .select('jugador_id,tipo_resultado,actualizado_en')
-          .in('jugador_id', idsActuales)
+          .in('jugador_id', idsAvisables)
           .gt('actualizado_en', desde)
           .order('actualizado_en', { ascending: true });
 
         const nombrePorId = new Map(jugadoresNuevos.map((j) => [j.id, j.nombre]));
         ((hoyosNuevos as { jugador_id: string; tipo_resultado: TipoResultadoHoyo }[]) ?? [])
-          .filter((h) => h.tipo_resultado !== 'par')
+          .filter((h) => h.tipo_resultado !== 'par' && favoritosJugadorRef.current.has(h.jugador_id))
           .forEach((h) => {
             const nombreJugador = nombrePorId.get(h.jugador_id);
             if (!nombreJugador) return;
@@ -1026,7 +1044,7 @@ export default function PorraClasificacionPage() {
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 340, overflowY: 'auto' }}>
                   {equiposOrdenados
-                    .map((eq, i) => ({ eq, rango: i + 1 }))
+                    .map((eq, i) => ({ eq, rango: etiquetasEquipos[i] }))
                     .filter(({ eq }) => !busquedaEquipo.trim() || normalizarNombre(eq.nombreEquipo ?? '').includes(normalizarNombre(busquedaEquipo)))
                     .filter(({ eq }) => !soloFavoritos || favoritos.has(eq.equipoId))
                     .map(({ eq, rango }) => {
@@ -1054,7 +1072,7 @@ export default function PorraClasificacionPage() {
                             textDecoration: 'none',
                           }}
                         >
-                          <span style={{ flexShrink: 0, width: 14, textAlign: 'center', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 11, color: S.MUTED_2 }}>{rango}</span>
+                          <span style={{ flexShrink: 0, minWidth: 14, textAlign: 'center', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 11, color: S.MUTED_2 }}>{rango}</span>
                           <EstrellaFavorito activo={esFavorito} onToggle={() => alternarFavorito(eq.equipoId)} />
                           <span style={{ flex: 1, minWidth: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                             {eq.nombreEquipo}
@@ -1206,7 +1224,7 @@ export default function PorraClasificacionPage() {
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 380, overflowY: 'auto' }}>
                 {campoOrdenado
-                  .map((j, i) => ({ j, rango: i + 1 }))
+                  .map((j, i) => ({ j, rango: etiquetasCampo[i] }))
                   .filter(({ j }) => !busquedaJugador.trim() || normalizarNombre(j.nombre).includes(normalizarNombre(busquedaJugador)))
                   .filter(({ j }) => !soloFavoritosJugador || favoritosJugador.has(j.id))
                   .map(({ j, rango }) => {
@@ -1372,7 +1390,7 @@ export default function PorraClasificacionPage() {
                       }
                       return (
                         <div key={r.equipoId} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
-                          <span style={{ flexShrink: 0, width: 32, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, color: '#F0B94D' }}>{r.posicion}º</span>
+                          <span style={{ flexShrink: 0, width: 32, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, color: '#F0B94D' }}>{etiquetaPuestoPremio(r.posicion, repartoFinal.map((x) => x.posicion))}</span>
                           <span style={{ flex: 1, minWidth: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 13, color: S.TEXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {eq?.nombreEquipo ?? 'Equipo'}
                           </span>

@@ -11,6 +11,7 @@ import * as S from '@/lib/mockupStyles';
 import { formatEuros, posicionLabel, parteParaPremios, DEPORTE_LABELS, type Deporte } from '@/lib/salaShared';
 import { formatGolfScore, COLOR_TIPO_RESULTADO, ETIQUETA_TIPO_RESULTADO, type TipoResultadoHoyo } from '@/lib/golfScoring';
 import { calcularReparto, repartirPremiosConEmpates, type TipoSala, type ClasificacionEntrada } from '@/lib/repartoPremios';
+import { etiquetasPosicion, etiquetaPuestoPremio } from '@/lib/posicionesEmpate';
 import { cargarFavoritos, alternarFavoritoEquipo } from '@/lib/favoritosEquipo';
 import { cargarFavoritosJugador } from '@/lib/favoritosJugador';
 import { cargarParesBiblioteca } from '@/lib/paresBiblioteca';
@@ -487,8 +488,11 @@ export default function SalaClasificacionPage() {
   // Favoritos (02/10): solo tiene sentido en el Maratón — ver comentario de
   // cabecera del archivo.
   const esMaraton = sala.tipo === 'maraton';
+  // Puesto con "T" si hay empate (08/10, ver lib/posicionesEmpate.ts).
+  const etiquetasEquipos = etiquetasPosicion(equiposPorPuntuacion, (eq) => totalEquipo(eq.jugadores));
+  const etiquetasCampo = etiquetasPosicion(campoOrdenado, (j) => puntosGolf.get(j.id)?.puntos_total ?? 0);
   const equiposVisibles = equiposPorPuntuacion
-    .map((eq, i) => ({ eq, rango: i + 1 }))
+    .map((eq, i) => ({ eq, rango: etiquetasEquipos[i] }))
     .filter(({ eq }) => !esMaraton || !soloFavoritos || favoritos.has(eq.equipoId));
 
   // Desglose de los puntos Drafters del jugador (07/10): de dónde sale cada
@@ -684,7 +688,7 @@ export default function SalaClasificacionPage() {
                         textDecoration: 'none',
                       }}
                     >
-                      <span style={{ flexShrink: 0, width: esMaraton ? 14 : 16, textAlign: 'center', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 11, color: S.MUTED_2 }}>{rango}</span>
+                      <span style={{ flexShrink: 0, minWidth: esMaraton ? 14 : 16, textAlign: 'center', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 11, color: S.MUTED_2 }}>{rango}</span>
                       {esMaraton && <EstrellaFavorito activo={esFavorito} onToggle={() => alternarFavorito(eq.equipoId)} />}
                       <span style={{ flex: 1, minWidth: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {eq.nombre}
@@ -790,7 +794,7 @@ export default function SalaClasificacionPage() {
                         textDecoration: 'none',
                       }}
                     >
-                      <span style={{ flexShrink: 0, width: 20, textAlign: 'center', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 11, color: S.MUTED_2 }}>{i + 1}</span>
+                      <span style={{ flexShrink: 0, minWidth: 20, textAlign: 'center', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 11, color: S.MUTED_2 }}>{etiquetasCampo[i]}</span>
                       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
                         <span style={{ display: 'flex', alignItems: 'baseline', gap: 5, minWidth: 0 }}>
                           <span
@@ -900,7 +904,7 @@ export default function SalaClasificacionPage() {
                       }
                       return (
                         <div key={r.equipoId} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
-                          <span style={{ flexShrink: 0, width: 32, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, color: '#F0B94D' }}>{r.posicion}º</span>
+                          <span style={{ flexShrink: 0, width: 32, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, color: '#F0B94D' }}>{etiquetaPuestoPremio(r.posicion, repartoFinal.map((x) => x.posicion))}</span>
                           <span style={{ flex: 1, minWidth: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 13, color: S.TEXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {eq?.nombre ?? 'Equipo'}
                           </span>

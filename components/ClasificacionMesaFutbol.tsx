@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
 import AnuncioVideoInline from '@/components/AnuncioVideoInline';
+import { etiquetasPosicion } from '@/lib/posicionesEmpate';
 import * as S from '@/lib/mockupStyles';
 import { formatEuros, parteParaPremios } from '@/lib/salaShared';
 import { calcularReparto, type TipoSala } from '@/lib/repartoPremios';
@@ -520,6 +521,8 @@ export default function ClasificacionMesaFutbol({ sala, saldoLabel, initials }: 
     );
   }
 
+  // Puesto con "T" si hay empate (08/10, ver lib/posicionesEmpate.ts).
+  const etiquetasEquipos = etiquetasPosicion(equiposPorPuntuacion, (eq) => totalEquipo(eq.jugadores));
   const equipoSeleccionado = equiposPorPuntuacion.find((e) => e.equipoId === equipoSeleccionadoId) ?? equiposPorPuntuacion[0];
   const jugadoresDelEquipo = equipoSeleccionado.jugadores.map((id) => jugadoresPorId.get(id)).filter((j): j is JugadorF => !!j);
 
@@ -629,7 +632,7 @@ export default function ClasificacionMesaFutbol({ sala, saldoLabel, initials }: 
                         textDecoration: 'none',
                       }}
                     >
-                      <span style={{ flexShrink: 0, width: 16, textAlign: 'center', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 11, color: S.MUTED_2 }}>{i + 1}</span>
+                      <span style={{ flexShrink: 0, minWidth: 16, textAlign: 'center', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 11, color: S.MUTED_2 }}>{etiquetasEquipos[i]}</span>
                       <span style={{ flex: 1, minWidth: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{eq.nombre}</span>
                       <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 12, color: S.MUTED_2 }}>{formatPuntos(totalEquipo(eq.jugadores))}</span>
                     </motion.a>
