@@ -1,86 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import LoMasCaliente from '@/components/LoMasCaliente';
 
 const ACCENT = '#3DDC84';
-
-type SportKey = 'golf' | 'futbol' | 'tenis';
-
-const SPORT_DATA: Record<
-  SportKey,
-  {
-    contextLabel: string;
-    leaderName: string;
-    leaderContext: string;
-    leaderTotal: string;
-    leaderActions: { label: string; pts: string }[];
-    others: { rank: string; name: string; context: string; total: string; highlight: string }[];
-  }
-> = {
-  golf: {
-    contextLabel: 'Golf · Ronda 3',
-    leaderName: 'A. Ibarra',
-    leaderContext: 'Hoyo 16 · Par 5 · *ejemplo ilustrativo',
-    leaderTotal: '18 pts',
-    leaderActions: [
-      { label: 'Birdie en hoyo 13', pts: '+3' },
-      { label: 'Approach metido en hoyo 14', pts: '+1' },
-      { label: 'Putt de +30 ft. en hoyo 15', pts: '+1' },
-    ],
-    others: [
-      { rank: '2', name: 'M. Lizarraga', context: 'Hoyo 16', total: '15 pts', highlight: 'Birdie hoyo 15 +3' },
-      { rank: '3', name: 'J. Etxeberria', context: 'Hoyo 12', total: '13 pts', highlight: 'Racha sin bogeys +4' },
-    ],
-  },
-  futbol: {
-    contextLabel: 'Fútbol · Jornada 8',
-    leaderName: 'I. Etxarri',
-    leaderContext: "Real Sociedad 2-1 Athletic · Min 63' · *ejemplo ilustrativo",
-    leaderTotal: '17 pts',
-    leaderActions: [
-      { label: 'Gol marcado', pts: '+10' },
-      { label: 'Asistencia', pts: '+6' },
-      { label: 'Disparo a puerta', pts: '+1' },
-    ],
-    others: [
-      { rank: '2', name: 'B. Zabaleta', context: "Min 78'", total: '12 pts', highlight: 'Asistencia +6' },
-      { rank: '3', name: 'O. Larrea (GK)', context: "Min 90'", total: '9 pts', highlight: 'Portería a cero +5' },
-    ],
-  },
-  tenis: {
-    contextLabel: 'Tenis · ATP 500',
-    leaderName: 'C. Mendive',
-    leaderContext: 'vs L. Ansorena · Set 2, 4-3 · *ejemplo ilustrativo',
-    leaderTotal: '19 pts',
-    leaderActions: [
-      { label: 'Break conseguido', pts: '+0,75' },
-      { label: 'Game ganado', pts: '+2,5' },
-      { label: 'Ace', pts: '+0,4' },
-    ],
-    others: [
-      { rank: '2', name: 'A. Goikoetxea', context: 'Set 1, 6-4', total: '14 pts', highlight: 'Set en blanco +4' },
-      { rank: '3', name: 'P. Sagasti', context: 'Set 3, 3-2', total: '11 pts', highlight: 'Break conseguido +0,75' },
-    ],
-  },
-};
-
-function pillStyle(isActive: boolean): React.CSSProperties {
-  return {
-    fontFamily: "'Barlow Condensed', sans-serif",
-    fontWeight: 700,
-    fontSize: 14,
-    textTransform: 'uppercase',
-    letterSpacing: '0.03em',
-    padding: '9px 16px',
-    borderRadius: 999,
-    border: `1px solid ${isActive ? ACCENT : '#2A3733'}`,
-    background: isActive ? ACCENT : 'transparent',
-    color: isActive ? '#04140B' : '#AAB4AE',
-    cursor: 'pointer',
-    width: 'auto',
-  };
-}
 
 function FeatureCard({ icon, title, text }: { icon: React.ReactNode; title: string; text: string }) {
   return (
@@ -119,9 +42,6 @@ function Step({ n, title, text }: { n: number; title: string; text: string }) {
 }
 
 export default function HomePage() {
-  const [sport, setSport] = useState<SportKey>('golf');
-  const active = SPORT_DATA[sport];
-
   return (
     <main style={{ maxWidth: 'none', margin: 0, padding: 0, display: 'block' }}>
       <div style={{ width: '100%', minHeight: '100%', display: 'flex', flexDirection: 'column', background: '#0B0F0E', maxWidth: 520, marginLeft: 'auto', marginRight: 'auto' }}>
@@ -162,69 +82,8 @@ export default function HomePage() {
             Únete ahora
           </Link>
 
-          {/* Lo más caliente ahora */}
-          <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <h2 style={{ fontSize: 20, fontWeight: 700, color: '#F5F7F5', margin: 0 }}>Lo más caliente, ahora.</h2>
-
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button type="button" onClick={() => setSport('golf')} style={pillStyle(sport === 'golf')}>Golf</button>
-              <button type="button" onClick={() => setSport('futbol')} style={pillStyle(sport === 'futbol')}>Fútbol</button>
-              <button type="button" onClick={() => setSport('tenis')} style={pillStyle(sport === 'tenis')}>Tenis</button>
-            </div>
-
-            <div style={{ background: '#131917', border: '1px solid #22302B', borderRadius: 16, padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#8B958F' }}>
-                  {active.contextLabel}
-                </span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#FF7A45' }} />
-                  <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: '#FF9F6E' }}>En vivo</span>
-                </div>
-              </div>
-
-              <div>
-                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 20, color: '#F5F7F5' }}>{active.leaderName}</div>
-                <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 13, color: '#6B756F' }}>{active.leaderContext}</div>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {active.leaderActions.map((a) => (
-                  <div key={a.label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 14, color: '#C7CFC9' }}>{a.label}</span>
-                    <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, color: ACCENT }}>{a.pts}</span>
-                  </div>
-                ))}
-              </div>
-
-              <div style={{ height: 1, background: '#22302B' }} />
-
-              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-                <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 12, color: '#6B756F', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Puntos en vivo
-                </span>
-                <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 32, color: ACCENT }}>{active.leaderTotal}</span>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {active.others.map((o) => (
-                <div key={o.rank} style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#131917', border: '1px solid #1E2723', borderRadius: 12, padding: '12px 14px' }}>
-                  <span style={{ flexShrink: 0, width: 26, height: 26, borderRadius: '50%', background: '#1E2723', color: '#8B958F', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    {o.rank}
-                  </span>
-                  <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, color: '#F5F7F5' }}>{o.name}</span>
-                    <span style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12, color: '#6B756F' }}>{o.context}</span>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
-                    <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 16, color: ACCENT }}>{o.total}</span>
-                    <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 11, color: '#8B958F' }}>{o.highlight}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+          {/* Lo más caliente ahora — datos reales, rotando fútbol → golf cada 3 s (09/10) */}
+          <LoMasCaliente />
         </div>
 
         {/* Qué es Drafters */}

@@ -470,14 +470,9 @@ export default function AdminPorrasGolfPage() {
     if (!window.confirm(`¿Publicar "${p.major}"? Pasará a ser visible para todos los usuarios y se enviarán los avisos por correo.`)) return;
     setPublicandoId(p.id);
     setError(null);
-    // Primero las mesas y después la porra: el aviso por correo se dispara al
-    // publicar la porra, y para entonces las mesas ya deben estar visibles.
-    const { error: salasError } = await supabase.from('salas').update({ publicada: true }).eq('deporte', 'golf').eq('competicion', p.competicion ?? '');
-    if (salasError) {
-      setPublicandoId(null);
-      setError('No se han podido publicar las mesas. Inténtalo de nuevo.');
-      return;
-    }
+    // 08/10 (Iñi): aquí solo se publica la PORRA. Las mesas Drafters del
+    // torneo no dependen de esta pantalla: se crean ya publicadas (ver
+    // lib/server/crearGolfDesdeDataGolf.ts).
     const { error: porraError } = await supabase.from('porras').update({ publicada: true }).eq('id', p.id);
     setPublicandoId(null);
     if (porraError) {
@@ -485,7 +480,7 @@ export default function AdminPorrasGolfPage() {
       return;
     }
     setRevisandoId(null);
-    setResultado(`"${p.major}" publicada (porra y mesas).`);
+    setResultado(`Porra "${p.major}" publicada.`);
     await cargarPorras();
   }
 

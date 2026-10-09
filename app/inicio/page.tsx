@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase, Perfil } from '@/lib/supabaseClient';
+import LoMasCaliente from '@/components/LoMasCaliente';
 import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
 import { formatEuros } from '@/lib/salaShared';
@@ -398,6 +399,9 @@ export default function InicioPage() {
             </div>
           )}
 
+          {/* 09/10 (Iñi): debajo de todo, los jugadores que más puntos están
+              sacando ahora mismo — mismo bloque que la portada. */}
+          <LoMasCaliente />
         </div>
       </div>
     </main>

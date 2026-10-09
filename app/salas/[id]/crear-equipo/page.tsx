@@ -341,7 +341,8 @@ export default function CrearEquipoPage() {
   // pero no puede confirmar de verdad — ver el botón de más abajo y
   // tiene_acceso_mesas_drafters() en drafters-schema.sql (mismo bloqueo
   // repetido ahí del lado del servidor).
-  const tieneAccesoMesas = !!perfil && (perfil.rol === 'admin' || !!perfil.acceso_mesas_drafters);
+  // 09/10 (Iñi): Mesas Drafters abiertas a todos los usuarios registrados.
+  const tieneAccesoMesas = !!perfil;
 
   // Flecha de volver paso a paso (07/10, pedido de Iñi con vídeo: las flechas
   // entraban en bucle). Cada paso tiene una salida fija y nunca se usa

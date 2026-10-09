@@ -24,12 +24,8 @@ export default function AdminUsuariosPage() {
   const [usuarios, setUsuarios] = useState<Perfil[]>([]);
   const [busqueda, setBusqueda] = useState('');
   const [error, setError] = useState<string | null>(null);
-  // Acceso a Mesas Drafters por usuario (nuevo, 01/10, pedido de Iñi): de
-  // serie todos en false — el admin los habilita uno a uno aquí mismo,
-  // p.ej. para su socio Javi Murúa, mientras las Mesas Drafters siguen en
-  // "solo vista previa" para el resto. Ver drafters-schema.sql
-  // (perfiles.acceso_mesas_drafters) y app/salas/[id]/crear-equipo/page.tsx.
-  const [cambiandoAccesoId, setCambiandoAccesoId] = useState<string | null>(null);
+  // 09/10 (Iñi): las Mesas Drafters ya están abiertas a todo el mundo — se
+  // quita el interruptor de acceso por usuario que había aquí desde el 01/10.
 
   useEffect(() => {
     let activo = true;
@@ -91,15 +87,6 @@ export default function AdminUsuariosPage() {
     );
   }
 
-  async function alternarAccesoMesas(usuario: Perfil) {
-    const nuevoValor = !usuario.acceso_mesas_drafters;
-    setCambiandoAccesoId(usuario.id);
-    const { error: updateError } = await supabase.from('perfiles').update({ acceso_mesas_drafters: nuevoValor }).eq('id', usuario.id);
-    if (!updateError) {
-      setUsuarios((prev) => prev.map((u) => (u.id === usuario.id ? { ...u, acceso_mesas_drafters: nuevoValor } : u)));
-    }
-    setCambiandoAccesoId(null);
-  }
 
   const busquedaNorm = busqueda.trim().toLowerCase();
   const usuariosFiltrados = busquedaNorm
@@ -186,38 +173,6 @@ export default function AdminUsuariosPage() {
                   </span>
                 </div>
 
-                {/* Acceso a Mesas Drafters (01/10) — el admin siempre tiene
-                    acceso (ver tiene_acceso_mesas_drafters() en el esquema),
-                    así que el toggle no tiene sentido mostrarlo en su propia
-                    fila. */}
-                {u.rol !== 'admin' && (
-                  <button
-                    type="button"
-                    onClick={() => alternarAccesoMesas(u)}
-                    disabled={cambiandoAccesoId === u.id}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: 10,
-                      marginTop: 4,
-                      padding: '7px 10px',
-                      borderRadius: 8,
-                      border: `1px solid ${u.acceso_mesas_drafters ? 'rgba(61,220,132,0.4)' : '#1E2723'}`,
-                      background: u.acceso_mesas_drafters ? 'rgba(61,220,132,0.08)' : 'transparent',
-                      cursor: cambiandoAccesoId === u.id ? 'default' : 'pointer',
-                      opacity: cambiandoAccesoId === u.id ? 0.6 : 1,
-                      textAlign: 'left',
-                    }}
-                  >
-                    <span style={{ fontSize: 11.5, fontWeight: 600, color: u.acceso_mesas_drafters ? S.ACCENT : S.MUTED_2 }}>
-                      {u.acceso_mesas_drafters ? 'Acceso a Mesas Drafters habilitado' : 'Sin acceso a Mesas Drafters (solo preview)'}
-                    </span>
-                    <div style={{ flexShrink: 0, width: 32, height: 18, borderRadius: 999, background: u.acceso_mesas_drafters ? 'rgba(61,220,132,0.35)' : '#232B26', position: 'relative' }}>
-                      <div style={{ position: 'absolute', top: 2, left: u.acceso_mesas_drafters ? 16 : 2, width: 14, height: 14, borderRadius: '50%', background: '#F5F7F5', transition: 'left 0.15s ease' }} />
-                    </div>
-                  </button>
-                )}
               </div>
             ))}
           </div>
