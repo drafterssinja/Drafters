@@ -17,10 +17,13 @@ import { generarSalasParaTorneo } from '@/lib/tiposDeSala';
 // CREACIÓN AUTOMÁTICA DE PORRA + MESAS DE GOLF DESDE DATA GOLF (05/10)
 // ============================================================================
 // Pedido de Iñi: en cuanto Data Golf publique las cuotas del próximo torneo
-// (DP World Tour o PGA Tour), crear sola la porra y las mesas Drafters, en
-// BORRADOR (publicada = false: ocultas para todo el mundo y sin correos, ver
-// el bloque "CREACIÓN AUTOMÁTICA..." de drafters-schema.sql). Iñi solo marca
-// a los españoles y publica, desde /admin/porras-golf.
+// (DP World Tour o PGA Tour), crear sola la porra y las mesas Drafters.
+// La PORRA nace en BORRADOR (publicada = false: oculta para todo el mundo y
+// sin correos, ver el bloque "CREACIÓN AUTOMÁTICA..." de drafters-schema.sql);
+// Iñi marca a los españoles y la publica desde /admin/porras-golf.
+// Las MESAS, en cambio, nacen ya PUBLICADAS (08/10, Iñi: "las mesas Drafters
+// no tienen sentido que se vean en Porras golf") — igual que las de fútbol,
+// no dependen de ninguna revisión y no tienen nada que ver con la porra.
 //
 // FORMAS CONFIRMADAS el 05/10 contra respuestas reales:
 //  - field-updates (campo, país, fechas, nombre del torneo): ver
@@ -172,7 +175,7 @@ async function crearBorrador(
 
   const salas = generarSalasParaTorneo({ competicionLabel: nombreTorneo, deporte: 'golf', fechaLimiteIso }).map((s) => ({
     ...s,
-    publicada: false,
+    publicada: true, // 08/10: las mesas salen visibles desde el principio (ver cabecera)
     // Para las pestañas PGA Tour / DP World Tour de /salas.
     circuito: tour === 'pga' ? 'pga' : 'eur',
   }));
@@ -338,7 +341,7 @@ async function procesarTour(admin: Admin, tour: DataGolfTour): Promise<Resultado
             usuario_id: a.id,
             tipo: 'borrador_golf',
             titulo: 'Nuevo torneo de golf listo para revisar',
-            mensaje: `Se han creado en borrador la porra y las mesas de "${nombreTorneo}". ${resumen} Revisa los españoles y publícalo cuando quieras: hasta entonces está oculto y no se manda ningún correo.`,
+            mensaje: `Se ha creado en borrador la porra de "${nombreTorneo}" (sus mesas Drafters ya están publicadas). ${resumen} Revisa los españoles y publica la porra cuando quieras: hasta entonces está oculta y no se manda ningún correo.`,
             link: '/admin/porras-golf',
           }))
         );
@@ -352,7 +355,7 @@ async function procesarTour(admin: Admin, tour: DataGolfTour): Promise<Resultado
     // Se deshace lo que se haya podido crear y se libera la clave, para que
     // el siguiente ciclo lo reintente limpio.
     await admin.from('torneos_golf_live').delete().eq('competicion', nombreTorneo).is('ultima_actualizacion', null);
-    await admin.from('salas').delete().eq('competicion', nombreTorneo).eq('publicada', false);
+    await admin.from('salas').delete().eq('competicion', nombreTorneo).eq('deporte', 'golf');
     await admin.from('porras').delete().eq('competicion', nombreTorneo).eq('publicada', false);
     await admin.from('jugadores').delete().eq('deporte', 'golf').eq('competicion', nombreTorneo);
     await admin.from('golf_autocreacion_torneos').delete().eq('clave', clave);
