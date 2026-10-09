@@ -196,7 +196,7 @@ export default function InicioPage() {
                 DRAFTERS
               </span>
               <span style={{ marginTop: 8, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 12, color: 'rgba(245,247,245,0.75)' }}>
-                Fútbol, golf y tenis. Salas, maratón y draft de fantasía.
+                Fútbol, golf y tenis. Salas y draft de fantasía.
               </span>
             </Link>
 

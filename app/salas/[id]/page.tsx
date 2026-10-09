@@ -376,7 +376,6 @@ export default function SalaDetallePage() {
               <InfoRow label="Tipo de sala" value={tipoLabel} />
               <InfoRow label="Formato" value={tipoLabel} />
               <InfoRow label="Competición" value={sala.competicion} />
-              {isFutbol && <InfoRow label="Puntuación" value="Tablas de Drafters con datos en directo de ESPN. Próximamente: más acciones" />}
               <InfoRow label="Jugadores inscritos" value={`${signedUp}/${capacidadLabel(sala.aforo)}`} />
               {!isFinalizada && <InfoRow label="Se cierra el" value={cierraEn ?? 'Sin fecha fijada'} />}
             </div>

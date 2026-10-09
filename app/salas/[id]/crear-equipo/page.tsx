@@ -1218,7 +1218,7 @@ function PuntuacionInfoScreen({ deporte, competicion, onEntendido, onVolver }: {
             Cada jugador suma puntos por lo que hace en <strong style={{ color: S.TEXT }}>su partido</strong> de la jornada, en tiempo real, y tu equipo puntúa la suma de sus 11 jugadores. Los puntos por <strong style={{ color: S.TEXT }}>portería a cero, victoria del equipo y partido completo</strong> se suman cuando el partido termina.
           </p>
           <p style={{ fontSize: 12.5, color: S.MUTED, lineHeight: 1.55, margin: 0 }}>
-            Las acciones marcadas como <strong style={{ color: '#F0B94D' }}>Próximamente</strong> todavía no se leen de la fuente de datos y no se tienen en cuenta.
+            Las acciones marcadas como <strong style={{ color: '#F0B94D' }}>Próximamente</strong> todavía no puntúan.
           </p>
         </div>
       )}

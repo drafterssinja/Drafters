@@ -175,7 +175,8 @@ function SalasPageInner() {
       if (!activo) return;
 
       if (perfilData) setPerfil(perfilData as Perfil);
-      setSalas(salasData ?? []);
+      // 09/10 (Iñi): los Maratones ya no se enseñan en las salas Drafters.
+      setSalas((salasData ?? []).filter((s) => s.tipo !== 'maraton'));
       const mapaInscritos = new Map<string, number>();
       ((inscritosData as { sala_id: string; inscritos: number }[]) ?? []).forEach((fila) => mapaInscritos.set(fila.sala_id, Number(fila.inscritos)));
       setInscritosPorSala(mapaInscritos);
@@ -390,7 +391,7 @@ function SalasPageInner() {
       activo: tipo !== 'todas',
       opciones: [
         { valor: 'todas', etiqueta: 'Todas', seleccionada: tipo === 'todas', aplicar: () => setTipo('todas') },
-        ...[...TIPOS_SALA_FIJA, 'maraton' as TipoSala].map((t) => ({ valor: t, etiqueta: TIPO_SALA_LABELS[t], seleccionada: tipo === t, aplicar: () => setTipo(t) })),
+        ...TIPOS_SALA_FIJA.map((t) => ({ valor: t, etiqueta: TIPO_SALA_LABELS[t], seleccionada: tipo === t, aplicar: () => setTipo(t) })),
       ],
     },
     {
@@ -427,7 +428,7 @@ function SalasPageInner() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '32px 20px 56px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <h1 style={{ fontSize: 26, fontWeight: 800, color: S.TEXT }}>Salas de {DEPORTE_LABELS[deporte].toLowerCase()}</h1>
-            <p style={{ fontSize: 13, color: S.MUTED_2 }}>Doble o Nada, Triple o Nada, Oro y Plata, Tridente y Maratón.</p>
+            <p style={{ fontSize: 13, color: S.MUTED_2 }}>Doble o Nada, Triple o Nada, Oro y Plata y Tridente.</p>
           </div>
 
           {/* 06/10 (Iñi): el deporte ya se elige en /mesas, así que aquí NO hay filtro de deporte arriba; cada deporte muestra sus propias competiciones. */}
