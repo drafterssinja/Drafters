@@ -2,12 +2,13 @@
 
 import { useState } from 'react';
 import * as S from '@/lib/mockupStyles';
+import { urlEscudoPropia } from '@/lib/urlEscudo';
 
 // Escudo de un equipo con iniciales de reserva si la imagen no carga.
 export default function EscudoEquipo({ url, nombre, tam = 26, alternativa = null }: { url: string | null; nombre: string; tam?: number; alternativa?: string | null }) {
-  // 07/10: si la imagen guardada no carga se prueba la alternativa (mapa fijo de ESPN) antes de las iniciales.
+  // 07/10: si la imagen guardada no carga se prueba la alternativa (mapa fijo) antes de las iniciales.
   const [falla, setFalla] = useState(0);
-  const lista = [url, alternativa].filter((u, i, a): u is string => !!u && a.indexOf(u) === i);
+  const lista = [urlEscudoPropia(url), urlEscudoPropia(alternativa)].filter((u, i, a): u is string => !!u && a.indexOf(u) === i);
   const actual = lista[falla] ?? null;
   if (!actual) {
     return (

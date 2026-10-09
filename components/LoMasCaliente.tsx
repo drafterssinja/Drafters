@@ -8,6 +8,8 @@
 // fútbol más reciente y del torneo de golf más reciente. Va cambiando solo de
 // deporte cada 3 segundos, empezando SIEMPRE por fútbol; las pastillas dejan
 // saltar a uno concreto (y el cambio automático sigue desde ahí).
+// 09/10: botón pausa/play arriba a la derecha de la caja — en pausa no cambia
+// de deporte (para mirarlo con calma); al darle a play sigue rotando.
 //
 // Se usa en la portada (sin sesión) y en /inicio, debajo de todo.
 // Si todavía no hay datos reales (o el SQL no se ha ejecutado), se enseña el
@@ -108,6 +110,7 @@ export default function LoMasCaliente({ titulo = 'Lo más caliente, ahora.' }: {
   const [deporte, setDeporte] = useState<Deporte>('futbol');
   // Cambia en cada clic para reiniciar la cuenta atrás de 3 s (y la barrita).
   const [vuelta, setVuelta] = useState(0);
+  const [pausado, setPausado] = useState(false);
 
   useEffect(() => {
     let activo = true;
@@ -151,13 +154,13 @@ export default function LoMasCaliente({ titulo = 'Lo más caliente, ahora.' }: {
   }, [disponibles, deporte]);
 
   useEffect(() => {
-    if (disponibles.length < 2) return;
+    if (disponibles.length < 2 || pausado) return;
     const t = setTimeout(() => {
       const i = disponibles.indexOf(deporte);
       setDeporte(disponibles[(i + 1) % disponibles.length]);
     }, SEGUNDOS_POR_DEPORTE * 1000);
     return () => clearTimeout(t);
-  }, [deporte, disponibles, vuelta]);
+  }, [deporte, disponibles, vuelta, pausado]);
 
   const activo: Bloque = (hayReales ? reales?.[deporte] : EJEMPLO[deporte]) ?? EJEMPLO[deporte];
   const etiquetaEstado = activo.enVivo ? 'En vivo' : deporte === 'futbol' ? 'Última jornada' : 'Último torneo';
@@ -191,7 +194,7 @@ export default function LoMasCaliente({ titulo = 'Lo más caliente, ahora.' }: {
 
       {disponibles.length > 1 && (
         <div style={{ height: 3, borderRadius: 2, background: '#1E2723', overflow: 'hidden' }}>
-          <div key={`${deporte}-${vuelta}`} style={{ height: '100%', background: ACCENT, animation: `lmc-barra ${SEGUNDOS_POR_DEPORTE}s linear both` }} />
+          <div key={`${deporte}-${vuelta}`} style={{ height: '100%', background: ACCENT, animation: `lmc-barra ${SEGUNDOS_POR_DEPORTE}s linear both`, animationPlayState: pausado ? 'paused' : 'running' }} />
         </div>
       )}
 
@@ -204,6 +207,25 @@ export default function LoMasCaliente({ titulo = 'Lo más caliente, ahora.' }: {
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
               <span style={{ width: 6, height: 6, borderRadius: '50%', background: activo.enVivo ? '#FF7A45' : '#6B756F' }} />
               <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: activo.enVivo ? '#FF9F6E' : '#8B958F' }}>{etiquetaEstado}</span>
+              {disponibles.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Al reanudar, la cuenta atrás de 3 s empieza de nuevo.
+                    if (pausado) setVuelta((v) => v + 1);
+                    setPausado((p) => !p);
+                  }}
+                  aria-label={pausado ? 'Reanudar' : 'Pausar'}
+                  title={pausado ? 'Reanudar' : 'Pausar'}
+                  style={{ marginLeft: 6, width: 28, height: 28, padding: 0, borderRadius: '50%', border: `1px solid ${pausado ? ACCENT : '#2A3733'}`, background: pausado ? 'rgba(61,220,132,0.12)' : 'transparent', color: pausado ? ACCENT : '#AAB4AE', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
+                >
+                  {pausado ? (
+                    <svg width="11" height="12" viewBox="0 0 11 12" aria-hidden="true"><path d="M1 1l9 5-9 5z" fill="currentColor" /></svg>
+                  ) : (
+                    <svg width="10" height="12" viewBox="0 0 10 12" aria-hidden="true"><rect x="0.5" y="0.5" width="3" height="11" rx="1" fill="currentColor" /><rect x="6.5" y="0.5" width="3" height="11" rx="1" fill="currentColor" /></svg>
+                  )}
+                </button>
+              )}
             </div>
           </div>
 

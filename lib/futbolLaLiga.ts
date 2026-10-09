@@ -178,7 +178,7 @@ export function escudoLaLiga(nombreEquipo: string | null | undefined): string | 
   const n = nombreEquipo ?? '';
   // Un filial (Celta Fortuna) enseña el escudo del primer equipo (07/10).
   const id = ESCUDOS_ESPN[claveEquipoLaLiga(esEquipoFilial(n) ? nombrePrimerEquipo(n) : n)];
-  return id ? `/escudos/soccer/500/${id}.png` : null;
+  return id ? `/escudos/soccer--500--${id}.png` : null;
 }
 
 export function resultadoDeEquipo(golesPropios: number, golesRival: number): ResultadoEquipo {
