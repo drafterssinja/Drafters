@@ -13,8 +13,6 @@
 // que estén en un dominio conocido de antemano, así que no hay una lista de
 // dominios que registrar en next.config.js.
 
-import { urlEscudoPropia } from '@/lib/urlEscudo';
-
 export function inicialesEquipoFutbol(nombre: string): string {
   const partes = nombre.trim().split(/\s+/).filter(Boolean);
   if (partes.length === 0) return '?';
@@ -22,8 +20,7 @@ export function inicialesEquipoFutbol(nombre: string): string {
   return `${partes[0].charAt(0)}${partes[partes.length - 1].charAt(0)}`.toUpperCase();
 }
 
-export default function EscudoEquipoFutbol({ nombre, url: urlOriginal, size = 30 }: { nombre: string; url: string | null | undefined; size?: number }) {
-  const url = urlEscudoPropia(urlOriginal);
+export default function EscudoEquipoFutbol({ nombre, url, size = 30 }: { nombre: string; url: string | null | undefined; size?: number }) {
   if (url) {
     // eslint-disable-next-line @next/next/no-img-element
     return (

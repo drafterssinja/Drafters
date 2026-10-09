@@ -11,7 +11,6 @@ import * as S from '@/lib/mockupStyles';
 import { formatEuros, parteParaPremios } from '@/lib/salaShared';
 import { calcularReparto, type TipoSala } from '@/lib/repartoPremios';
 import { claveEquipoLaLiga, escudoLaLiga, formatPuntos } from '@/lib/futbolLaLiga';
-import { urlEscudoPropia } from '@/lib/urlEscudo';
 import type { LineaDesglose } from '@/lib/futbolPuntuacion';
 import { reproducirSonidoAviso, leerPreferenciaSonido, guardarPreferenciaSonido } from '@/lib/sonidoAviso';
 import { TIPOS_AVISO_FUTBOL, TIPOS_AVISO_POR_DEFECTO, INFO_TIPO_AVISO, textoAvisoFutbol, type EventoFutbol, type TipoAvisoFutbol } from '@/lib/futbolAvisos';
@@ -88,9 +87,8 @@ function formatoHora(iso: string | null): string {
   return `${dia.charAt(0).toUpperCase()}${dia.slice(1)} ${fecha} a las ${hora}`;
 }
 
-function Escudo({ url: urlOriginal, nombre, tam = 26 }: { url: string | null; nombre: string; tam?: number }) {
+function Escudo({ url, nombre, tam = 26 }: { url: string | null; nombre: string; tam?: number }) {
   const [falla, setFalla] = useState(false);
-  const url = urlEscudoPropia(urlOriginal);
   if (!url || falla) {
     return (
       <span
