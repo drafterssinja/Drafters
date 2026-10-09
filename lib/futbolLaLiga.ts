@@ -165,7 +165,8 @@ export function emparejarJugadoresConTabla(
 // ----------------------------------------------------------------------------
 export type ResultadoEquipo = 'G' | 'E' | 'P';
 
-// Escudos de LaLiga (ESPN CDN, ids de equipo de esp.1) por clave de equipo —
+// Escudos de LaLiga por clave de equipo (09/10: se sirven desde nuestro propio
+// dominio, /escudos/..., para que no se vea de dónde salen los datos) —
 // 06/10, pedido de Iñi: en la elección de jugadores los partidos se ven como
 // "escudo vs escudo". Independiente de que ya haya marcadores cargados.
 const ESCUDOS_ESPN: Record<string, number> = {
@@ -177,7 +178,7 @@ export function escudoLaLiga(nombreEquipo: string | null | undefined): string | 
   const n = nombreEquipo ?? '';
   // Un filial (Celta Fortuna) enseña el escudo del primer equipo (07/10).
   const id = ESCUDOS_ESPN[claveEquipoLaLiga(esEquipoFilial(n) ? nombrePrimerEquipo(n) : n)];
-  return id ? `https://a.espncdn.com/i/teamlogos/soccer/500/${id}.png` : null;
+  return id ? `/escudos/soccer/500/${id}.png` : null;
 }
 
 export function resultadoDeEquipo(golesPropios: number, golesRival: number): ResultadoEquipo {
