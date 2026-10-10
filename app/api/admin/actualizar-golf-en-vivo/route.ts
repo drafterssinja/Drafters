@@ -744,7 +744,18 @@ async function procesarTorneoDataGolf(
     // estaba "en la ronda 1" con thru 18 (caso de la Alfred Dunhill, que
     // seguía sin cerrarse dos días después de acabar).
     const maxRondaVista = estadoActual.reduce((m, j) => (j.ronda !== null && j.ronda > m ? j.ronda : m), 0);
-    const rondasFinal = Math.max(rondasTotalesEfectivo, maxRondaVista);
+    // FIX 10/10 (Iñi: "ha marcado la porra del Open de España como finalizada
+    // cuando falta el día de mañana"): el nº de rondas sale de los horarios de
+    // salida publicados por Data Golf, y el jueves solo están publicados los de
+    // las rondas 1-2 (o 1-3 el sábado). Con eso guardado, al acabar la ronda 3
+    // todos estaban "en la última ronda con thru 18" y se liquidaba un día antes.
+    // Ahora (confirmado por Iñi): un torneo de golf se juega SIEMPRE a 4 rondas
+    // (los match play tipo Ryder/Presidents no se usan para porras). Si algún
+    // día se recorta a 3 por mal tiempo, se cierra a mano desde Resultados golf
+    // ("Cierre manual") y se reparte en Pagos pendientes. Además nunca se da por
+    // terminado antes del día de la última ronda (primera salida + 3 días).
+    const rondasMinimas = 4;
+    const rondasFinal = Math.max(rondasTotalesEfectivo, maxRondaVista, rondasMinimas);
     if (rondasFinal !== rondasTotalesEfectivo) {
       await admin.from('torneos_golf_live').update({ rondas_totales: rondasFinal }).eq('id', torneo.id);
     }
@@ -755,7 +766,11 @@ async function procesarTorneoDataGolf(
     // que bloqueaba el cierre de la Dunhill (un solo jugador, Follett-Smith,
     // con ronda/hoyo/posición vacíos, impedía que se diera por acabado).
     const activos = estadoActual.filter((j) => j.total !== null && j.ronda !== null && sigueCompitiendo(j.posicion));
-    const todosListos = activos.length > 0 && activos.every((j) => j.ronda === rondasFinal && j.thru === 18);
+    const primeraSalida = torneo.primeraSalidaEn ? new Date(torneo.primeraSalidaEn).getTime() : null;
+    // Día de la última ronda: primera salida + (rondas - 1) días, desde las 00:00 UTC de ese día.
+    const diaUltimaRonda = primeraSalida !== null ? new Date(primeraSalida + (rondasFinal - 1) * 86400000).setUTCHours(0, 0, 0, 0) : null;
+    const yaEsElUltimoDia = diaUltimaRonda === null || Date.now() >= diaUltimaRonda;
+    const todosListos = yaEsElUltimoDia && activos.length > 0 && activos.every((j) => j.ronda === rondasFinal && j.thru === 18);
 
     if (todosListos) {
       if (!torneo.listoParaLiquidarDesde) {
@@ -863,7 +878,8 @@ export async function POST(req: NextRequest) {
             id: torneo.id,
             competicion: torneo.competicion,
             tourDataGolf: torneo.tour_datagolf,
-            primeraSalidaEn: null, // no se necesita leer el valor guardado: cada ciclo lo vuelve a calcular (y a guardar) desde field-updates
+            // 10/10: se pasa el valor guardado (fijado la primera vez que se detectó) para no dar el torneo por terminado antes del último día.
+            primeraSalidaEn: (torneo as unknown as { primera_salida_en: string | null }).primera_salida_en ?? null,
             rondasTotales: torneo.rondas_totales,
             listoParaLiquidarDesde: torneo.listo_para_liquidar_desde,
             finalizadoEn: torneo.finalizado_en,

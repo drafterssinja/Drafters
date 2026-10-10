@@ -520,7 +520,7 @@ export default function AdminResultadosGolfPage() {
     const activos = conDatos.filter((j) => j.resultado_en_vivo_ronda !== null && sigueCompitiendo(j.resultado_en_vivo_posicion));
     const sinEstado = conDatos.filter((j) => j.resultado_en_vivo_ronda === null && sigueCompitiendo(j.resultado_en_vivo_posicion)).length;
     const maxRonda = conDatos.reduce((m, j) => Math.max(m, j.resultado_en_vivo_ronda ?? 0), 0);
-    const rondas = Math.max(t.rondas_totales ?? 0, maxRonda);
+    const rondas = Math.max(t.rondas_totales ?? 0, maxRonda, 4); // 10/10: siempre 4 rondas, igual que la sincronización
     const noListos = activos.filter((j) => !(j.resultado_en_vivo_ronda === rondas && j.resultado_en_vivo_thru === 18));
     const lineas = [
       `Rondas totales guardadas: ${t.rondas_totales ?? 'sin dato'} · ronda más alta vista: ${maxRonda || 'ninguna'}.`,
