@@ -76,6 +76,10 @@ export const MINUTOS_PORTERO_PORTERIA_A_CERO = 90;
 export const PUNTOS_DOBLETE = 2;
 export const PUNTOS_HATTRICK = 5;
 export const PUNTOS_PARTIDO_COMPLETO = 1;
+/** 11/10 (Iñi): +5 por victoria del equipo para TODAS las posiciones (antes solo portero). */
+export const PUNTOS_VICTORIA = 5;
+/** Minutos mínimos jugados para cobrar la victoria (Iñi, 11/10). */
+export const MINUTOS_VICTORIA = 60;
 
 /** Acciones de las tablas que ESPN no proporciona: se muestran como
  * "Próximamente" y no puntúan. Se compara con el texto de la fila en
@@ -158,7 +162,6 @@ export function puntuarJugador(posicion: PosicionFutbol | string | null | undefi
     add('penalti_parado', 'Penalti parado', st.penaltisParados, PUNTOS_PORTERO.penaltiParado);
     if (ctx.finalizado) {
       if (ctx.golesContraEquipo === 0 && st.minutos >= MINUTOS_PORTERO_PORTERIA_A_CERO) addTotal('porteria_cero', 'Portería a cero', PUNTOS_PORTERO.porteriaACero);
-      if (ctx.equipoGana) addTotal('victoria', 'Victoria del equipo', PUNTOS_PORTERO.victoria);
     }
   }
 
@@ -169,6 +172,10 @@ export function puntuarJugador(posicion: PosicionFutbol | string | null | undefi
 
   // Partido completo (todos)
   if (ctx.finalizado && st.partidoCompleto) addTotal('completo', 'Partido completo', PUNTOS_PARTIDO_COMPLETO);
+
+  // Victoria del equipo — 11/10, Iñi: para TODAS las posiciones (antes solo el
+  // portero), siempre que el jugador haya jugado al menos 60 minutos.
+  if (ctx.finalizado && ctx.equipoGana && st.minutos >= MINUTOS_VICTORIA) addTotal('victoria', 'Victoria del equipo (60+ min.)', PUNTOS_VICTORIA);
 
   const total = redondear(lineas.reduce((s, l) => s + l.puntos, 0));
   return { total, desglose: lineas };
