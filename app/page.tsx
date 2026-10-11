@@ -1,5 +1,6 @@
 'use client';
 
+import LogoDrafters from '@/components/LogoDrafters';
 import Link from 'next/link';
 import LoMasCaliente from '@/components/LoMasCaliente';
 
@@ -47,7 +48,7 @@ export default function HomePage() {
       <div style={{ width: '100%', minHeight: '100%', display: 'flex', flexDirection: 'column', background: '#0B0F0E', maxWidth: 520, marginLeft: 'auto', marginRight: 'auto' }}>
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 20px', borderBottom: '1px solid #1A211D' }}>
-          <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 22, letterSpacing: '0.06em', color: '#F5F7F5' }}>DRAFTERS</span>
+          <LogoDrafters size={30} />
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Link href="/login" style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 13, color: '#F5F7F5', background: 'transparent', border: '1px solid #2A3733', padding: '8px 14px', borderRadius: 8, display: 'inline-flex', alignItems: 'center' }}>
               Iniciar sesión
@@ -204,7 +205,7 @@ export default function HomePage() {
 
         {/* Footer */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '20px 20px 28px', borderTop: '1px solid #1A211D' }}>
-          <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, letterSpacing: '0.05em', color: '#F5F7F5' }}>DRAFTERS</span>
+          <LogoDrafters size={21} />
           <span style={{ fontSize: 12, color: '#6B756F' }}>Fútbol · Golf · Tenis — puntuación en vivo.</span>
           <span style={{ fontSize: 11, color: '#4E574F' }}>© 2026 Drafters</span>
         </div>

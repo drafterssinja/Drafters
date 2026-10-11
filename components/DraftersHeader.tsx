@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import LogoDrafters from '@/components/LogoDrafters';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
@@ -83,15 +84,9 @@ export default function DraftersHeader({ saldoLabel, accountInitials, homeHref, 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <Link
           href={destino}
-          style={{
-            fontFamily: "'Barlow Condensed', sans-serif",
-            fontWeight: 800,
-            fontSize: 22,
-            letterSpacing: '0.06em',
-            color: '#F5F7F5',
-          }}
+          style={{ display: 'inline-flex', alignItems: 'center' }}
         >
-          DRAFTERS
+          <LogoDrafters size={30} />
         </Link>
       </div>
 
