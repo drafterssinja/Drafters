@@ -36,7 +36,7 @@ const PREFIJOS = ['La Liga', 'Champions League', 'Premier League'];
 type FilaCuota = { equipo_local: string; equipo_visitante: string; cuota_1: number; cuota_x: number; cuota_2: number };
 type FilaJugadorJornada = { id: string; nombre: string; equipo_real: string | null };
 
-async function repararUna(admin: Admin, competicion: string, prefijo: string): Promise<ResultadoReparacion> {
+async function repararUna(admin: Admin, competicion: string, prefijo: string, forzarPrecios = false): Promise<ResultadoReparacion> {
   const { data: cuotasData, error: errCuotas } = await admin
     .from('cuotas_partido_futbol')
     .select('equipo_local,equipo_visitante,cuota_1,cuota_x,cuota_2')
@@ -173,9 +173,12 @@ async function repararUna(admin: Admin, competicion: string, prefijo: string): P
     if (error) throw new Error(`jugadores: ${error.message}`);
   }
 
-  // 4. Precios de los que ya estaban (solo si nadie se ha apuntado todavía).
+  // 4. Precios de los que ya estaban (solo si nadie se ha apuntado todavía,
+  //    o si el admin pide recalcularlos expresamente — 12/10, Iñi: la jornada
+  //    de Champions se creó antes del ajuste de defensas/porteros y ya tenía
+  //    equipos; los equipos ya hechos se quedan como están).
   let reprecios = 0;
-  if (!hayEquipos) {
+  if (!hayEquipos || forzarPrecios) {
     for (let k = 0; k < fichas.length; k++) {
       const idExistente = yaEsta.get(clave(fichas[k].nombre, fichas[k].equipo_real));
       const p = precioPorId.get(ids[k]);
@@ -211,14 +214,14 @@ async function repararUna(admin: Admin, competicion: string, prefijo: string): P
   const detalle =
     `${nuevas.length} jugadores añadidos, ${cuotasCambiadas} partido(s) con el nombre de equipo corregido, ${aBorrar.length} jugador(es) de filial retirados` +
     (filialesConservados > 0 ? ` (${filialesConservados} conservado(s) porque alguien ya los eligió)` : '') +
-    (hayEquipos ? '; ya hay equipos apuntados: los precios de los jugadores que ya estaban no se han tocado' : `; precios recalculados de ${reprecios} jugadores`) +
+    (hayEquipos && !forzarPrecios ? '; ya hay equipos apuntados: los precios de los jugadores que ya estaban no se han tocado' : `; precios recalculados de ${reprecios} jugadores${hayEquipos ? ' (los equipos ya creados no cambian)' : ''}`) +
     '.' +
     (avisos.length > 0 ? `\n   · ${avisos.join('\n   · ')}` : '');
   return { competicion, estado: cambios > 0 ? 'reparada' : 'sin_cambios', detalle };
 }
 
 /** Repara las jornadas creadas solas que todavía no han terminado (o una concreta). */
-export async function repararJornadasFutbol(admin: Admin, competicion?: string): Promise<ResultadoReparacion[]> {
+export async function repararJornadasFutbol(admin: Admin, competicion?: string, opciones: { forzarPrecios?: boolean } = {}): Promise<ResultadoReparacion[]> {
   let competiciones: string[];
   if (competicion) {
     competiciones = [competicion];
@@ -235,8 +238,19 @@ export async function repararJornadasFutbol(admin: Admin, competicion?: string):
   for (const c of Array.from(new Set(competiciones))) {
     const prefijo = PREFIJOS.find((p) => c.startsWith(p));
     if (!prefijo) continue;
+    // Recalcular precios a la fuerza: solo jornadas que todavía no han empezado.
+    let forzar = false;
+    if (opciones.forzarPrecios) {
+      const { data: primera } = await admin.from('salas').select('fecha_limite_inscripcion').eq('competicion', c).order('fecha_limite_inscripcion', { ascending: true }).limit(1);
+      const inicio = (primera as { fecha_limite_inscripcion: string | null }[] | null)?.[0]?.fecha_limite_inscripcion;
+      if (!inicio || new Date(inicio).getTime() <= Date.now()) {
+        resultados.push({ competicion: c, estado: 'sin_cambios', detalle: 'Ya ha empezado: sus precios no se tocan.' });
+        continue;
+      }
+      forzar = true;
+    }
     try {
-      resultados.push(await repararUna(admin, c, prefijo));
+      resultados.push(await repararUna(admin, c, prefijo, forzar));
     } catch (err) {
       resultados.push({ competicion: c, estado: 'error', detalle: (err as Error).message });
     }
