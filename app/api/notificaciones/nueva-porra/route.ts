@@ -29,7 +29,8 @@ import { enviarEmailSimple } from '@/lib/server/emailResend';
 // sincronizados — quien haga clic ve todo el detalle real en la propia
 // página.
 
-const SITE_URL = 'https://drafters-rho.vercel.app';
+// 11/10: dominio propio. Se puede cambiar con la variable NEXT_PUBLIC_SITE_URL en Vercel.
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://drafters.es';
 
 type PerfilConEmail = { email: string | null };
 

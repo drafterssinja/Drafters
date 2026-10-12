@@ -176,7 +176,9 @@ function SalasPageInner() {
 
       if (perfilData) setPerfil(perfilData as Perfil);
       // 09/10 (Iñi): los Maratones ya no se enseñan en las salas Drafters.
-      setSalas((salasData ?? []).filter((s) => s.tipo !== 'maraton'));
+      const salasVisibles = (salasData ?? []).filter((s) => s.tipo !== 'maraton');
+      setSalas(salasVisibles);
+      setPestana(pestanaConProximo(deporteInicial, salasVisibles));
       const mapaInscritos = new Map<string, number>();
       ((inscritosData as { sala_id: string; inscritos: number }[]) ?? []).forEach((fila) => mapaInscritos.set(fila.sala_id, Number(fila.inscritos)));
       setInscritosPorSala(mapaInscritos);
@@ -189,9 +191,29 @@ function SalasPageInner() {
     };
   }, [router]);
 
+  // 12/10 (Iñi): al entrar en un deporte, lo primero que se ve es lo que se
+  // puede jugar: la pestaña (PGA / DP World, La Liga / Champions) con el
+  // torneo o jornada MÁS PRÓXIMO que todavía admite inscripciones. Lo que ya
+  // está en directo se ve en "Mis mesas / en juego", no aquí de primeras.
+  function pestanaConProximo(d: Deporte, lista: SalaFila[]): string | null {
+    const pestanas = PESTANAS_COMPETICION[d];
+    if (pestanas.length === 0) return null;
+    const ahora = Date.now();
+    let mejor: { id: string; t: number } | null = null;
+    for (const s of lista) {
+      if (s.deporte !== d || s.estado === 'finalizada' || !s.fecha_limite_inscripcion) continue;
+      const t = new Date(s.fecha_limite_inscripcion).getTime();
+      if (t <= ahora) continue;
+      const c = circuitoDeSala(s);
+      const id = c && pestanas.some((p) => p.id === c) ? c : null;
+      if (id && (!mejor || t < mejor.t)) mejor = { id, t };
+    }
+    return mejor?.id ?? pestanas[0].id;
+  }
+
   function cambiarDeporte(d: Deporte) {
     setDeporte(d);
-    setPestana(PESTANAS_COMPETICION[d][0]?.id ?? null);
+    setPestana(pestanaConProximo(d, salas));
     setCompeticionElegida(null);
     setTorneoAbierto(false);
     setFiltroAbierto(null);
@@ -296,7 +318,10 @@ function SalasPageInner() {
   // app/mesas/page.tsx: se usa tanto en la lista filtrada de arriba como en
   // la de finalizadas, con el mismo diseño, cambiando solo el botón).
   function tarjetaSala(s: SalaFila & { signedUp: number }) {
-    const estadoInfo = estadoSalaInfo(s.estado, s.aforo, s.signedUp);
+    const estadoInfoBase = estadoSalaInfo(s.estado, s.aforo, s.signedUp);
+    // 12/10 (Iñi): una mesa ya empezada no puede salir como abierta / con plazas libres.
+    const yaEmpezada = !!s.fecha_limite_inscripcion && new Date(s.fecha_limite_inscripcion).getTime() <= Date.now();
+    const estadoInfo = s.estado !== 'finalizada' && yaEmpezada ? { label: 'En juego · inscripción cerrada', color: '#FF7A45' } : estadoInfoBase;
     const juegoLabel = TIPO_SALA_LABELS[s.tipo as TipoSala] ?? s.tipo;
     // Empezada (03/10, pedido de Iñi: "en las mesas y en las
     // porras que ya están empezadas... tiene que haber un botón

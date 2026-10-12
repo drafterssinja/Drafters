@@ -16,7 +16,7 @@ import { normalizarNombre } from '@/lib/nombreMatch';
 import { parsearValoresMercado, FilaValorMercado } from '@/lib/parsearValoresMercado';
 import { parsearCuotasPartidosFutbol } from '@/lib/parsearCuotasFutbol';
 import { emparejarEquipo } from '@/lib/aliasEquipos';
-import { calcularPreciosFutbolDetallado, factorPosicion, fuerzaPorEquipo, PosicionFutbol, JugadorConPrecioFutbol } from '@/lib/precioFutbol';
+import { calcularPreciosFutbolDetallado, crearAjusteValorPorPosicion, factorPosicion, fuerzaPorEquipo, PosicionFutbol, JugadorConPrecioFutbol } from '@/lib/precioFutbol';
 
 // ============================================================================
 // MESAS DRAFTERS — menú de administración dedicado (nuevo, 28/09)
@@ -681,12 +681,14 @@ export default function AdminMesasDraftersPage() {
     const fuerzaEquipo = fuerzaPorEquipo(partidosResueltos);
 
     const jugadoresSinPosicion = jugadoresDb.filter((j) => !j.posicion);
+    // 11/10: en la Champions se regulan defensas y porteros (ver crearAjusteValorPorPosicion).
+    const ajustarValor = crearAjusteValorPorPosicion(prefijo, jugadoresLiga.map((j) => ({ posicion: j.posicion, valor: j.valor_mercado })));
     const entrada = jugadoresDb
       .filter((j): j is JugadorFutbolDb & { posicion: PosicionFutbol } => !!j.posicion)
       .map((j) => {
         const fuerza = j.equipo_real ? fuerzaEquipo.get(j.equipo_real) : undefined;
         const factor = fuerza !== undefined ? factorPosicion(fuerza, j.posicion) : 1;
-        return { id: j.id, posicion: j.posicion, valorMercado: j.valor_mercado, factorPartido: factor };
+        return { id: j.id, posicion: j.posicion, valorMercado: ajustarValor(j.posicion, j.valor_mercado), factorPartido: factor };
       });
 
     // El nivel de cada jugador (lib/precioFutbol.ts) se calcula sobre el
@@ -698,7 +700,7 @@ export default function AdminMesasDraftersPage() {
     const valoresLiga = jugadoresLiga.map((j) => j.valor_mercado).filter((v): v is number => typeof v === 'number' && v > 0);
     const rangoNivel = valoresLiga.length > 0 ? { valorMin: Math.min(...valoresLiga), valorMax: Math.max(...valoresLiga) } : undefined;
 
-    const resultado = calcularPreciosFutbolDetallado(entrada, {}, rangoNivel);
+    const resultado = calcularPreciosFutbolDetallado(entrada, {}, rangoNivel, prefijo);
     const porId = new Map(jugadoresDb.map((j) => [j.id, j]));
     const precios = resultado.precios.map((p) => ({ ...p, nombre: porId.get(p.id)?.nombre ?? '?', equipoReal: porId.get(p.id)?.equipo_real ?? null }));
 

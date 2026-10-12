@@ -243,7 +243,8 @@ function signo(n: number): string {
 function textoResumen(p: PuntosF | undefined, partido: PartidoF | null): string {
   if (!p) return 'Sin datos todavía';
   if (p.partido_estado === 'sin_partido') return 'Sin partido esta jornada';
-  if (p.partido_estado === 'aplazado') return 'Partido aplazado';
+  // 12/10 (Iñi): aplazado más allá del final de la jornada → 0 definitivo.
+  if (p.partido_estado === 'aplazado') return p.actualizado ? 'Partido aplazado · cuenta como suplente (0)' : 'Partido aplazado';
   if (p.partido_estado === 'pendiente') return partido ? 'Pendiente de su partido' : 'Sin datos todavía';
   if (!p.jugo) return p.partido_estado === 'finalizado' ? 'No ha jugado' : 'Todavía no ha jugado';
   const lineas = p.desglose ?? [];

@@ -148,11 +148,15 @@ export default function AdminLiquidarPage() {
         );
         setEquipos(equiposActivos);
         const salaRow = salaData as SalaRow;
-        if (salaRow.deporte === 'golf') {
+        if (salaRow.deporte === 'golf' || salaRow.deporte === 'futbol') {
+          // 12/10: las mesas de fútbol también se rellenan solas, con los
+          // puntos de futbol_puntos_jugador (misma regla que la liquidación
+          // de toda la jornada de golpe).
           // Golf (07/10): las mesas puntúan con los puntos Drafters (tabla
           // golf_puntos_jugador); se rellena sola la posición de cada equipo
           // (empatados = mismo puesto) y se puede corregir a mano.
-          const { data: ptsData } = await supabase.from('golf_puntos_jugador').select('jugador_id, puntos_total').eq('competicion', salaRow.competicion);
+          const tablaPuntos = salaRow.deporte === 'golf' ? 'golf_puntos_jugador' : 'futbol_puntos_jugador';
+          const { data: ptsData } = await supabase.from(tablaPuntos).select('jugador_id, puntos_total').eq('competicion', salaRow.competicion).range(0, 4999);
           const pts = new Map(((ptsData as { jugador_id: string; puntos_total: number }[]) ?? []).map((f) => [f.jugador_id, Number(f.puntos_total)]));
           const totales = equiposActivos.map((e) => ({ id: e.id, total: (e.jugadores ?? []).reduce((a, id) => a + (pts.get(id) ?? 0), 0) }));
           const sorted = totales.slice().sort((a, b) => b.total - a.total);
@@ -164,8 +168,10 @@ export default function AdminLiquidarPage() {
           setPosicionesManual(posiciones);
           setAvisoDatos(
             pts.size === 0
-              ? 'Todavía no hay puntos Drafters de golf para esta competición (¿has ejecutado sql_golf_puntos.sql y está sincronizando?). Escribe la posición a mano.'
-              : 'Posiciones rellenadas automáticamente con los puntos Drafters de golf (más puntos = mejor; empatados comparten puesto). Revísalas antes de repartir: los puntos por posición final solo se incluyen si el torneo ya está dado por terminado.'
+              ? 'Todavía no hay puntos Drafters para esta competición. Escribe la posición a mano.'
+              : salaRow.deporte === 'golf'
+                ? 'Posiciones rellenadas automáticamente con los puntos Drafters de golf (más puntos = mejor; empatados comparten puesto). Revísalas antes de repartir: los puntos por posición final solo se incluyen si el torneo ya está dado por terminado.'
+                : 'Posiciones rellenadas automáticamente con los puntos Drafters de fútbol (más puntos = mejor; empatados comparten puesto). Revísalas antes de repartir.'
           );
         } else {
           setAvisoDatos('Esta sala no tiene un motor de puntuación automático todavía — escribe a mano la posición final de cada equipo.');

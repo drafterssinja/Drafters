@@ -104,6 +104,39 @@ export default function RegistroPage() {
     }
 
     setCargando(true);
+
+    // Comprobación previa (11/10, pedido de Iñi): basta con que el email O
+    // el nombre de usuario ya existan para no dejar crear la cuenta.
+    try {
+      const resp = await fetch('/api/registro/comprobar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), nombre_usuario: nombreUsuario.trim() }),
+      });
+      if (!resp.ok) {
+        setCargando(false);
+        setError('No se ha podido comprobar si el email y el usuario están libres. Inténtalo de nuevo.');
+        return;
+      }
+      const comp = (await resp.json()) as { email_libre: boolean; usuario_libre: boolean };
+      if (!comp.email_libre) {
+        setCargando(false);
+        setEmailYaUsado(true);
+        setError('Ya existe una cuenta con este email. Inicia sesión o, si no llegaste a verificarla, verifica tu email.');
+        return;
+      }
+      if (!comp.usuario_libre) {
+        setCargando(false);
+        setUsuarioDisponible(false);
+        setError('Ese nombre de usuario ya está en uso. Elige otro.');
+        return;
+      }
+    } catch {
+      setCargando(false);
+      setError('No se ha podido conectar. Revisa tu conexión e inténtalo de nuevo.');
+      return;
+    }
+
     const { data, error: signUpError } = await supabase.auth.signUp({
       email,
       password,
