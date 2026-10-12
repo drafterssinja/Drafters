@@ -85,7 +85,7 @@ export default function AdminResultadosFutbolPage() {
     };
   }, [router]);
 
-  async function llamar(accion: 'sync' | 'forzar' | 'comprobar' | 'escudos' | 'crear' | 'reparar') {
+  async function llamar(accion: 'sync' | 'forzar' | 'comprobar' | 'escudos' | 'crear' | 'reparar' | 'recalcular') {
     setTrabajando(true);
     setError(null);
     setMensaje(null);
@@ -104,7 +104,7 @@ export default function AdminResultadosFutbolPage() {
       return;
     }
     try {
-      const res = await fetch(accion === 'crear' ? '/api/admin/crear-futbol-automatico' : accion === 'reparar' ? '/api/admin/reparar-jornadas-futbol' : '/api/admin/actualizar-futbol-en-vivo', {
+      const res = await fetch(accion === 'crear' ? '/api/admin/crear-futbol-automatico' : accion === 'reparar' || accion === 'recalcular' ? '/api/admin/reparar-jornadas-futbol' : '/api/admin/actualizar-futbol-en-vivo', {
         method: 'POST',
         headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ accion }),
@@ -115,7 +115,7 @@ export default function AdminResultadosFutbolPage() {
       } else if (accion === 'crear') {
         const r = (body.resultados ?? []) as { liga: string; jornada: number | null; estado: string; detalle: string }[];
         setMensaje(r.length === 0 ? 'Nada que hacer.' : r.map((x) => `${x.liga}${x.jornada ? ` J${x.jornada}` : ''} → ${x.estado}: ${x.detalle}`).join('\n'));
-      } else if (accion === 'reparar') {
+      } else if (accion === 'reparar' || accion === 'recalcular') {
         const r = (body.resultados ?? []) as { competicion: string; estado: string; detalle: string }[];
         setMensaje(r.length === 0 ? 'No hay jornadas abiertas que reparar.' : r.map((x) => `${x.competicion} → ${x.estado}: ${x.detalle}`).join('\n'));
       } else if (accion === 'escudos') {
@@ -208,7 +208,7 @@ export default function AdminResultadosFutbolPage() {
 
   const saldoLabel = formatEuros(perfil.saldo_simulado);
   const initials = S.iniciales(perfil.nombre, perfil.apellido);
-  const boton = (texto: string, accion: 'sync' | 'forzar' | 'comprobar' | 'escudos' | 'crear' | 'reparar', principal = false) => (
+  const boton = (texto: string, accion: 'sync' | 'forzar' | 'comprobar' | 'escudos' | 'crear' | 'reparar' | 'recalcular', principal = false) => (
     <button
       type="button"
       disabled={trabajando}
@@ -242,6 +242,7 @@ export default function AdminResultadosFutbolPage() {
             {boton('Forzar sincronización', 'forzar')}
             {boton('Crear jornadas ahora', 'crear')}
             {boton('Reparar jornadas (añadir jugadores que faltan)', 'reparar')}
+            {boton('Recalcular precios de las jornadas sin empezar', 'recalcular')}
           </div>
           <p style={{ fontSize: 10.5, color: S.MUTED_3, lineHeight: 1.4, margin: 0 }}>
             "Crear jornadas ahora" comprueba el calendario de ESPN y crea las jornadas de La Liga y Champions que ya tengan todos los horarios confirmados (también se hace solo cada 30 minutos). "Sincronizar ahora" respeta las reglas del cron (no hace nada si la jornada está a más de 12 h o ya está completa). "Forzar" lo ejecuta igualmente y recalcula también los partidos ya congelados.

@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase, Perfil, Movimiento } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
+import InstalarApp from '@/components/InstalarApp';
 import * as S from '@/lib/mockupStyles';
 
 // Mismo criterio que en el registro (app/registro/page.tsx): solo letras,
@@ -253,6 +254,8 @@ export default function CuentaPage() {
               <span style={{ fontSize: 13, color: S.MUTED_2 }}>@{perfil.nombre_usuario}</span>
             )}
           </div>
+
+          <InstalarApp variante="tarjeta" />
 
           <Link href="/recargar" style={S.card}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>

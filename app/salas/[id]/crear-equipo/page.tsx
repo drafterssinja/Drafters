@@ -786,7 +786,7 @@ export default function CrearEquipoPage() {
                   <select
                     value={equipoHechoElegido}
                     onChange={(e) => usarEquipoHecho(e.target.value)}
-                    aria-label="Repetir un equipo que ya has hecho en esta jornada"
+                    aria-label="Elige un equipo que ya has hecho en esta jornada"
                     style={{
                       width: '100%',
                       fontFamily: "'Manrope', sans-serif",
@@ -800,7 +800,7 @@ export default function CrearEquipoPage() {
                     }}
                   >
                     <option value="" disabled>
-                      {isFutbol ? 'Repite un equipo que ya has hecho en esta jornada' : 'Repite un equipo que ya has hecho en este torneo'}
+                      {isFutbol ? 'Elige un equipo que ya has hecho en esta jornada' : 'Elige un equipo que ya has hecho en este torneo'}
                     </option>
                     {equiposHechos.map((e) => (
                       <option key={e.id} value={e.id}>

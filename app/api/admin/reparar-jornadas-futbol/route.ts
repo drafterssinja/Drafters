@@ -20,8 +20,15 @@ export async function POST(req: NextRequest) {
   const { data: perfil } = await admin.from('perfiles').select('rol').eq('id', userData.user.id).single();
   if (!perfil || perfil.rol !== 'admin') return NextResponse.json({ error: 'No autorizado.' }, { status: 401 });
 
+  let accion = '';
   try {
-    const resultados = await repararJornadasFutbol(admin);
+    accion = ((await req.json()) as { accion?: string }).accion ?? '';
+  } catch {
+    // sin cuerpo: reparación normal
+  }
+
+  try {
+    const resultados = await repararJornadasFutbol(admin, undefined, { forzarPrecios: accion === 'recalcular' });
     return NextResponse.json({ resultados });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
