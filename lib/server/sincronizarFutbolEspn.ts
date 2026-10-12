@@ -138,7 +138,10 @@ export function yyyymmdd(d: Date): string {
 function estadoEspn(ev: any): EstadoPartido {
   const tipo = ev?.status?.type ?? {};
   const nombre = String(tipo.name ?? '').toUpperCase();
-  if (/POSTPONED|CANCEL|ABANDON|SUSPEND|FORFEIT|DELAY/.test(nombre) && tipo.state !== 'in') return 'aplazado';
+  // 12/10 (Iñi): un partido suspendido o abandonado a mitad cuenta como
+  // aplazado (aunque ESPN lo deje "en juego"); si se reanuda, vuelve a contar.
+  if (/POSTPONED|CANCEL|ABANDON|SUSPEND|FORFEIT/.test(nombre)) return 'aplazado';
+  if (/DELAY/.test(nombre) && tipo.state !== 'in') return 'aplazado';
   if (tipo.state === 'in') return 'en_juego';
   if (tipo.state === 'post') return 'finalizado';
   return 'pendiente';
@@ -407,7 +410,21 @@ function filaDeEspn(nombre: string, nombreCompleto: string, equipoNuestro: strin
 // Guardado
 // ----------------------------------------------------------------------------
 type FilaPuntosBD = { jugador_id: string; puntos_total: number; partido_estado: string; actualizado: boolean; desglose: LineaDesglose[] | null };
-type FilaPartidoBD = { clave_local: string; clave_visitante: string; kickoff: string | null; estado: string; finalizado_visto_en: string | null; actualizado: boolean; actualizado_en: string | null; goles_detalle: GolDetalle[] | null };
+type FilaPartidoBD = { clave_local: string; clave_visitante: string; kickoff: string | null; estado: string; finalizado_visto_en: string | null; actualizado: boolean; actualizado_en: string | null; goles_detalle: GolDetalle[] | null; kickoff_original: string | null; descartado: boolean | null };
+
+// ----------------------------------------------------------------------------
+// PARTIDOS APLAZADOS O SUSPENDIDOS (12/10, regla de Iñi)
+// ----------------------------------------------------------------------------
+// - Si el partido se juega (o se reanuda) antes de que termine el último
+//   partido de la jornada, cuenta normal.
+// - Si se va a jugar más tarde (o no se juega), sus jugadores cuentan como
+//   suplentes: 0 puntos DEFINITIVOS (nombre en verde) y el partido se queda
+//   marcado como "Aplazado" aunque luego se juegue.
+// La jornada termina cuando han acabado todos sus partidos "normales". Un
+// partido no es normal si está aplazado/suspendido o si se ha movido más de
+// 24 h de su hora original (kickoff_original). Al terminar la jornada esos
+// partidos se marcan descartado = true y ya no se vuelven a puntuar.
+const HORAS_REPROGRAMADO = 24;
 
 function vacio(competicion: string, estado: ResultadoCompeticionFutbol['estado'], extra: Partial<ResultadoCompeticionFutbol> = {}): ResultadoCompeticionFutbol {
   return {
@@ -487,7 +504,7 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
   if (opciones.soloComprobar) return comprobarEmparejamiento(competicion, slug, jugadores, nuestros, jugadoresPorEquipo, alias);
 
   const [{ data: partidosBD }, { data: puntosBD }] = await Promise.all([
-    admin.from('futbol_partidos_jornada').select('clave_local,clave_visitante,kickoff,estado,finalizado_visto_en,actualizado,actualizado_en,goles_detalle').eq('competicion', competicion),
+    admin.from('futbol_partidos_jornada').select('clave_local,clave_visitante,kickoff,estado,finalizado_visto_en,actualizado,actualizado_en,goles_detalle,kickoff_original,descartado').eq('competicion', competicion),
     admin.from('futbol_puntos_jugador').select('jugador_id,puntos_total,partido_estado,actualizado,desglose').eq('competicion', competicion),
   ]);
   const partidosGuardados = (partidosBD as FilaPartidoBD[]) ?? [];
@@ -498,7 +515,7 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
     if (fechaLimite && ahora.getTime() < fechaLimite.getTime() - HORAS_ANTES_DE_EMPEZAR * 3600 * 1000) {
       return vacio(competicion, 'pendiente_de_empezar', { jugadoresEnFicha: jugadores.length, aviso: 'La jornada empieza en más de 12 horas; todavía no se sincroniza.' });
     }
-    if (partidosGuardados.length > 0 && partidosGuardados.length * 2 >= nuestros.size - 1 && partidosGuardados.every(congelado)) {
+    if (partidosGuardados.length > 0 && partidosGuardados.length * 2 >= nuestros.size - 1 && partidosGuardados.every((p) => congelado(p) || !!p.descartado)) {
       return vacio(competicion, 'completa', { jugadoresEnFicha: jugadores.length, partidosEncontrados: partidosGuardados.length, partidosFinalizados: partidosGuardados.length });
     }
   }
@@ -531,6 +548,9 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
   for (const p of partidos) {
     const k = `${p.local.clave}|${p.visitante.clave}`;
     const prev = guardadoPorPartido.get(k);
+    // Partido ya descartado al cerrar la jornada: no se toca ni se puntúa.
+    if (prev?.descartado) continue;
+    const kickoffOriginal = prev?.kickoff_original ?? prev?.kickoff ?? p.kickoff.toISOString();
     const finalizadoVistoEn = p.estado === 'finalizado' ? (prev?.finalizado_visto_en ?? ahora.toISOString()) : null;
     const yaCongelado = !!prev && congelado(prev) && p.estado === 'finalizado' && !opciones.forzar;
 
@@ -552,6 +572,8 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
       clave_visitante: p.visitante.clave,
       espn_id: p.espnId,
       kickoff: p.kickoff.toISOString(),
+      kickoff_original: kickoffOriginal,
+      descartado: false,
       equipo_local: p.local.nombre,
       equipo_visitante: p.visitante.nombre,
       logo_local: p.local.logo,
@@ -685,8 +707,59 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
   for (const c of equiposSinPartido) {
     for (const j of jugadoresPorEquipo.get(c) ?? []) {
       const previo = puntosGuardados.get(j.id);
-      if (previo && previo.partido_estado === 'sin_partido') continue;
+      if (previo && (previo.partido_estado === 'sin_partido' || (previo.partido_estado === 'aplazado' && previo.actualizado))) continue;
       filasPuntos.push({ jugador_id: j.id, competicion, puntos_total: 0, jugo: false, minutos: 0, espn_atleta_id: null, resultado_equipo: null, partido_estado: 'sin_partido', actualizado: false, desglose: [], actualizado_en: ahora.toISOString() });
+    }
+  }
+
+  // ¿Ha terminado la jornada? (regla de aplazados, ver arriba)
+  const yaDescartados = partidosGuardados.filter((g) => !!g.descartado);
+  const claveDe = (a: string, b: string) => `${a}|${b}`;
+  const descartadoPorClave = new Set(yaDescartados.map((g) => claveDe(g.clave_local, g.clave_visitante)));
+  const esReprogramado = (estado: string, kickoff: Date, original: string | null) =>
+    estado === 'aplazado' || (estado === 'pendiente' && !!original && kickoff.getTime() - new Date(original).getTime() > HORAS_REPROGRAMADO * 3600 * 1000);
+  const vivos = partidos.filter((p) => !descartadoPorClave.has(claveDe(p.local.clave, p.visitante.clave)));
+  const originalDe = (p: PartidoEspn) => {
+    const g = guardadoPorPartido.get(claveDe(p.local.clave, p.visitante.clave));
+    return g?.kickoff_original ?? g?.kickoff ?? null;
+  };
+  const fueraDePlazo = vivos.filter((p) => esReprogramado(p.estado, p.kickoff, originalDe(p)));
+  const normales = vivos.filter((p) => !fueraDePlazo.includes(p));
+  const clavesVistas = new Set([...partidos.map((p) => claveDe(p.local.clave, p.visitante.clave)), ...partidosGuardados.map((g) => claveDe(g.clave_local, g.clave_visitante))]);
+  const ultimoKickoffNormal = normales.reduce((m, p) => Math.max(m, p.kickoff.getTime()), 0);
+  const cubreTodos = clavesVistas.size * 2 >= nuestros.size - 1 || (normales.length > 0 && ahora.getTime() > ultimoKickoffNormal + 3 * 3600 * 1000);
+  const jornadaTerminada = normales.length > 0 && cubreTodos && normales.every((p) => p.estado === 'finalizado');
+
+  // Partidos guardados de otras pasadas que ya no aparecen (movidos fuera de
+  // la ventana de días) y siguen sin acabar: también quedan fuera de plazo.
+  const guardadosPerdidos = partidosGuardados.filter(
+    (g) => !g.descartado && g.estado !== 'finalizado' && !partidos.some((p) => p.local.clave === g.clave_local && p.visitante.clave === g.clave_visitante)
+  );
+
+  if (jornadaTerminada) {
+    const equiposADescartar = new Set<string>([...equiposSinPartido]);
+    for (const p of fueraDePlazo) {
+      equiposADescartar.add(p.local.clave);
+      equiposADescartar.add(p.visitante.clave);
+      const fila = filasPartido.find((f) => f.clave_local === p.local.clave && f.clave_visitante === p.visitante.clave);
+      if (fila) Object.assign(fila, { estado: 'aplazado', descartado: true, goles_local: null, goles_visitante: null, goles_detalle: [], actualizado: true });
+    }
+    for (const g of guardadosPerdidos) {
+      equiposADescartar.add(g.clave_local);
+      equiposADescartar.add(g.clave_visitante);
+      await admin.from('futbol_partidos_jornada').update({ estado: 'aplazado', descartado: true, actualizado: true, updated_at: ahora.toISOString() }).eq('competicion', competicion).eq('clave_local', g.clave_local).eq('clave_visitante', g.clave_visitante);
+    }
+    const idsDescartados = new Set<string>();
+    equiposADescartar.forEach((c) => (jugadoresPorEquipo.get(c) ?? []).forEach((j) => idsDescartados.add(j.id)));
+    if (idsDescartados.size > 0) {
+      for (let i = filasPuntos.length - 1; i >= 0; i--) if (idsDescartados.has(String(filasPuntos[i].jugador_id))) filasPuntos.splice(i, 1);
+      idsDescartados.forEach((id) => {
+        const previo = puntosGuardados.get(id);
+        if (previo && previo.partido_estado === 'aplazado' && previo.actualizado && Number(previo.puntos_total) === 0) return;
+        filasPuntos.push({ jugador_id: id, competicion, puntos_total: 0, jugo: false, minutos: 0, espn_atleta_id: null, resultado_equipo: null, partido_estado: 'aplazado', actualizado: true, desglose: [], actualizado_en: ahora.toISOString() });
+      });
+      // Avisos de esos jugadores (si los hubo antes de la suspensión) fuera.
+      for (let i = filasEventos.length - 1; i >= 0; i--) if (idsDescartados.has(String(filasEventos[i].jugador_id))) filasEventos.splice(i, 1);
     }
   }
 
@@ -713,8 +786,9 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
   // terminados — con un aplazado pendiente no se cierra sola.
   let mesasCerradas = false;
   {
-    const cubreTodos = partidos.length > 0 && partidos.length * 2 >= nuestros.size - 1;
-    if (cubreTodos && partidos.every((p) => p.estado === 'finalizado')) {
+    // 12/10: termina la jornada cuando acaban todos sus partidos normales;
+    // los aplazados para más tarde ya no la retienen (cuentan 0, ver arriba).
+    if (jornadaTerminada) {
       const { data: cerradas } = await admin.from('salas').update({ estado: 'finalizada' }).eq('deporte', 'futbol').eq('competicion', competicion).neq('estado', 'finalizada').select('id');
       mesasCerradas = (cerradas?.length ?? 0) > 0;
     }

@@ -44,7 +44,7 @@ import type { crearClienteAdmin } from './supabaseAdmin';
 import { BASE_ESPN, jsonEspn, yyyymmdd, mapaEquiposNuestros, claveNuestraDe } from './sincronizarFutbolEspn';
 import { normalizarNombre } from '../nombreMatch';
 import { generarSalasParaTorneo } from '../tiposDeSala';
-import { calcularPreciosFutbolDetallado, factorPosicion, fuerzaPorEquipo } from '../precioFutbol';
+import { calcularPreciosFutbolDetallado, crearAjusteValorPorPosicion, factorPosicion, fuerzaPorEquipo } from '../precioFutbol';
 import type { PosicionFutbol } from '../futbolPuntuacion';
 
 type Admin = ReturnType<typeof crearClienteAdmin>;
@@ -420,11 +420,13 @@ async function crearUnaLiga(admin: Admin, liga: (typeof LIGAS_AUTO)[number], aho
       const rango = valores.length > 0 ? { valorMin: Math.min(...valores), valorMax: Math.max(...valores) } : undefined;
 
       const nuevosIds = fichas.map(() => randomUUID());
+      // 11/10: en la Champions se regulan defensas y porteros (ver crearAjusteValorPorPosicion).
+      const ajustarValor = crearAjusteValorPorPosicion(competicion, plantilla.map((j) => ({ posicion: j.posicion, valor: j.valor_mercado })));
       const entrada = fichas.map((j, k) => {
         const f = fuerza.get(j.equipo_real as string);
-        return { id: nuevosIds[k], posicion: j.posicion as PosicionFutbol, valorMercado: j.valor_mercado, factorPartido: f !== undefined ? factorPosicion(f, j.posicion as PosicionFutbol) : 1 };
+        return { id: nuevosIds[k], posicion: j.posicion as PosicionFutbol, valorMercado: ajustarValor(j.posicion, j.valor_mercado), factorPartido: f !== undefined ? factorPosicion(f, j.posicion as PosicionFutbol) : 1 };
       });
-      const calculo = calcularPreciosFutbolDetallado(entrada, {}, rango);
+      const calculo = calcularPreciosFutbolDetallado(entrada, {}, rango, competicion);
       const precioPorId = new Map(calculo.precios.map((p) => [p.id, p]));
 
       const filas = fichas.map((j, k) => {

@@ -22,7 +22,7 @@ import type { crearClienteAdmin } from './supabaseAdmin';
 import { mapaEquiposNuestros, claveNuestraDe } from './sincronizarFutbolEspn';
 import { plantillaDeLaLiga } from './crearFutbolAutomatico';
 import { normalizarNombre } from '../nombreMatch';
-import { calcularPreciosFutbolDetallado, factorPosicion, fuerzaPorEquipo } from '../precioFutbol';
+import { calcularPreciosFutbolDetallado, crearAjusteValorPorPosicion, factorPosicion, fuerzaPorEquipo } from '../precioFutbol';
 import { esEquipoFilial, nombrePrimerEquipo } from '../aliasEquipos';
 import { claveEquipoFutbol } from '../futbolLaLiga';
 import type { PosicionFutbol } from '../futbolPuntuacion';
@@ -118,11 +118,13 @@ async function repararUna(admin: Admin, competicion: string, prefijo: string): P
   const valores = plantilla.map((j) => j.valor_mercado).filter((x): x is number => typeof x === 'number' && x > 0);
   const rango = valores.length > 0 ? { valorMin: Math.min(...valores), valorMax: Math.max(...valores) } : undefined;
   const ids = fichas.map(() => randomUUID());
+  // 11/10: en la Champions se regulan defensas y porteros (ver crearAjusteValorPorPosicion).
+  const ajustarValor = crearAjusteValorPorPosicion(competicion, plantilla.map((j) => ({ posicion: j.posicion, valor: j.valor_mercado })));
   const entrada = fichas.map((j, k) => {
     const f = fuerza.get(j.equipo_real as string);
-    return { id: ids[k], posicion: j.posicion as PosicionFutbol, valorMercado: j.valor_mercado, factorPartido: f !== undefined ? factorPosicion(f, j.posicion as PosicionFutbol) : 1 };
+    return { id: ids[k], posicion: j.posicion as PosicionFutbol, valorMercado: ajustarValor(j.posicion, j.valor_mercado), factorPartido: f !== undefined ? factorPosicion(f, j.posicion as PosicionFutbol) : 1 };
   });
-  const calculo = calcularPreciosFutbolDetallado(entrada, {}, rango);
+  const calculo = calcularPreciosFutbolDetallado(entrada, {}, rango, competicion);
   const precioPorId = new Map(calculo.precios.map((p) => [p.id, p]));
 
   // 3. Jugadores que ya tiene la jornada.

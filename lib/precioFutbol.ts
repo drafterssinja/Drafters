@@ -169,6 +169,35 @@ export const PRECIO_FUTBOL_CONFIG = {
   redondeo: 100,
 } as const;
 
+// ============================================================================
+// REBAJAS FINALES POR LIGA (12/10, pedido de Iñi)
+// ============================================================================
+// Se aplican al final, sobre el precio ya calculado, para poder meter algún
+// jugador bueno más sin que el presupuesto ahogue:
+//   - LaLiga: los jugadores de más de 12.000 € cuestan 1.000 € menos.
+//   - Champions: centrocampistas y delanteros cuestan 2.500 € menos TODOS
+//     (sus valores de traspaso los inflan en toda la tabla, no solo arriba),
+//     sin bajar nunca del precio mínimo; porteros y defensas de más de
+//     12.000 €, 1.500 € menos.
+// (Simulado con la tabla real de Champions: la mediana de medios/delanteros
+// baja de 9.700 a 7.200 € y el mejor once posible pasa a poder llevar 2
+// jugadores del 5 % más valioso, frente a 0 antes.)
+export type RebajaLiga = { prefijo: string; umbral: number; rebajaSobreUmbral: Partial<Record<PosicionFutbol, number>>; rebajaTodos: Partial<Record<PosicionFutbol, number>> };
+export const REBAJAS_POR_LIGA: RebajaLiga[] = [
+  { prefijo: 'La Liga', umbral: 12_000, rebajaSobreUmbral: { portero: 1_000, defensa: 1_000, centrocampista: 1_000, delantero: 1_000 }, rebajaTodos: {} },
+  { prefijo: 'Champions League', umbral: 12_000, rebajaSobreUmbral: { portero: 1_500, defensa: 1_500 }, rebajaTodos: { centrocampista: 2_500, delantero: 2_500 } },
+];
+
+export function aplicarRebajaLiga(competicion: string | null | undefined, posicion: PosicionFutbol, precio: number, minimo: number = PRECIO_FUTBOL_CONFIG.minimo): number {
+  const c = (competicion ?? '').toLowerCase().replace(/\s+/g, ' ');
+  const r = REBAJAS_POR_LIGA.find((x) => c.startsWith(x.prefijo.toLowerCase()));
+  if (!r) return precio;
+  let p = precio;
+  if (r.rebajaTodos[posicion]) p = Math.max(minimo, p - (r.rebajaTodos[posicion] as number));
+  else if (precio > r.umbral && r.rebajaSobreUmbral[posicion]) p = p - (r.rebajaSobreUmbral[posicion] as number);
+  return p;
+}
+
 export type ConfigPrecioFutbol = {
   presupuesto: number;
   minimo: number;
@@ -480,7 +509,9 @@ export function calcularPreciosFutbolDetallado(
    * (como antes) a partir de la propia lista `jugadores` recibida — pensado
    * solo para pruebas o para cuando de verdad no hay más tabla que esa.
    */
-  rangoNivel?: { valorMin: number; valorMax: number }
+  rangoNivel?: { valorMin: number; valorMax: number },
+  /** Competición (p.ej. "La Liga - Jornada 9") para aplicar las rebajas finales por liga (12/10). */
+  competicion?: string | null
 ): ResultadoPreciosFutbol {
   const cfg: ConfigPrecioFutbol = {
     presupuesto: EQUIPO_PRESUPUESTO,
@@ -528,7 +559,7 @@ export function calcularPreciosFutbolDetallado(
       valorMercado: tieneValor(j) ? (j.valorMercado as number) : null,
       nivel: i.nivel,
       nivelAjustado: i.nivelAjustado,
-      precio: i.precio,
+      precio: aplicarRebajaLiga(competicion, j.posicion, i.precio, cfg.minimo),
       sinValor: i.sinValor,
     };
   });
@@ -543,4 +574,58 @@ export function calcularPreciosFutbol(
   rangoNivel?: { valorMin: number; valorMax: number }
 ): JugadorConPrecioFutbol[] {
   return calcularPreciosFutbolDetallado(jugadores, config, rangoNivel).precios;
+}
+
+// ============================================================================
+// AJUSTE POR POSICIÓN SEGÚN LA LIGA (11/10, pedido de Iñi)
+// ============================================================================
+// En la Champions el valor de cada jugador es su valor estimado de traspaso, que
+// infla a los defensas jóvenes (Cubarsí salía a 21.000 frente a 16.000 en LaLiga)
+// y hunde a los porteros. Para esas posiciones, el valor se "reparte" igual que el
+// del resto: cada jugador toma el valor que ocupa su mismo puesto (percentil)
+// dentro de TODA la tabla de la competición, y luego se aplica un peso (en escala
+// logarítmica, sobre el valor mínimo de la tabla). LaLiga (valores de LaLiga
+// Fantasy, ya pensados para fantasy) no se toca.
+export type AjustePosicion = Partial<Record<PosicionFutbol, number>>;
+export const AJUSTE_POSICION_POR_LIGA: { prefijo: string; ajuste: AjustePosicion }[] = [
+  { prefijo: 'Champions League', ajuste: { portero: 1, defensa: 0.83 } },
+];
+
+export function ajustePosicionDeCompeticion(competicion: string | null | undefined): AjustePosicion | null {
+  const c = (competicion ?? '').toLowerCase();
+  return AJUSTE_POSICION_POR_LIGA.find((a) => c.startsWith(a.prefijo.toLowerCase()))?.ajuste ?? null;
+}
+
+/**
+ * Devuelve una función que traduce (posición, valor) al valor ajustado, calculada
+ * sobre la tabla completa de la competición. Sin ajuste para la liga → identidad.
+ */
+export function crearAjusteValorPorPosicion(
+  competicion: string | null | undefined,
+  tabla: { posicion: PosicionFutbol | string | null; valor: number | null | undefined }[]
+): (posicion: PosicionFutbol | string | null, valor: number | null | undefined) => number | null | undefined {
+  const ajuste = ajustePosicionDeCompeticion(competicion);
+  if (!ajuste) return (_p, v) => v;
+  const validos = tabla.filter((t): t is { posicion: PosicionFutbol; valor: number } => typeof t.valor === 'number' && t.valor > 0 && !!t.posicion);
+  if (validos.length < 2) return (_p, v) => v;
+  const lnTodos = validos.map((t) => Math.log(t.valor)).sort((a, b) => a - b);
+  const lnMin = lnTodos[0];
+  const porPos = new Map<string, number[]>();
+  for (const t of validos) {
+    const l = porPos.get(t.posicion) ?? [];
+    l.push(t.valor);
+    porPos.set(t.posicion, l);
+  }
+  porPos.forEach((l) => l.sort((a, b) => a - b));
+  return (posicion, valor) => {
+    if (!posicion || typeof valor !== 'number' || !(valor > 0)) return valor;
+    const peso = ajuste[posicion as PosicionFutbol];
+    const lista = porPos.get(posicion);
+    if (peso === undefined || !lista || lista.length < 2) return valor;
+    let menores = 0;
+    while (menores < lista.length && lista[menores] < valor) menores++;
+    const q = Math.min(1, menores / (lista.length - 1));
+    const ln = lnTodos[Math.min(lnTodos.length - 1, Math.round(q * (lnTodos.length - 1)))];
+    return Math.exp(lnMin + peso * (ln - lnMin));
+  };
 }

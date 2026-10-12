@@ -76,7 +76,10 @@ export const MINUTOS_PORTERO_PORTERIA_A_CERO = 90;
 export const PUNTOS_DOBLETE = 2;
 export const PUNTOS_HATTRICK = 5;
 export const PUNTOS_PARTIDO_COMPLETO = 1;
-/** 11/10 (Iñi): +5 por victoria del equipo para TODAS las posiciones (antes solo portero). */
+/** Victoria del equipo para TODAS las posiciones (Iñi, 11/10). 12/10 (Iñi):
+ * portero y defensa +5; centrocampista y delantero +3 (ya tienen más
+ * opciones de sumar con goles y asistencias). */
+export const PUNTOS_VICTORIA_POR_POSICION: Record<string, number> = { portero: 5, defensa: 5, centrocampista: 3, delantero: 3 };
 export const PUNTOS_VICTORIA = 5;
 /** Minutos mínimos jugados para cobrar la victoria (Iñi, 11/10). */
 export const MINUTOS_VICTORIA = 60;
@@ -175,7 +178,7 @@ export function puntuarJugador(posicion: PosicionFutbol | string | null | undefi
 
   // Victoria del equipo — 11/10, Iñi: para TODAS las posiciones (antes solo el
   // portero), siempre que el jugador haya jugado al menos 60 minutos.
-  if (ctx.finalizado && ctx.equipoGana && st.minutos >= MINUTOS_VICTORIA) addTotal('victoria', 'Victoria del equipo (60+ min.)', PUNTOS_VICTORIA);
+  if (ctx.finalizado && ctx.equipoGana && st.minutos >= MINUTOS_VICTORIA) addTotal('victoria', 'Victoria del equipo (60+ min.)', PUNTOS_VICTORIA_POR_POSICION[pos] ?? 3);
 
   const total = redondear(lineas.reduce((s, l) => s + l.puntos, 0));
   return { total, desglose: lineas };

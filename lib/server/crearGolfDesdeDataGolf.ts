@@ -239,7 +239,7 @@ async function nombresEquivalentesExistentes(admin: Admin, nombreTorneo: string)
   return Array.from(encontrados);
 }
 
-async function procesarTour(admin: Admin, tour: DataGolfTour): Promise<ResultadoCreacionTour> {
+async function procesarTour(admin: Admin, tour: DataGolfTour, eventoDeOtroTour: string | null = null): Promise<ResultadoCreacionTour> {
   const base = { tour, evento: null as string | null };
 
   // 1. Campo del torneo actual/próximo del tour (nombre, fechas, países).
@@ -257,6 +257,15 @@ async function procesarTour(admin: Admin, tour: DataGolfTour): Promise<Resultado
   }
   const nombreTorneo = campo.eventName;
   base.evento = nombreTorneo;
+
+  // 12/10 (Iñi): el Baycurrent Classic (PGA Tour) salió en la pestaña del DP
+  // World Tour porque Data Golf lo devolvió también para el tour europeo. Si
+  // el torneo del DP World es el mismo que el del PGA Tour de esta semana, se
+  // deja al PGA Tour y aquí no se crea ni se toca nada.
+  const normalizar = (t: string) => t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  if (tour === 'euro' && eventoDeOtroTour && normalizar(eventoDeOtroTour) === normalizar(nombreTorneo)) {
+    return { ...base, estado: 'ya_existe', detalle: 'Es el mismo torneo que el del PGA Tour de esta semana: se gestiona solo en el PGA Tour.' };
+  }
 
   // 1b. CIERRE AUTOMÁTICO DE INSCRIPCIONES (pedido de Iñi, 05/10): en cuanto
   // Data Golf publica la hora de la primera salida, se fija la fecha límite de
@@ -365,10 +374,9 @@ async function procesarTour(admin: Admin, tour: DataGolfTour): Promise<Resultado
 
 /** Un ciclo completo: revisa DP World Tour y PGA Tour. */
 export async function crearGolfDesdeDataGolf(admin: Admin): Promise<ResultadoCreacionTour[]> {
-  const tours: DataGolfTour[] = ['euro', 'pga'];
-  const resultados: ResultadoCreacionTour[] = [];
-  for (const tour of tours) {
-    resultados.push(await procesarTour(admin, tour));
-  }
-  return resultados;
+  // 12/10: primero el PGA Tour, y el DP World Tour sabiendo qué torneo es el
+  // del PGA (para no crear dos veces el mismo, ni con el circuito equivocado).
+  const pga = await procesarTour(admin, 'pga');
+  const euro = await procesarTour(admin, 'euro', pga.evento);
+  return [euro, pga];
 }

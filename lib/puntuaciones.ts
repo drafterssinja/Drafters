@@ -94,8 +94,17 @@ export const PUNTUACION_FUTBOL: TablaPuntuacion[] = [
       { accion: 'MVP del partido', puntos: '+3', proximamente: true },
       { accion: 'Hat-trick (3 goles en el mismo partido)', puntos: '+5 adicionales' },
       { accion: 'Doblete (2 goles en el mismo partido)', puntos: '+2 adicionales' },
-      { accion: 'Victoria del equipo (60+ minutos jugados)', puntos: '+5' },
+      { accion: 'Victoria del equipo (60+ minutos jugados) — portero / defensa', puntos: '+5' },
+      { accion: 'Victoria del equipo (60+ minutos jugados) — centrocampista / delantero', puntos: '+3' },
       { accion: 'Partido completo jugado (90 min.)', puntos: '+1' },
+    ],
+  },
+  {
+    // 12/10, Iñi: regla de partidos aplazados o suspendidos.
+    titulo: 'Partidos aplazados o suspendidos',
+    filas: [
+      { accion: 'Se juega (o se reanuda) antes de que termine el último partido de la jornada: puntúa normal', puntos: 'Normal' },
+      { accion: 'Se juega más tarde, o no se juega: sus jugadores cuentan como suplentes', puntos: '0' },
     ],
   },
 ];
