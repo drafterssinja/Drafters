@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { motion } from 'framer-motion';
 import { supabase } from '@/lib/supabaseClient';
 import { etiquetasPosicion } from '@/lib/posicionesEmpate';
 import { formatPuntos } from '@/lib/futbolLaLiga';
@@ -24,9 +25,15 @@ export default function ResumenClasificacionMesa({ salaId, competicion, deporte,
   useEffect(() => {
     if (deporte !== 'futbol' && deporte !== 'golf') return;
     let activo = true;
-    (async () => {
-      const { data: eqs } = await supabase.rpc('equipos_sala_clasificacion', { p_sala_id: salaId });
-      const equipos = ((eqs as { equipo_id: string; nombre: string; jugadores: string[] }[]) ?? []).map((e) => ({ id: e.equipo_id, nombre: e.nombre, jugadores: e.jugadores ?? [] }));
+    let equipos: { id: string; nombre: string; jugadores: string[] }[] | null = null;
+    // 13/10 (Iñi): se actualiza sola, como la clasificación en directo: los
+    // equipos se leen una vez y los puntos cada 20 s (solo con la pantalla a
+    // la vista y mientras la mesa no esté finalizada).
+    async function cargar() {
+      if (equipos === null) {
+        const { data: eqs } = await supabase.rpc('equipos_sala_clasificacion', { p_sala_id: salaId });
+        equipos = ((eqs as { equipo_id: string; nombre: string; jugadores: string[] }[]) ?? []).map((e) => ({ id: e.equipo_id, nombre: e.nombre, jugadores: e.jugadores ?? [] }));
+      }
       if (equipos.length === 0) {
         if (activo) setFilas([]);
         return;
@@ -42,11 +49,24 @@ export default function ResumenClasificacionMesa({ salaId, competicion, deporte,
         .map((e) => ({ equipoId: e.id, nombre: e.nombre, total: Math.round(e.jugadores.reduce((a, id) => a + (puntos.get(id) ?? 0), 0) * 100) / 100 }))
         .sort((a, b) => b.total - a.total);
       if (activo) setFilas(lista);
-    })();
-    return () => {
+    }
+    void cargar();
+    if (finalizada) return () => {
       activo = false;
     };
-  }, [salaId, competicion, deporte]);
+    const intervalo = setInterval(() => {
+      if (document.visibilityState === 'visible') void cargar();
+    }, 20000);
+    const alVolver = () => {
+      if (document.visibilityState === 'visible') void cargar();
+    };
+    document.addEventListener('visibilitychange', alVolver);
+    return () => {
+      activo = false;
+      clearInterval(intervalo);
+      document.removeEventListener('visibilitychange', alVolver);
+    };
+  }, [salaId, competicion, deporte, finalizada]);
 
   if (!filas || filas.length === 0) return null;
   const etiquetas = etiquetasPosicion(filas, (f) => f.total);
@@ -76,11 +96,11 @@ export default function ResumenClasificacionMesa({ salaId, competicion, deporte,
           {filas.map((f, k) => {
             const mio = f.equipoId === miEquipoId;
             return (
-              <div key={f.equipoId} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <motion.div layout transition={{ type: 'spring', stiffness: 420, damping: 38 }} key={f.equipoId} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ flexShrink: 0, width: 28, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 13, color: mio ? S.ACCENT : '#F0B94D' }}>{etiquetas[k]}</span>
                 <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: mio ? 800 : 600, color: mio ? S.ACCENT : S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.nombre}</span>
                 <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 13, color: mio ? S.ACCENT : S.MUTED }}>{formatPuntos(f.total)} pts</span>
-              </div>
+              </motion.div>
             );
           })}
         </div>

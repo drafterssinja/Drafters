@@ -1,5 +1,6 @@
 'use client';
 
+import { todasLasFilas } from '@/lib/paginar';
 import { useEffect, useMemo, useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -445,11 +446,15 @@ export default function AdminMesasDraftersPage() {
     const { filas, avisos } = parsearValoresMercado(textoValorMercado);
 
     const prefijo = LIGA_FUTBOL_PREFIJO[ligaValorMercado];
-    const { data, error: fetchError } = await supabase
-      .from('jugadores')
-      .select('id, nombre, equipo_real, posicion, valor_mercado, competicion')
-      .eq('deporte', 'futbol')
-      .ilike('competicion', `${prefijo}%`);
+    const { data, error: fetchError } = await todasLasFilas((d, h) =>
+      supabase
+        .from('jugadores')
+        .select('id, nombre, equipo_real, posicion, valor_mercado, competicion')
+        .eq('deporte', 'futbol')
+        .ilike('competicion', `${prefijo}%`)
+        .order('id')
+        .range(d, h)
+    );
 
     setCalculandoPreviewValor(false);
 
@@ -634,11 +639,15 @@ export default function AdminMesasDraftersPage() {
     // crea al confirmar). Los equipos que no aparezcan en las cuotas pegadas
     // simplemente no entran en esta jornada — se quedan como estaban.
     const prefijo = LIGA_FUTBOL_PREFIJO[ligaJornadaFutbol];
-    const { data, error: fetchError } = await supabase
-      .from('jugadores')
-      .select('id, nombre, equipo_real, posicion, valor_mercado, competicion')
-      .eq('deporte', 'futbol')
-      .ilike('competicion', `${prefijo}%`);
+    const { data, error: fetchError } = await todasLasFilas((d, h) =>
+      supabase
+        .from('jugadores')
+        .select('id, nombre, equipo_real, posicion, valor_mercado, competicion')
+        .eq('deporte', 'futbol')
+        .ilike('competicion', `${prefijo}%`)
+        .order('id')
+        .range(d, h)
+    );
 
     setCalculandoPreviewCuotas(false);
 

@@ -1,5 +1,6 @@
 'use client';
 
+import { todasLasFilas } from '@/lib/paginar';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
@@ -329,7 +330,8 @@ export default function ClasificacionMesaFutbol({ sala, saldoLabel, initials }: 
     let activo = true;
     async function cargar() {
       const [{ data: jug }, { data: eqs }, { data: esc }] = await Promise.all([
-        supabase.from('jugadores').select('id,nombre,equipo_real,posicion').eq('deporte', 'futbol').eq('competicion', sala.competicion),
+        // 13/10: paginado (más de 1.000 jugadores en Champions: faltaban jugadores en los equipos).
+        todasLasFilas<JugadorF>((d, h) => supabase.from('jugadores').select('id,nombre,equipo_real,posicion').eq('deporte', 'futbol').eq('competicion', sala.competicion).order('id').range(d, h)),
         // Solo devuelve filas cuando la inscripción ya se ha cerrado.
         supabase.rpc('equipos_sala_clasificacion', { p_sala_id: sala.id }),
         supabase.from('futbol_escudos').select('clave,logo'),
@@ -372,10 +374,14 @@ export default function ClasificacionMesaFutbol({ sala, saldoLabel, initials }: 
     let activo = true;
     async function refrescar() {
       const [{ data: pts }, { data: pts2 }] = await Promise.all([
-        supabase
-          .from('futbol_puntos_jugador')
-          .select('jugador_id,jugo,minutos,resultado_equipo,puntos_total,partido_estado,actualizado,desglose')
-          .eq('competicion', sala.competicion),
+        todasLasFilas<PuntosF>((d, h) =>
+          supabase
+            .from('futbol_puntos_jugador')
+            .select('jugador_id,jugo,minutos,resultado_equipo,puntos_total,partido_estado,actualizado,desglose')
+            .eq('competicion', sala.competicion)
+            .order('jugador_id')
+            .range(d, h)
+        ),
         supabase
           .from('futbol_partidos_jornada')
           .select('clave_local,clave_visitante,kickoff,equipo_local,equipo_visitante,logo_local,logo_visitante,goles_local,goles_visitante,estado,reloj,goles_detalle')

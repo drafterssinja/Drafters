@@ -1,5 +1,6 @@
 'use client';
 
+import { todasLasFilas } from '@/lib/paginar';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
@@ -209,7 +210,8 @@ export default function CrearEquipoPage() {
 
       const [{ data: misEquiposData }, { data: jugData }, { data: partidosData }, { data: equipoEditandoData }, { data: hechosData }] = await Promise.all([
         supabase.from('equipos').select('id, inscripciones(estado)').eq('sala_id', salaId).eq('usuario_id', session.user.id),
-        supabase.from('jugadores').select('id,nombre,posicion,precio,lesionado,equipo_real,baja').eq('deporte', salaRow.deporte).eq('competicion', salaRow.competicion).order('precio', { ascending: false }),
+        // 13/10: paginado (más de 1.000 jugadores en Champions: faltaban los más baratos).
+        todasLasFilas((d, h) => supabase.from('jugadores').select('id,nombre,posicion,precio,lesionado,equipo_real,baja').eq('deporte', salaRow.deporte).eq('competicion', salaRow.competicion).order('precio', { ascending: false }).order('id').range(d, h)),
         salaRow.deporte === 'futbol'
           ? supabase.from('cuotas_partido_futbol').select('equipo_local,equipo_visitante,cuota_1,cuota_x,cuota_2').eq('competicion', salaRow.competicion)
           : Promise.resolve({ data: [] as PartidoRow[] }),
