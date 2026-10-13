@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { registrarAperturaSiToca, registrarUsoApp } from '@/lib/usoApp';
+import { registrarAperturaSiToca, registrarEntradaConSesionGuardada, registrarUsoApp } from '@/lib/usoApp';
 import { supabase } from '@/lib/supabaseClient';
 
 // Registra public/sw.js (necesario para que Android ofrezca instalar la app)
@@ -24,13 +24,25 @@ export default function RegistrarServiceWorker() {
     };
     // 13/10: estadística de aperturas desde el icono (y al iniciar sesión).
     void registrarAperturaSiToca();
+    // 13/10: cada entrada con la sesión ya guardada cuenta en el Registro de actividad.
+    void registrarEntradaConSesionGuardada();
     const { data: sub } = supabase.auth.onAuthStateChange((evento) => {
       if (evento === 'SIGNED_IN') void registrarAperturaSiToca();
     });
+    // Volver a la app/pestaña tras un rato (el móvil no recarga la página)
+    // también cuenta como entrada, si han pasado 30 min desde la anterior.
+    const alVolver = () => {
+      if (document.visibilityState === 'visible') {
+        void registrarEntradaConSesionGuardada();
+        void registrarAperturaSiToca();
+      }
+    };
+    document.addEventListener('visibilitychange', alVolver);
     window.addEventListener('beforeinstallprompt', alAviso);
     window.addEventListener('appinstalled', alInstalar);
     if (!('serviceWorker' in navigator)) return () => {
       sub.subscription.unsubscribe();
+      document.removeEventListener('visibilitychange', alVolver);
       window.removeEventListener('beforeinstallprompt', alAviso);
       window.removeEventListener('appinstalled', alInstalar);
     };
@@ -39,6 +51,7 @@ export default function RegistrarServiceWorker() {
     });
     return () => {
       sub.subscription.unsubscribe();
+      document.removeEventListener('visibilitychange', alVolver);
       window.removeEventListener('beforeinstallprompt', alAviso);
       window.removeEventListener('appinstalled', alInstalar);
     };

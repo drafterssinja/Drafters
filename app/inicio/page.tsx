@@ -7,6 +7,7 @@ import { supabase, Perfil } from '@/lib/supabaseClient';
 import LoMasCaliente from '@/components/LoMasCaliente';
 import DraftersHeader from '@/components/DraftersHeader';
 import InstalarApp from '@/components/InstalarApp';
+import ResumenClasificacionMesa from '@/components/ResumenClasificacionMesa';
 import * as S from '@/lib/mockupStyles';
 import { formatEuros } from '@/lib/salaShared';
 
@@ -42,10 +43,16 @@ type EquipoFila = {
   nombre_equipo: string | null;
   jugadores: string[];
   gasto_total: number;
-  salas: { id: string; nombre: string; competicion: string; deporte: string; estado: string; tipo: string } | null;
+  salas: { id: string; nombre: string; competicion: string; deporte: string; estado: string; tipo: string; fecha_limite_inscripcion?: string | null } | null;
   porras: { id: string; major: string; estado: string; competicion: string | null; fecha_limite_inscripcion: string | null } | null;
   inscripciones: { estado: string }[];
 };
+
+// Mesa con la inscripción ya cerrada (ha empezado): ya hay clasificación.
+function salaCerrada(eq: EquipoFila): boolean {
+  const f = eq.salas?.fecha_limite_inscripcion;
+  return !!f && new Date(f).getTime() <= Date.now();
+}
 
 export default function InicioPage() {
   const router = useRouter();
@@ -83,7 +90,7 @@ export default function InicioPage() {
         supabase
           .from('equipos')
           .select(
-            'id, modo, sala_id, porra_id, nombre_equipo, jugadores, gasto_total, salas(id,nombre,competicion,deporte,estado,tipo), porras(id,major,estado,competicion,fecha_limite_inscripcion), inscripciones(estado)'
+            'id, modo, sala_id, porra_id, nombre_equipo, jugadores, gasto_total, salas(id,nombre,competicion,deporte,estado,tipo,fecha_limite_inscripcion), porras(id,major,estado,competicion,fecha_limite_inscripcion), inscripciones(estado)'
           )
           .eq('usuario_id', session.user.id)
           .order('created_at', { ascending: false }),
@@ -315,7 +322,8 @@ export default function InicioPage() {
                         padding: '12px 14px',
                       }}
                     >
-                      <Link href={href} style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1, textDecoration: 'none' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0, flex: 1 }}>
+                      <Link href={href} style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, textDecoration: 'none' }}>
                         <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#F0B94D' }}>
                           {competicionLabel}
                         </span>
@@ -323,6 +331,11 @@ export default function InicioPage() {
                           {salaNombre}
                         </span>
                       </Link>
+                      {/* 13/10 (Iñi): puesto actual en la mesa y, al pulsarlo, la clasificación. */}
+                      {eq.salas && eq.sala_id && (enDirecto || esFinalizadoEq || salaCerrada(eq)) && (
+                        <ResumenClasificacionMesa salaId={eq.sala_id} competicion={eq.salas.competicion} deporte={eq.salas.deporte} miEquipoId={eq.id} finalizada={esFinalizadoEq} />
+                      )}
+                      </div>
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
                         <Link
                           href={href}

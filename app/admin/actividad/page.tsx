@@ -44,7 +44,7 @@ type EventoActividad = {
   apellido: string | null;
   email: string | null;
   tipo: 'login' | 'inscripcion' | 'recarga' | 'clasificacion';
-  detalle: { modo?: 'sala' | 'porra'; nombre?: string; tipo_recarga?: 'gratuita' | 'video' } | null;
+  detalle: { modo?: 'sala' | 'porra'; nombre?: string; tipo_recarga?: 'gratuita' | 'video'; via?: 'sesion_guardada' | 'usuario_y_contrasena'; desde?: 'app' | 'navegador'; plataforma?: 'ios' | 'android' | 'otro' } | null;
   creado_en: string;
 };
 
@@ -223,7 +223,14 @@ export default function AdminActividadPage() {
   }
 
   function resumenEvento(e: EventoActividad): string {
-    if (e.tipo === 'login') return 'Ha iniciado sesión';
+    if (e.tipo === 'login') {
+      // 13/10: también las entradas con la sesión ya guardada (sin poner contraseña).
+      const disp = e.detalle?.plataforma === 'ios' ? 'iPhone' : e.detalle?.plataforma === 'android' ? 'Android' : e.detalle?.plataforma === 'otro' ? 'ordenador' : null;
+      if (e.detalle?.via === 'sesion_guardada') {
+        return `Ha entrado (sesión guardada${e.detalle.desde === 'app' ? ' · app' : ' · navegador'}${disp ? ` · ${disp}` : ''})`;
+      }
+      return `Ha iniciado sesión${disp ? ` (${disp})` : ''}`;
+    }
     if (e.tipo === 'recarga') {
       return e.detalle?.tipo_recarga === 'video' ? 'Ha recargado 20 € viendo un vídeo' : 'Ha recargado 20 € (gratuita mensual)';
     }

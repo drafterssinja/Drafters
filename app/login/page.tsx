@@ -3,6 +3,7 @@
 import { useState, FormEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { marcarEntradaRegistrada, plataformaActual } from '@/lib/usoApp';
 import { supabase } from '@/lib/supabaseClient';
 import { traducirErrorAuth } from '@/lib/authErrors';
 import DraftersHeader from '@/components/DraftersHeader';
@@ -67,7 +68,8 @@ export default function LoginPage() {
     // Registro de actividad (28/09, pedido de Iñi) — no bloquea el acceso
     // si por lo que sea falla (registrar_evento_actividad() ya se traga
     // cualquier caso raro del lado del servidor).
-    await supabase.rpc('registrar_evento_actividad', { p_tipo: 'login' });
+    await supabase.rpc('registrar_evento_actividad', { p_tipo: 'login', p_detalle: { via: 'usuario_y_contrasena', plataforma: plataformaActual() } });
+    marcarEntradaRegistrada();
 
     router.push('/inicio');
   }

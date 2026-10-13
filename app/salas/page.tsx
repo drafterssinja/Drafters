@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState, Suspense, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, Suspense, type CSSProperties } from 'react';
+import { motion } from 'framer-motion';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase, Perfil } from '@/lib/supabaseClient';
 import AvisoMasMesas from '@/components/AvisoMasMesas';
@@ -130,6 +131,11 @@ function SalasPageInner() {
 
   const [salas, setSalas] = useState<SalaFila[]>([]);
   const [inscritosPorSala, setInscritosPorSala] = useState<Map<string, number>>(new Map());
+  // 13/10 (Iñi): la lista se actualiza sola (sin recargar) cuando alguien se
+  // apunta o se borra; la mesa que cambia se ilumina un momento y el orden
+  // (las más llenas arriba) se recoloca con una animación.
+  const [salasCambiadas, setSalasCambiadas] = useState<Set<string>>(new Set());
+  const inscritosPrevios = useRef<Map<string, number> | null>(null);
   const [perfil, setPerfil] = useState<Perfil | null>(null);
   const [cargando, setCargando] = useState(true);
   // Finalizadas (04/10, corrección de Iñi): no se ven de primeras al
@@ -182,6 +188,7 @@ function SalasPageInner() {
       const mapaInscritos = new Map<string, number>();
       ((inscritosData as { sala_id: string; inscritos: number }[]) ?? []).forEach((fila) => mapaInscritos.set(fila.sala_id, Number(fila.inscritos)));
       setInscritosPorSala(mapaInscritos);
+      inscritosPrevios.current = mapaInscritos;
       setCargando(false);
     }
 
@@ -190,6 +197,57 @@ function SalasPageInner() {
       activo = false;
     };
   }, [router]);
+
+  // Actualización en directo (13/10): plazas cada 5 s y mesas nuevas (copias
+  // que se crean al llenarse una) cada 30 s, solo con la pestaña visible.
+  useEffect(() => {
+    let activo = true;
+    let vueltas = 0;
+    async function refrescar() {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      vueltas++;
+      const [{ data: inscritosData }, salasRes] = await Promise.all([
+        supabase.rpc('inscritos_por_sala'),
+        vueltas % 6 === 0
+          ? supabase.from('salas').select('id,nombre,competicion,deporte,tipo,aforo,buy_in,estado,fecha_limite_inscripcion,circuito')
+          : Promise.resolve({ data: null, error: null }),
+      ]);
+      if (!activo) return;
+      if (inscritosData) {
+        const mapa = new Map<string, number>();
+        ((inscritosData as { sala_id: string; inscritos: number }[]) ?? []).forEach((f) => mapa.set(f.sala_id, Number(f.inscritos)));
+        const previos = inscritosPrevios.current;
+        if (previos) {
+          const cambiadas = new Set<string>();
+          mapa.forEach((n, id) => {
+            if ((previos.get(id) ?? 0) !== n) cambiadas.add(id);
+          });
+          previos.forEach((n, id) => {
+            if (!mapa.has(id) && n !== 0) cambiadas.add(id);
+          });
+          if (cambiadas.size > 0) {
+            setSalasCambiadas(cambiadas);
+            setTimeout(() => activo && setSalasCambiadas(new Set()), 2500);
+          }
+        }
+        inscritosPrevios.current = mapa;
+        setInscritosPorSala(mapa);
+      }
+      if (salasRes && salasRes.data && !salasRes.error) {
+        setSalas((salasRes.data as SalaFila[]).filter((x) => x.tipo !== 'maraton'));
+      }
+    }
+    const intervalo = setInterval(refrescar, 5000);
+    const alVolver = () => {
+      if (document.visibilityState === 'visible') void refrescar();
+    };
+    document.addEventListener('visibilitychange', alVolver);
+    return () => {
+      activo = false;
+      clearInterval(intervalo);
+      document.removeEventListener('visibilitychange', alVolver);
+    };
+  }, []);
 
   // 12/10 (Iñi): al entrar en un deporte, lo primero que se ve es lo que se
   // puede jugar: la pestaña (PGA / DP World, La Liga / Champions) con el
@@ -333,11 +391,14 @@ function SalasPageInner() {
     const esFinalizada = s.estado === 'finalizada';
     const mostrarBotonClasificacion = esFinalizada || empezada;
     const textoBotonClasificacion = esFinalizada ? 'Clasificación final' : 'Clasificación en directo';
+    const recienCambiada = salasCambiadas.has(s.id);
     return (
-      <div
+      <motion.div
+        layout
+        transition={{ type: 'spring', stiffness: 380, damping: 36 }}
         key={s.id}
         onClick={() => router.push(`/salas/${s.id}`)}
-        style={{ background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 6, cursor: 'pointer' }}
+        style={{ background: recienCambiada ? 'rgba(61,220,132,0.10)' : S.PANEL, border: `1px solid ${recienCambiada ? 'rgba(61,220,132,0.55)' : '#1E2723'}`, borderRadius: 10, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 6, cursor: 'pointer', transition: 'background .6s, border-color .6s' }}
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
           <span style={{ flex: 1, minWidth: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, color: S.TEXT }}>{s.nombre}</span>
@@ -399,7 +460,7 @@ function SalasPageInner() {
             </button>
           </div>
         )}
-      </div>
+      </motion.div>
     );
   }
 
