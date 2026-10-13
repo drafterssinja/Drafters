@@ -128,9 +128,16 @@ async function repararUna(admin: Admin, competicion: string, prefijo: string, fo
   const precioPorId = new Map(calculo.precios.map((p) => [p.id, p]));
 
   // 3. Jugadores que ya tiene la jornada.
-  const { data: actualesData, error: errAct } = await admin.from('jugadores').select('id,nombre,equipo_real').eq('competicion', competicion);
-  if (errAct) throw new Error(`jugadores: ${errAct.message}`);
-  const actuales = (actualesData as FilaJugadorJornada[]) ?? [];
+  //    (13/10: paginado — Supabase devuelve como mucho 1.000 filas por
+  //    consulta y una jornada de Champions puede pasar de ahí; sin esto se
+  //    duplicarían los que quedaban fuera).
+  const actuales: FilaJugadorJornada[] = [];
+  for (let desde = 0; ; desde += 1000) {
+    const { data: lote, error: errAct } = await admin.from('jugadores').select('id,nombre,equipo_real').eq('competicion', competicion).order('id').range(desde, desde + 999);
+    if (errAct) throw new Error(`jugadores: ${errAct.message}`);
+    actuales.push(...((lote as FilaJugadorJornada[]) ?? []));
+    if (!lote || lote.length < 1000) break;
+  }
   const clave = (nombre: string, equipo: string | null) => `${normalizarNombre(nombre)}|${normalizarNombre(equipo ?? '')}`;
   const yaEsta = new Map(actuales.filter((a) => !esEquipoFilial(a.equipo_real ?? '')).map((a) => [clave(a.nombre, a.equipo_real), a.id]));
 
@@ -179,12 +186,24 @@ async function repararUna(admin: Admin, competicion: string, prefijo: string, fo
   //    equipos; los equipos ya hechos se quedan como están).
   let reprecios = 0;
   if (!hayEquipos || forzarPrecios) {
+    // 13/10: en bloques de 500 (antes uno a uno: con ~900 jugadores de
+    // Champions la ruta pasaba de 60 s y Vercel la cortaba). El upsert por id
+    // solo cambia las columnas enviadas; nombre/deporte/competición van porque
+    // son obligatorias, con el mismo valor que ya tienen.
+    const actualPorId = new Map(actuales.map((a) => [a.id, a]));
+    const filas: { id: string; nombre: string; deporte: string; competicion: string; precio: number; valor_a_revisar: boolean }[] = [];
     for (let k = 0; k < fichas.length; k++) {
       const idExistente = yaEsta.get(clave(fichas[k].nombre, fichas[k].equipo_real));
       const p = precioPorId.get(ids[k]);
       if (!idExistente || !p) continue;
-      const { error } = await admin.from('jugadores').update({ precio: p.precio, valor_a_revisar: p.sinValor ?? false }).eq('id', idExistente);
-      if (!error) reprecios++;
+      const actual = actualPorId.get(idExistente);
+      filas.push({ id: idExistente, nombre: actual?.nombre ?? fichas[k].nombre, deporte: 'futbol', competicion, precio: p.precio, valor_a_revisar: p.sinValor ?? false });
+    }
+    for (let d = 0; d < filas.length; d += 500) {
+      const lote = filas.slice(d, d + 500);
+      const { error } = await admin.from('jugadores').upsert(lote, { onConflict: 'id' });
+      if (error) throw new Error(`precios: ${error.message}`);
+      reprecios += lote.length;
     }
   }
 
@@ -234,26 +253,24 @@ export async function repararJornadasFutbol(admin: Admin, competicion?: string, 
     const { data: salas } = await admin.from('salas').select('competicion').eq('deporte', 'futbol').gte('fecha_limite_inscripcion', desde);
     for (const s of (salas as { competicion: string }[] | null) ?? []) if (!competiciones.includes(s.competicion)) competiciones.push(s.competicion);
   }
-  const resultados: ResultadoReparacion[] = [];
-  for (const c of Array.from(new Set(competiciones))) {
+  // 13/10: las jornadas se procesan a la vez (antes una detrás de otra) para
+  // no pasar del tiempo máximo de la ruta.
+  const procesar = async (c: string): Promise<ResultadoReparacion | null> => {
     const prefijo = PREFIJOS.find((p) => c.startsWith(p));
-    if (!prefijo) continue;
-    // Recalcular precios a la fuerza: solo jornadas que todavía no han empezado.
+    if (!prefijo) return null;
     let forzar = false;
     if (opciones.forzarPrecios) {
       const { data: primera } = await admin.from('salas').select('fecha_limite_inscripcion').eq('competicion', c).order('fecha_limite_inscripcion', { ascending: true }).limit(1);
       const inicio = (primera as { fecha_limite_inscripcion: string | null }[] | null)?.[0]?.fecha_limite_inscripcion;
-      if (!inicio || new Date(inicio).getTime() <= Date.now()) {
-        resultados.push({ competicion: c, estado: 'sin_cambios', detalle: 'Ya ha empezado: sus precios no se tocan.' });
-        continue;
-      }
+      if (!inicio || new Date(inicio).getTime() <= Date.now()) return { competicion: c, estado: 'sin_cambios', detalle: 'Ya ha empezado: sus precios no se tocan.' };
       forzar = true;
     }
     try {
-      resultados.push(await repararUna(admin, c, prefijo, forzar));
+      return await repararUna(admin, c, prefijo, forzar);
     } catch (err) {
-      resultados.push({ competicion: c, estado: 'error', detalle: (err as Error).message });
+      return { competicion: c, estado: 'error', detalle: (err as Error).message };
     }
-  }
+  };
+  const resultados = (await Promise.all(Array.from(new Set(competiciones)).map(procesar))).filter((r): r is ResultadoReparacion => r !== null);
   return resultados;
 }
