@@ -39,6 +39,7 @@
 // fecha límite = inicio del primer partido; (d) anota la jornada en
 // `futbol_jornadas_auto`.
 
+import { todasLasFilas } from '../paginar';
 import { randomUUID } from 'crypto';
 import type { crearClienteAdmin } from './supabaseAdmin';
 import { BASE_ESPN, jsonEspn, yyyymmdd, mapaEquiposNuestros, claveNuestraDe } from './sincronizarFutbolEspn';
@@ -451,7 +452,7 @@ async function crearUnaLiga(admin: Admin, liga: (typeof LIGAS_AUTO)[number], aho
       // Jugadores que ya hubiera con esta misma etiqueta (p.ej. los de una
       // jornada creada a mano antes y cuyas mesas se borraron): se retiran al
       // final, una vez creado todo lo nuevo, para no dejar jugadores duplicados.
-      const { data: antiguos } = await admin.from('jugadores').select('id').eq('competicion', competicion);
+      const { data: antiguos } = await todasLasFilas<{ id: string }>((d, h) => admin.from('jugadores').select('id').eq('competicion', competicion).order('id').range(d, h));
       const idsAntiguos = ((antiguos as { id: string }[] | null) ?? []).map((x) => x.id);
 
       // Escritura: jugadores → cuotas → mesas. Si algo falla, se deshace lo anterior.

@@ -23,6 +23,7 @@
 //
 // Todo cuesta 0 € (API pública de ESPN) y se llama desde el cron cada minuto.
 
+import { todasLasFilas } from '../paginar';
 import { crearClienteAdmin } from './supabaseAdmin';
 import { normalizarNombre } from '../nombreMatch';
 import { emparejarEquipo } from '../aliasEquipos';
@@ -486,7 +487,8 @@ export async function sincronizarEscudos(admin: Admin): Promise<{ liga: string; 
 async function sincronizarCompeticion(admin: Admin, competicion: string, slug: string, fechaLimite: Date | null, alias: Map<string, string>, opciones: OpcionesSincronizacion): Promise<ResultadoCompeticionFutbol> {
   const ahora = new Date();
 
-  const { data: fichas, error: errFichas } = await admin.from('jugadores').select('id,nombre,equipo_real,posicion').eq('deporte', 'futbol').eq('competicion', competicion);
+  // 13/10: paginado (una jornada de Champions pasa de 1.000 jugadores y los que quedaban fuera no puntuaban).
+  const { data: fichas, error: errFichas } = await todasLasFilas<JugadorNuestro>((d, h) => admin.from('jugadores').select('id,nombre,equipo_real,posicion').eq('deporte', 'futbol').eq('competicion', competicion).order('id').range(d, h));
   if (errFichas) throw new Error(errFichas.message);
   const jugadores = (fichas as JugadorNuestro[]) ?? [];
   if (jugadores.length === 0) return vacio(competicion, 'error', { ok: false, error: 'No hay jugadores cargados para esta competición.' });
@@ -505,7 +507,7 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
 
   const [{ data: partidosBD }, { data: puntosBD }] = await Promise.all([
     admin.from('futbol_partidos_jornada').select('clave_local,clave_visitante,kickoff,estado,finalizado_visto_en,actualizado,actualizado_en,goles_detalle,kickoff_original,descartado').eq('competicion', competicion),
-    admin.from('futbol_puntos_jugador').select('jugador_id,puntos_total,partido_estado,actualizado,desglose').eq('competicion', competicion),
+    todasLasFilas<FilaPuntosBD>((d, h) => admin.from('futbol_puntos_jugador').select('jugador_id,puntos_total,partido_estado,actualizado,desglose').eq('competicion', competicion).order('jugador_id').range(d, h)),
   ]);
   const partidosGuardados = (partidosBD as FilaPartidoBD[]) ?? [];
   const puntosGuardados = new Map(((puntosBD as FilaPuntosBD[]) ?? []).map((f) => [f.jugador_id, f]));
