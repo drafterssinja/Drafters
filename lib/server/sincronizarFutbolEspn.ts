@@ -276,6 +276,7 @@ async function resumenDelPartido(slug: string, p: PartidoEspn): Promise<ResumenP
   const eventos: EventoClave[] = [];
   const entra = new Map<string, number>();
   const sale = new Map<string, number>();
+  const cambios: { a: string | null; b: string | null; minuto: number }[] = [];
   const penaltisFallados = new Map<string, number>();
   const fallosPenalti: { lanzadorId: string; minuto: number }[] = [];
 
@@ -309,10 +310,11 @@ async function resumenDelPartido(slug: string, p: PartidoEspn): Promise<ResumenP
       continue;
     }
     if (/^substitution/i.test(tipoTexto)) {
-      const dentro = k.participants?.[0]?.athlete?.id;
-      const fuera = k.participants?.[1]?.athlete?.id;
-      if (dentro) entra.set(String(dentro), minuto);
-      if (fuera) sale.set(String(fuera), minuto);
+      // 13/10: se guardan los dos participantes y se decide más abajo, con la
+      // alineación, quién entra y quién sale (no fiarse del orden de ESPN).
+      const a = k.participants?.[0]?.athlete?.id;
+      const b = k.participants?.[1]?.athlete?.id;
+      cambios.push({ a: a ? String(a) : null, b: b ? String(b) : null, minuto });
       continue;
     }
     if (/red card/i.test(tipoTexto)) {
@@ -361,10 +363,32 @@ async function resumenDelPartido(slug: string, p: PartidoEspn): Promise<ResumenP
     });
   const rosters: any[] = json.rosters ?? [];
   const delLado = (lado: LadoPartido) => rosters.find((r) => String(r.team?.id ?? '') === lado.id);
+  const rosterLocal = leerRoster(delLado(p.local));
+  const rosterVisitante = leerRoster(delLado(p.visitante));
+
+  // 13/10 (bug de Iñi: Marc Pubill entró en el 60' y salía "Todavía no ha
+  // jugado"): las estadísticas de la alineación de ESPN tardan en marcar a los
+  // que salen del banquillo, así que el cambio se toma de los eventos del
+  // partido. Quién entra y quién sale se decide con la alineación: el que es
+  // titular, o ya había entrado antes, es el que sale.
+  const titulares = new Set([...rosterLocal, ...rosterVisitante].filter((f) => f.titular).map((f) => f.atletaId));
+  for (const c of cambios.sort((x, y) => x.minuto - y.minuto)) {
+    const enCampo = (id: string | null) => !!id && (titulares.has(id) || entra.has(id));
+    let dentro = c.a;
+    let fuera = c.b;
+    if (enCampo(c.a) && !enCampo(c.b)) {
+      dentro = c.b;
+      fuera = c.a;
+    }
+    if (dentro && !entra.has(dentro)) entra.set(dentro, c.minuto);
+    if (fuera && !sale.has(fuera)) sale.set(fuera, c.minuto);
+  }
+  for (const f of [...rosterLocal, ...rosterVisitante]) if (!f.titular && entra.has(f.atletaId)) f.entro = true;
+
   return {
     eventos,
     goles,
-    roster: { local: leerRoster(delLado(p.local)), visitante: leerRoster(delLado(p.visitante)) },
+    roster: { local: rosterLocal, visitante: rosterVisitante },
     entra,
     sale,
     penaltisFallados,
@@ -615,7 +639,7 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
         let hayProblema = false;
         for (const f of emp.sinEmparejarTabla) {
           const fr = filasRoster[filas.indexOf(f)];
-          if (fr && ((fr.stats.appearances ?? 0) > 0 || fr.titular)) {
+          if (fr && ((fr.stats.appearances ?? 0) > 0 || fr.titular || fr.entro)) {
             sinEmparejarEspn.push({ nombre: fr.nombreCompleto, equipo: nombreEquipoNuestro });
             hayProblema = true;
           }
