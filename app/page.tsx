@@ -2,6 +2,9 @@
 
 import LogoDrafters from '@/components/LogoDrafters';
 import Link from 'next/link';
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabaseClient';
 import LoMasCaliente from '@/components/LoMasCaliente';
 
 const ACCENT = '#3DDC84';
@@ -43,6 +46,24 @@ function Step({ n, title, text }: { n: number; title: string; text: string }) {
 }
 
 export default function HomePage() {
+  const router = useRouter();
+  // 13/10 (Iñi): con la sesión iniciada, la portada lleva directo a Inicio
+  // (sobre todo al abrir Drafters desde el icono del móvil). Desde el icono y
+  // sin sesión, directo a iniciar sesión.
+  useEffect(() => {
+    let activo = true;
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!activo) return;
+      const desdeIcono =
+        window.matchMedia?.('(display-mode: standalone)').matches || (navigator as unknown as { standalone?: boolean }).standalone === true;
+      if (session) router.replace('/inicio');
+      else if (desdeIcono) router.replace('/login');
+    });
+    return () => {
+      activo = false;
+    };
+  }, [router]);
+
   return (
     <main style={{ maxWidth: 'none', margin: 0, padding: 0, display: 'block' }}>
       <div style={{ width: '100%', minHeight: '100%', display: 'flex', flexDirection: 'column', background: '#0B0F0E', maxWidth: 520, marginLeft: 'auto', marginRight: 'auto' }}>

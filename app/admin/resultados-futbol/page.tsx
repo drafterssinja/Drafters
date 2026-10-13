@@ -109,7 +109,16 @@ export default function AdminResultadosFutbolPage() {
         headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ accion }),
       });
-      const body = await res.json();
+      // 13/10: si Vercel corta la ruta por tiempo devuelve texto, no JSON
+      // (en iPhone salía "The string did not match the expected pattern").
+      const texto = await res.text();
+      let body: any;
+      try {
+        body = JSON.parse(texto);
+      } catch {
+        setError(res.status === 504 || /timeout|timed out/i.test(texto) ? 'La operación ha tardado demasiado y el servidor la ha cortado. Vuelve a pulsar el botón: lo que ya se hizo no se repite.' : `Respuesta inesperada del servidor (${res.status}).`);
+        return;
+      }
       if (!res.ok) {
         setError(body.error ?? 'No se ha podido completar la acción.');
       } else if (accion === 'crear') {

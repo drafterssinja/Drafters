@@ -12,30 +12,34 @@ import { registrarUsoApp } from '@/lib/usoApp';
 //   (app instalada), tampoco sale.
 // - Android: el botón abre la ventana de instalación del propio navegador.
 // - iPhone: Apple no deja instalar con un botón; se abre una guía de 3 pasos
-//   (Compartir, arriba a la derecha → Ver más → Añadir a pantalla de inicio →
-//   Añadir). 13/10 (Iñi): la flecha señala ARRIBA a la derecha, donde está
-//   Compartir; en el menú ••• no aparece.
+//   (Safari: ••• abajo a la derecha → Compartir; Chrome: Compartir arriba a la
+//   derecha; después Ver más → Añadir a pantalla de inicio → Añadir), con una
+//   flecha hacia donde está ese botón en cada navegador (13/10, Iñi).
 // - Navegadores dentro de Instagram, Facebook, TikTok…: no dejan instalar; se
 //   pide abrir drafters.es en Safari / Chrome.
 // Variante 'aviso' (Inicio): se puede cerrar y no vuelve a salir.
 
 type Plataforma = 'ios' | 'android' | null;
 type Variante = 'tarjeta' | 'aviso' | 'popup';
+type NavegadorIos = 'safari' | 'chrome' | 'otro';
 
 const CLAVE_AVISO_CERRADO = 'drafters_aviso_instalar_cerrado';
 // 13/10 (Iñi): ventana que sale al entrar, con los pasos y "No volver a mostrar".
 const CLAVE_POPUP_NO_MOSTRAR = 'drafters_popup_instalar_no_mostrar';
 const CLAVE_POPUP_SESION = 'drafters_popup_instalar_visto_sesion';
 
-function detectar(): { plataforma: Plataforma; instalada: boolean; dentroDeApp: boolean } {
-  if (typeof window === 'undefined') return { plataforma: null, instalada: false, dentroDeApp: false };
+function detectar(): { plataforma: Plataforma; instalada: boolean; dentroDeApp: boolean; navegadorIos: NavegadorIos } {
+  if (typeof window === 'undefined') return { plataforma: null, instalada: false, dentroDeApp: false, navegadorIos: 'safari' };
   const ua = navigator.userAgent || '';
   const esIos = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   const esAndroid = /Android/i.test(ua);
   const instalada =
     window.matchMedia?.('(display-mode: standalone)').matches || (navigator as unknown as { standalone?: boolean }).standalone === true;
   const dentroDeApp = /Instagram|FBAN|FBAV|FB_IAB|FBIOS|Line\/|Twitter|TikTok|musical_ly|BytedanceWebview|Snapchat|LinkedInApp|GSA\//i.test(ua);
-  return { plataforma: esIos ? 'ios' : esAndroid ? 'android' : null, instalada, dentroDeApp };
+  // 13/10 (Iñi): en iPhone, el botón Compartir no está en el mismo sitio en
+  // Safari que en Chrome (u otros); la guía y la flecha cambian según cuál sea.
+  const navegadorIos: NavegadorIos = /CriOS/i.test(ua) ? 'chrome' : /FxiOS|EdgiOS|OPiOS/i.test(ua) ? 'otro' : 'safari';
+  return { plataforma: esIos ? 'ios' : esAndroid ? 'android' : null, instalada, dentroDeApp, navegadorIos };
 }
 
 function IconoMovil() {
@@ -78,12 +82,14 @@ function Paso({ n, children }: { n: number; children: React.ReactNode }) {
 function Guia({
   plataforma,
   dentroDeApp,
+  navegadorIos = 'safari',
   onCerrar,
   intro,
   pie,
 }: {
   plataforma: Plataforma;
   dentroDeApp: boolean;
+  navegadorIos?: NavegadorIos;
   onCerrar: () => void;
   intro?: React.ReactNode;
   pie?: React.ReactNode;
@@ -93,11 +99,11 @@ function Guia({
       role="dialog"
       aria-modal="true"
       onClick={onCerrar}
-      style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.72)', display: 'flex', alignItems: plataforma === 'ios' ? 'flex-start' : 'flex-end', justifyContent: 'center', padding: 16 }}
+      style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.72)', display: 'flex', alignItems: plataforma === 'ios' && navegadorIos === 'chrome' ? 'flex-start' : 'flex-end', justifyContent: 'center', padding: 16 }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{ width: '100%', maxWidth: 420, background: S.PANEL, border: '1px solid #1E2723', borderRadius: 18, padding: '20px 18px 18px', display: 'flex', flexDirection: 'column', gap: 14, marginTop: plataforma === 'ios' ? 64 : 0 }}
+        style={{ width: '100%', maxWidth: 420, background: S.PANEL, border: '1px solid #1E2723', borderRadius: 18, padding: '20px 18px 18px', display: 'flex', flexDirection: 'column', gap: 14, marginTop: plataforma === 'ios' && navegadorIos === 'chrome' ? 64 : 0, marginBottom: plataforma === 'ios' && navegadorIos === 'safari' ? 64 : 0 }}
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 20, color: S.TEXT }}>
@@ -118,7 +124,19 @@ function Guia({
         ) : plataforma === 'ios' ? (
           <>
             <Paso n={1}>
-              Pulsa el botón <strong>Compartir</strong> <IconoCompartir /> de Safari, arriba a la derecha.
+              {navegadorIos === 'chrome' ? (
+                <>
+                  Pulsa el botón <strong>Compartir</strong> <IconoCompartir /> de Chrome, arriba a la derecha.
+                </>
+              ) : navegadorIos === 'otro' ? (
+                <>
+                  Pulsa el botón <strong>Compartir</strong> <IconoCompartir /> de tu navegador (o ábrela en Safari: <strong>•••</strong> abajo a la derecha → <strong>Compartir</strong>).
+                </>
+              ) : (
+                <>
+                  Pulsa <strong>•••</strong> abajo a la derecha de Safari y elige <strong>Compartir</strong> <IconoCompartir />.
+                </>
+              )}
             </Paso>
             <Paso n={2}>
               Pulsa <strong>Ver más</strong> y después <strong>Añadir a pantalla de inicio</strong> <IconoMas />.
@@ -143,12 +161,15 @@ function Guia({
 
         {pie}
       </div>
-      <style>{`@keyframes drafters-instalar-flecha { 0%, 100% { opacity: 1; transform: translate(0,0); } 50% { opacity: 0.4; transform: translate(4px,-4px); } }`}</style>
-      {plataforma === 'ios' && !dentroDeApp && (
-        <span
-          aria-hidden
-          style={{ position: 'fixed', top: 10, right: 22, fontSize: 34, color: S.ACCENT, lineHeight: 1, animation: 'drafters-instalar-flecha 1.4s ease-in-out infinite' }}
-        >
+      <style>{`@keyframes drafters-instalar-flecha-arriba { 0%, 100% { opacity: 1; transform: translate(0,0); } 50% { opacity: 0.4; transform: translate(4px,-4px); } } @keyframes drafters-instalar-flecha-abajo { 0%, 100% { opacity: 1; transform: translate(0,0); } 50% { opacity: 0.4; transform: translate(4px,4px); } }`}</style>
+      {/* 13/10 (Iñi): Safari → ••• abajo a la derecha; Chrome → Compartir arriba a la derecha. */}
+      {plataforma === 'ios' && !dentroDeApp && navegadorIos === 'safari' && (
+        <span aria-hidden style={{ position: 'fixed', bottom: 14, right: 22, fontSize: 34, color: S.ACCENT, lineHeight: 1, animation: 'drafters-instalar-flecha-abajo 1.4s ease-in-out infinite' }}>
+          ↘
+        </span>
+      )}
+      {plataforma === 'ios' && !dentroDeApp && navegadorIos === 'chrome' && (
+        <span aria-hidden style={{ position: 'fixed', top: 10, right: 22, fontSize: 34, color: S.ACCENT, lineHeight: 1, animation: 'drafters-instalar-flecha-arriba 1.4s ease-in-out infinite' }}>
           ↗
         </span>
       )}
@@ -157,7 +178,7 @@ function Guia({
 }
 
 export default function InstalarApp({ variante = 'tarjeta' }: { variante?: Variante }) {
-  const [info, setInfo] = useState<{ plataforma: Plataforma; instalada: boolean; dentroDeApp: boolean } | null>(null);
+  const [info, setInfo] = useState<{ plataforma: Plataforma; instalada: boolean; dentroDeApp: boolean; navegadorIos: NavegadorIos } | null>(null);
   const [avisoCerrado, setAvisoCerrado] = useState(false);
   const [guiaAbierta, setGuiaAbierta] = useState(false);
   const [popupAbierto, setPopupAbierto] = useState(false);
@@ -247,6 +268,7 @@ export default function InstalarApp({ variante = 'tarjeta' }: { variante?: Varia
       <Guia
         plataforma={plataforma}
         dentroDeApp={info.dentroDeApp}
+        navegadorIos={info.navegadorIos}
         onCerrar={cerrarPopup}
         intro={
           <p style={{ fontSize: 14, color: S.MUTED, margin: 0, lineHeight: 1.5 }}>
@@ -315,7 +337,7 @@ export default function InstalarApp({ variante = 'tarjeta' }: { variante?: Varia
           </button>
         </div>
       )}
-      {guiaAbierta && <Guia plataforma={plataforma} dentroDeApp={info.dentroDeApp} onCerrar={() => setGuiaAbierta(false)} />}
+      {guiaAbierta && <Guia plataforma={plataforma} dentroDeApp={info.dentroDeApp} navegadorIos={info.navegadorIos} onCerrar={() => setGuiaAbierta(false)} />}
     </>
   );
 }
