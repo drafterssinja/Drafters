@@ -83,3 +83,41 @@ export async function registrarAperturaSiToca(): Promise<void> {
   }
   await registrarUsoApp('apertura');
 }
+
+// ============================================================================
+// ENTRADAS CON SESIÓN GUARDADA (13/10, pedido de Iñi)
+// ============================================================================
+// Al abrir Drafters (sobre todo desde el icono) ya no se pide usuario y
+// contraseña, así que antes no quedaba registrado ningún "login". Ahora cada
+// entrada con la sesión ya iniciada se apunta en el Registro de actividad como
+// 'login' con detalle { via: 'sesion_guardada', desde: 'app' | 'navegador',
+// plataforma }. Como mucho una cada 30 min por móvil/navegador. El login con
+// usuario y contraseña marca también la hora, para no contar dos veces.
+const CLAVE_ULTIMA_ENTRADA = 'drafters_ultima_entrada';
+const MINUTOS_ENTRE_ENTRADAS = 30;
+
+export function marcarEntradaRegistrada(): void {
+  try {
+    localStorage.setItem(CLAVE_ULTIMA_ENTRADA, String(Date.now()));
+  } catch {
+    // nada
+  }
+}
+
+export async function registrarEntradaConSesionGuardada(): Promise<void> {
+  try {
+    const ultima = Number(localStorage.getItem(CLAVE_ULTIMA_ENTRADA) ?? 0);
+    if (Date.now() - ultima < MINUTOS_ENTRE_ENTRADAS * 60000) return;
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session) return;
+    marcarEntradaRegistrada();
+    await supabase.rpc('registrar_evento_actividad', {
+      p_tipo: 'login',
+      p_detalle: { via: 'sesion_guardada', desde: abiertaDesdeIcono() ? 'app' : 'navegador', plataforma: plataformaActual() },
+    });
+  } catch {
+    // nunca debe romper la web
+  }
+}
