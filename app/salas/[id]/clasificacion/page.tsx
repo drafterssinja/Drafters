@@ -625,6 +625,14 @@ export default function SalaClasificacionPage() {
             <button type="button" onClick={() => setVista('eventos')} style={vistaPillStyle(vista === 'eventos')}>
               Eventos
             </button>
+            {/* 13/10 (Iñi): con el torneo terminado se entra en la
+                clasificación final, pero se pueden seguir viendo los equipos
+                de cada uno y los puntos de cada jugador. */}
+            {torneoFinalizado && (
+              <button type="button" onClick={() => setVista('mesa')} style={vistaPillStyle(vista === 'mesa')}>
+                Ver detalles
+              </button>
+            )}
           </div>
 
           {vista === 'mesa' && (

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import * as S from '@/lib/mockupStyles';
+import { registrarUsoApp } from '@/lib/usoApp';
 
 // ============================================================================
 // AÑADIR DRAFTERS A LA PANTALLA DE INICIO (12/10, pedido de Iñi)
@@ -11,15 +12,20 @@ import * as S from '@/lib/mockupStyles';
 //   (app instalada), tampoco sale.
 // - Android: el botón abre la ventana de instalación del propio navegador.
 // - iPhone: Apple no deja instalar con un botón; se abre una guía de 3 pasos
-//   (••• / Compartir → Ver más → Añadir a pantalla de inicio → Añadir).
+//   (Compartir, arriba a la derecha → Ver más → Añadir a pantalla de inicio →
+//   Añadir). 13/10 (Iñi): la flecha señala ARRIBA a la derecha, donde está
+//   Compartir; en el menú ••• no aparece.
 // - Navegadores dentro de Instagram, Facebook, TikTok…: no dejan instalar; se
 //   pide abrir drafters.es en Safari / Chrome.
 // Variante 'aviso' (Inicio): se puede cerrar y no vuelve a salir.
 
 type Plataforma = 'ios' | 'android' | null;
-type Variante = 'tarjeta' | 'aviso';
+type Variante = 'tarjeta' | 'aviso' | 'popup';
 
 const CLAVE_AVISO_CERRADO = 'drafters_aviso_instalar_cerrado';
+// 13/10 (Iñi): ventana que sale al entrar, con los pasos y "No volver a mostrar".
+const CLAVE_POPUP_NO_MOSTRAR = 'drafters_popup_instalar_no_mostrar';
+const CLAVE_POPUP_SESION = 'drafters_popup_instalar_visto_sesion';
 
 function detectar(): { plataforma: Plataforma; instalada: boolean; dentroDeApp: boolean } {
   if (typeof window === 'undefined') return { plataforma: null, instalada: false, dentroDeApp: false };
@@ -69,17 +75,29 @@ function Paso({ n, children }: { n: number; children: React.ReactNode }) {
   );
 }
 
-function Guia({ plataforma, dentroDeApp, onCerrar }: { plataforma: Plataforma; dentroDeApp: boolean; onCerrar: () => void }) {
+function Guia({
+  plataforma,
+  dentroDeApp,
+  onCerrar,
+  intro,
+  pie,
+}: {
+  plataforma: Plataforma;
+  dentroDeApp: boolean;
+  onCerrar: () => void;
+  intro?: React.ReactNode;
+  pie?: React.ReactNode;
+}) {
   return (
     <div
       role="dialog"
       aria-modal="true"
       onClick={onCerrar}
-      style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.72)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', padding: 16 }}
+      style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.72)', display: 'flex', alignItems: plataforma === 'ios' ? 'flex-start' : 'flex-end', justifyContent: 'center', padding: 16 }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{ width: '100%', maxWidth: 420, background: S.PANEL, border: '1px solid #1E2723', borderRadius: 18, padding: '20px 18px 18px', display: 'flex', flexDirection: 'column', gap: 14, marginBottom: plataforma === 'ios' ? 64 : 0 }}
+        style={{ width: '100%', maxWidth: 420, background: S.PANEL, border: '1px solid #1E2723', borderRadius: 18, padding: '20px 18px 18px', display: 'flex', flexDirection: 'column', gap: 14, marginTop: plataforma === 'ios' ? 64 : 0 }}
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 20, color: S.TEXT }}>
@@ -90,6 +108,8 @@ function Guia({ plataforma, dentroDeApp, onCerrar }: { plataforma: Plataforma; d
           </button>
         </div>
 
+        {intro}
+
         {dentroDeApp ? (
           <p style={{ fontSize: 14, color: S.TEXT, margin: 0, lineHeight: 1.5 }}>
             Estás dentro de otra app (Instagram, TikTok…) y desde aquí no se puede instalar. Abre <strong>drafters.es</strong> en{' '}
@@ -98,7 +118,7 @@ function Guia({ plataforma, dentroDeApp, onCerrar }: { plataforma: Plataforma; d
         ) : plataforma === 'ios' ? (
           <>
             <Paso n={1}>
-              Pulsa <strong>•••</strong> abajo a la derecha (o el botón <strong>Compartir</strong> <IconoCompartir />) y elige <strong>Compartir</strong>.
+              Pulsa el botón <strong>Compartir</strong> <IconoCompartir /> de Safari, arriba a la derecha.
             </Paso>
             <Paso n={2}>
               Pulsa <strong>Ver más</strong> y después <strong>Añadir a pantalla de inicio</strong> <IconoMas />.
@@ -120,14 +140,16 @@ function Guia({ plataforma, dentroDeApp, onCerrar }: { plataforma: Plataforma; d
             </Paso>
           </>
         )}
+
+        {pie}
       </div>
-      <style>{`@keyframes drafters-instalar-flecha { 0%, 100% { opacity: 1; transform: translate(0,0); } 50% { opacity: 0.4; transform: translate(4px,4px); } }`}</style>
+      <style>{`@keyframes drafters-instalar-flecha { 0%, 100% { opacity: 1; transform: translate(0,0); } 50% { opacity: 0.4; transform: translate(4px,-4px); } }`}</style>
       {plataforma === 'ios' && !dentroDeApp && (
         <span
           aria-hidden
-          style={{ position: 'fixed', bottom: 14, right: 28, fontSize: 34, color: S.ACCENT, lineHeight: 1, animation: 'drafters-instalar-flecha 1.4s ease-in-out infinite' }}
+          style={{ position: 'fixed', top: 10, right: 22, fontSize: 34, color: S.ACCENT, lineHeight: 1, animation: 'drafters-instalar-flecha 1.4s ease-in-out infinite' }}
         >
-          ↘
+          ↗
         </span>
       )}
     </div>
@@ -138,16 +160,33 @@ export default function InstalarApp({ variante = 'tarjeta' }: { variante?: Varia
   const [info, setInfo] = useState<{ plataforma: Plataforma; instalada: boolean; dentroDeApp: boolean } | null>(null);
   const [avisoCerrado, setAvisoCerrado] = useState(false);
   const [guiaAbierta, setGuiaAbierta] = useState(false);
+  const [popupAbierto, setPopupAbierto] = useState(false);
+  const [noVolverAMostrar, setNoVolverAMostrar] = useState(false);
+  const [hayAvisoAndroid, setHayAvisoAndroid] = useState(false);
   const [, setRefresco] = useState(0);
 
   useEffect(() => {
-    setInfo(detectar());
+    const d = detectar();
+    setInfo(d);
     try {
       setAvisoCerrado(localStorage.getItem(CLAVE_AVISO_CERRADO) === '1');
     } catch {
       // sin almacenamiento: el aviso se enseña igual
     }
-    const refrescar = () => setRefresco((n) => n + 1);
+    if (variante === 'popup' && d.plataforma && !d.instalada) {
+      let mostrar = true;
+      try {
+        if (localStorage.getItem(CLAVE_POPUP_NO_MOSTRAR) === '1' || sessionStorage.getItem(CLAVE_POPUP_SESION) === '1') mostrar = false;
+      } catch {
+        // sin almacenamiento: se enseña
+      }
+      if (mostrar) setPopupAbierto(true);
+    }
+    setHayAvisoAndroid(!!(window as unknown as { __draftersInstalar?: unknown }).__draftersInstalar);
+    const refrescar = () => {
+      setRefresco((n) => n + 1);
+      setHayAvisoAndroid(true);
+    };
     const instalada = () => setInfo((i) => (i ? { ...i, instalada: true } : i));
     window.addEventListener('drafters-instalable', refrescar);
     window.addEventListener('drafters-instalada', instalada);
@@ -155,6 +194,7 @@ export default function InstalarApp({ variante = 'tarjeta' }: { variante?: Varia
       window.removeEventListener('drafters-instalable', refrescar);
       window.removeEventListener('drafters-instalada', instalada);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (!info || !info.plataforma || info.instalada) return null;
@@ -163,6 +203,7 @@ export default function InstalarApp({ variante = 'tarjeta' }: { variante?: Varia
   const plataforma = info.plataforma;
 
   async function instalar() {
+    void registrarUsoApp('clic_boton');
     if (plataforma === 'android' && !info?.dentroDeApp) {
       const w = window as unknown as { __draftersInstalar?: (Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> }) | null };
       const aviso = w.__draftersInstalar;
@@ -188,6 +229,59 @@ export default function InstalarApp({ variante = 'tarjeta' }: { variante?: Varia
     } catch {
       // nada
     }
+  }
+
+  function cerrarPopup() {
+    setPopupAbierto(false);
+    try {
+      sessionStorage.setItem(CLAVE_POPUP_SESION, '1');
+      if (noVolverAMostrar) localStorage.setItem(CLAVE_POPUP_NO_MOSTRAR, '1');
+    } catch {
+      // nada
+    }
+  }
+
+  if (variante === 'popup') {
+    if (!popupAbierto) return null;
+    return (
+      <Guia
+        plataforma={plataforma}
+        dentroDeApp={info.dentroDeApp}
+        onCerrar={cerrarPopup}
+        intro={
+          <p style={{ fontSize: 14, color: S.MUTED, margin: 0, lineHeight: 1.5 }}>
+            Puedes tener Drafters en tu móvil como una app más: con su icono en la pantalla de inicio y a pantalla completa. Así se hace:
+          </p>
+        }
+        pie={
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 4 }}>
+            {plataforma === 'android' && hayAvisoAndroid && !info.dentroDeApp && (
+              <button
+                type="button"
+                onClick={async () => {
+                  await instalar();
+                  cerrarPopup();
+                }}
+                style={{ background: S.ACCENT, color: '#04140B', border: 'none', borderRadius: 10, padding: '12px 14px', fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 14, cursor: 'pointer' }}
+              >
+                Instalar ahora
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={cerrarPopup}
+              style={{ background: 'transparent', color: S.TEXT, border: '1px solid #2A3733', borderRadius: 10, padding: '11px 14px', fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
+            >
+              Entendido
+            </button>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: S.MUTED_2, cursor: 'pointer' }}>
+              <input type="checkbox" checked={noVolverAMostrar} onChange={(e) => setNoVolverAMostrar(e.target.checked)} style={{ width: 18, height: 18, accentColor: S.ACCENT }} />
+              No volver a mostrar
+            </label>
+          </div>
+        }
+      />
+    );
   }
 
   const etiqueta = plataforma === 'ios' ? 'Añadir a iPhone' : 'Añadir a Android';

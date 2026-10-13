@@ -89,6 +89,8 @@ const TARJETAS_GESTION: { href: string; titulo: string; subtitulo: string }[] = 
   // en ESPN para que la clasificación en directo se rellene sola, sin
   // introducir el resultado a mano — ver drafters-schema.sql.
   { href: '/admin/resultados-golf', titulo: 'Resultados de golf en vivo', subtitulo: 'Conectar cada competición con ESPN para la clasificación en directo' },
+  // 13/10: diagnóstico de la fuente de tenis en directo (Live Tennis API).
+  { href: '/admin/tenis', titulo: 'Tenis en vivo (pruebas)', subtitulo: 'Probar Live Tennis API: qué datos trae cada plan' },
   // Ruta renombrada de /admin/publicidad a /admin/videos (28/09, aviso de
   // Iñi) — la palabra "publicidad" en la URL hacía que algunos
   // bloqueadores de anuncios del navegador (net::ERR_BLOCKED_BY_CLIENT)
@@ -98,6 +100,8 @@ const TARJETAS_GESTION: { href: string; titulo: string; subtitulo: string }[] = 
   // solo el nombre de la ruta.
   { href: '/admin/videos', titulo: 'Vídeos publicitarios', subtitulo: 'Subir vídeos, prioridad y estadísticas de visualización' },
   { href: '/admin/usuarios', titulo: 'Usuarios', subtitulo: 'Listado completo de usuarios registrados' },
+  // 13/10: estadísticas de la app en la pantalla de inicio (iPhone/Android).
+  { href: '/admin/app-movil', titulo: 'App en el móvil', subtitulo: 'Quién tiene Drafters en la pantalla de inicio y cuánto la abre' },
   { href: '/admin/actividad', titulo: 'Registro de actividad', subtitulo: 'Historial de accesos e inscripciones, filtrable por usuario' },
   // 09/10: fuera "Intentos sin acceso a Mesas Drafters" — las mesas ya están
   // abiertas a todos (la página /admin/mesas-sin-acceso queda solo como histórico).

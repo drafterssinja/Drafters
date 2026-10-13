@@ -150,7 +150,7 @@ export default function InicioPage() {
       <div style={S.pageFrame}>
         <DraftersHeader saldoLabel={saldoLabel} accountInitials={initials} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20, padding: '40px 20px 56px' }}>
-          <InstalarApp variante="aviso" />
+          <InstalarApp variante="popup" />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <h1 style={{ fontSize: 28, fontWeight: 800, color: S.TEXT }}>¡Bienvenido, {perfil.nombre}!</h1>
             <p style={{ fontSize: 14, color: S.MUTED }}>

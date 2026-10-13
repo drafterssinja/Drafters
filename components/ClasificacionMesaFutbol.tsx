@@ -9,7 +9,7 @@ import AnuncioVideoInline from '@/components/AnuncioVideoInline';
 import { etiquetasPosicion } from '@/lib/posicionesEmpate';
 import * as S from '@/lib/mockupStyles';
 import { formatEuros, parteParaPremios } from '@/lib/salaShared';
-import { calcularReparto, type TipoSala } from '@/lib/repartoPremios';
+import { calcularReparto, repartirPremiosConEmpates, type TipoSala } from '@/lib/repartoPremios';
 import { claveEquipoLaLiga, escudoLaLiga, formatPuntos } from '@/lib/futbolLaLiga';
 import type { LineaDesglose } from '@/lib/futbolPuntuacion';
 import { reproducirSonidoAviso, leerPreferenciaSonido, guardarPreferenciaSonido } from '@/lib/sonidoAviso';
@@ -301,7 +301,10 @@ export default function ClasificacionMesaFutbol({ sala, saldoLabel, initials }: 
   const [puntos, setPuntos] = useState<Map<string, PuntosF>>(new Map());
   const [partidos, setPartidos] = useState<PartidoF[]>([]);
   const [escudos, setEscudos] = useState<Map<string, string>>(new Map());
-  const [vista, setVista] = useState<'mesa' | 'eventos' | 'premios'>('mesa');
+  // 13/10 (Iñi): una mesa finalizada se abre en la clasificación final; los
+  // equipos y los puntos de cada jugador siguen en "Ver detalles".
+  const mesaFinalizada = sala.estado === 'finalizada';
+  const [vista, setVista] = useState<'mesa' | 'eventos' | 'premios'>(mesaFinalizada ? 'premios' : 'mesa');
 
   // Avisos y eventos (07/10, pedido de Iñi): como en golf, pero para los
   // jugadores del EQUIPO del usuario en esta mesa y con las alertas
@@ -534,7 +537,7 @@ export default function ClasificacionMesaFutbol({ sala, saldoLabel, initials }: 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '24px 20px 40px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#3DDC84' }}>{sala.nombre}</span>
-            <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT }}>Clasificación en directo</h1>
+            <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT }}>{mesaFinalizada ? 'Clasificación final' : 'Clasificación en directo'}</h1>
             <p style={{ fontSize: 13, color: S.MUTED_2 }}>
               {equipos.length} equipo{equipos.length === 1 ? '' : 's'} inscrito{equipos.length === 1 ? '' : 's'} · {sala.competicion}
             </p>
@@ -545,15 +548,31 @@ export default function ClasificacionMesaFutbol({ sala, saldoLabel, initials }: 
           </div>
 
           <div style={{ display: 'flex', gap: 6, alignSelf: 'flex-start' }}>
-            <button type="button" onClick={() => setVista('mesa')} style={vistaPillStyle(vista === 'mesa')}>
-              Mesa
-            </button>
-            <button type="button" onClick={() => setVista('eventos')} style={vistaPillStyle(vista === 'eventos')}>
-              Eventos
-            </button>
-            <button type="button" onClick={() => setVista('premios')} style={vistaPillStyle(vista === 'premios')}>
-              Premios
-            </button>
+            {mesaFinalizada ? (
+              <>
+                <button type="button" onClick={() => setVista('premios')} style={vistaPillStyle(vista === 'premios')}>
+                  Clasificación final
+                </button>
+                <button type="button" onClick={() => setVista('eventos')} style={vistaPillStyle(vista === 'eventos')}>
+                  Eventos
+                </button>
+                <button type="button" onClick={() => setVista('mesa')} style={vistaPillStyle(vista === 'mesa')}>
+                  Ver detalles
+                </button>
+              </>
+            ) : (
+              <>
+                <button type="button" onClick={() => setVista('mesa')} style={vistaPillStyle(vista === 'mesa')}>
+                  Mesa
+                </button>
+                <button type="button" onClick={() => setVista('eventos')} style={vistaPillStyle(vista === 'eventos')}>
+                  Eventos
+                </button>
+                <button type="button" onClick={() => setVista('premios')} style={vistaPillStyle(vista === 'premios')}>
+                  Premios
+                </button>
+              </>
+            )}
             {/* Campanita de sonido (07/10): igual que en golf; se recuerda
                 por dispositivo (lib/sonidoAviso.ts). */}
             <button
@@ -812,8 +831,32 @@ export default function ClasificacionMesaFutbol({ sala, saldoLabel, initials }: 
                     <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#C9A257' }}>Bote total</span>
                     <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 30, color: '#F0B94D' }}>{formatEuros(bote)}</span>
                   </div>
-                  {tramos.length === 0 && <p style={{ fontSize: 13, color: S.MUTED_2 }}>Todavía no hay suficientes equipos inscritos para calcular el reparto.</p>}
-                  {tramos.map((t, i) => (
+                  {/* 13/10 (Iñi): mesa finalizada → clasificación final con lo que gana cada uno. */}
+                  {mesaFinalizada &&
+                    (() => {
+                      const ordenados = equipos
+                        .map((e) => ({ e, total: Math.round(totalEquipo(e.jugadores) * 100) / 100 }))
+                        .sort((a, b) => b.total - a.total);
+                      const bote2 = parteParaPremios(sala.buy_in) * equipos.length;
+                      const reparto = repartirPremiosConEmpates(
+                        ordenados.map((o) => ({ equipoId: o.e.equipoId, valor: o.total })),
+                        tramos,
+                        bote2,
+                        'desc'
+                      );
+                      const importe = new Map(reparto.map((r) => [r.equipoId, r.importe]));
+                      const etiquetas = etiquetasPosicion(ordenados, (o) => o.total);
+                      return ordenados.map((o, i) => (
+                        <div key={o.e.equipoId} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
+                          <span style={{ flexShrink: 0, width: 32, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, color: '#F0B94D' }}>{etiquetas[i]}</span>
+                          <span style={{ flex: 1, minWidth: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 13, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.e.nombre}</span>
+                          <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14, color: '#3DDC84' }}>{formatPuntos(o.total)} pts</span>
+                          <span style={{ flexShrink: 0, width: 70, textAlign: 'right', fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13, color: (importe.get(o.e.equipoId) ?? 0) > 0 ? '#F0B94D' : S.MUTED_3 }}>{formatEuros(importe.get(o.e.equipoId) ?? 0)}</span>
+                        </div>
+                      ));
+                    })()}
+                  {!mesaFinalizada && tramos.length === 0 && <p style={{ fontSize: 13, color: S.MUTED_2 }}>Todavía no hay suficientes equipos inscritos para calcular el reparto.</p>}
+                  {!mesaFinalizada && tramos.map((t, i) => (
                     <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '13px 14px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
                       <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14, color: S.TEXT }}>{t.desde === t.hasta ? `${t.desde}º` : `${t.desde}º–${t.hasta}º`}</span>
                       <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 14, color: '#F0B94D' }}>{formatEuros((bote * t.porcentajeCadaUno) / 100)}</span>

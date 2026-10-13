@@ -20,7 +20,8 @@ import { supabase } from '@/lib/supabaseClient';
 import { formatPuntos } from '@/lib/futbolLaLiga';
 
 const ACCENT = '#3DDC84';
-const SEGUNDOS_POR_DEPORTE = 3;
+// 13/10 (Iñi): más tiempo en cada deporte, para que dé tiempo a leerlo.
+const SEGUNDOS_POR_DEPORTE = 10;
 const ORDEN: Deporte[] = ['futbol', 'golf', 'tenis'];
 const NOMBRE_DEPORTE: Record<Deporte, string> = { futbol: 'Fútbol', golf: 'Golf', tenis: 'Tenis' };
 
@@ -28,7 +29,7 @@ type Deporte = 'futbol' | 'golf' | 'tenis';
 type Linea = { clave?: string; etiqueta: string; cantidad?: number; puntos: number };
 type FilaApi = { deporte: Deporte; competicion: string; nombre: string; contexto: string | null; puntos: number | string; desglose: Linea[] | null; en_vivo: boolean };
 
-type Jugador = { nombre: string; contexto: string; total: string; acciones: { label: string; pts: string }[]; highlight: string };
+type Jugador = { nombre: string; contexto: string; total: string; acciones: { label: string; pts: string }[]; highlight: string; todas?: { label: string; pts: string }[] };
 type Bloque = { etiqueta: string; enVivo: boolean; ejemplo: boolean; lider: Jugador; otros: Jugador[] };
 
 function signo(n: number): string {
@@ -51,6 +52,9 @@ function aJugador(f: FilaApi): Jugador {
     total: `${formatPuntos(Number(f.puntos))} pts`,
     acciones,
     highlight: acciones[0] ? `${acciones[0].label} ${acciones[0].pts}` : '',
+    todas: (f.desglose ?? [])
+      .filter((l) => typeof l.puntos === 'number' && l.puntos !== 0)
+      .map((l) => ({ label: `${l.etiqueta}${l.cantidad && l.cantidad > 1 ? ` ×${l.cantidad}` : ''}`, pts: signo(l.puntos) })),
   };
 }
 
@@ -111,6 +115,8 @@ export default function LoMasCaliente({ titulo = 'Lo más caliente, ahora.' }: {
   // Cambia en cada clic para reiniciar la cuenta atrás de 3 s (y la barrita).
   const [vuelta, setVuelta] = useState(0);
   const [pausado, setPausado] = useState(false);
+  // 13/10 (Iñi): el 2º y el 3º se pueden pulsar para ver de dónde salen sus puntos.
+  const [abierto, setAbierto] = useState<number | null>(null);
 
   useEffect(() => {
     let activo = true;
@@ -162,6 +168,8 @@ export default function LoMasCaliente({ titulo = 'Lo más caliente, ahora.' }: {
     return () => clearTimeout(t);
   }, [deporte, disponibles, vuelta, pausado]);
 
+  useEffect(() => setAbierto(null), [deporte]);
+
   const activo: Bloque = (hayReales ? reales?.[deporte] : EJEMPLO[deporte]) ?? EJEMPLO[deporte];
   const etiquetaEstado = activo.enVivo ? 'En vivo' : deporte === 'futbol' ? 'Última jornada' : 'Último torneo';
 
@@ -170,7 +178,7 @@ export default function LoMasCaliente({ titulo = 'Lo más caliente, ahora.' }: {
       <style>{`@keyframes lmc-barra { from { width: 0% } to { width: 100% } } @keyframes lmc-entra { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: none } }`}</style>
       <h2 style={{ fontSize: 20, fontWeight: 700, color: '#F5F7F5', margin: 0 }}>{titulo}</h2>
 
-      <div style={{ display: 'flex', gap: 8 }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         {ORDEN.map((d) => {
           const deshabilitado = !disponibles.includes(d);
           return (
@@ -190,6 +198,25 @@ export default function LoMasCaliente({ titulo = 'Lo más caliente, ahora.' }: {
             </button>
           );
         })}
+        {disponibles.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Al reanudar, la cuenta atrás empieza de nuevo.
+                    if (pausado) setVuelta((v) => v + 1);
+                    setPausado((p) => !p);
+                  }}
+                  aria-label={pausado ? 'Reanudar' : 'Pausar'}
+                  title={pausado ? 'Reanudar' : 'Pausar'}
+                  style={{ marginLeft: 'auto', width: 34, height: 34, padding: 0, borderRadius: '50%', border: `1px solid ${pausado ? ACCENT : '#2A3733'}`, background: pausado ? 'rgba(61,220,132,0.12)' : 'transparent', color: pausado ? ACCENT : '#AAB4AE', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
+                >
+                  {pausado ? (
+                    <svg width="13" height="14" viewBox="0 0 11 12" aria-hidden="true"><path d="M1 1l9 5-9 5z" fill="currentColor" /></svg>
+                  ) : (
+                    <svg width="12" height="14" viewBox="0 0 10 12" aria-hidden="true"><rect x="0.5" y="0.5" width="3" height="11" rx="1" fill="currentColor" /><rect x="6.5" y="0.5" width="3" height="11" rx="1" fill="currentColor" /></svg>
+                  )}
+                </button>
+              )}
       </div>
 
       {disponibles.length > 1 && (
@@ -207,25 +234,6 @@ export default function LoMasCaliente({ titulo = 'Lo más caliente, ahora.' }: {
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
               <span style={{ width: 6, height: 6, borderRadius: '50%', background: activo.enVivo ? '#FF7A45' : '#6B756F' }} />
               <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: activo.enVivo ? '#FF9F6E' : '#8B958F' }}>{etiquetaEstado}</span>
-              {disponibles.length > 1 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    // Al reanudar, la cuenta atrás de 3 s empieza de nuevo.
-                    if (pausado) setVuelta((v) => v + 1);
-                    setPausado((p) => !p);
-                  }}
-                  aria-label={pausado ? 'Reanudar' : 'Pausar'}
-                  title={pausado ? 'Reanudar' : 'Pausar'}
-                  style={{ marginLeft: 6, width: 28, height: 28, padding: 0, borderRadius: '50%', border: `1px solid ${pausado ? ACCENT : '#2A3733'}`, background: pausado ? 'rgba(61,220,132,0.12)' : 'transparent', color: pausado ? ACCENT : '#AAB4AE', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
-                >
-                  {pausado ? (
-                    <svg width="11" height="12" viewBox="0 0 11 12" aria-hidden="true"><path d="M1 1l9 5-9 5z" fill="currentColor" /></svg>
-                  ) : (
-                    <svg width="10" height="12" viewBox="0 0 10 12" aria-hidden="true"><rect x="0.5" y="0.5" width="3" height="11" rx="1" fill="currentColor" /><rect x="6.5" y="0.5" width="3" height="11" rx="1" fill="currentColor" /></svg>
-                  )}
-                </button>
-              )}
             </div>
           </div>
 
@@ -264,7 +272,8 @@ export default function LoMasCaliente({ titulo = 'Lo más caliente, ahora.' }: {
         {activo.otros.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {activo.otros.map((o, i) => (
-              <div key={`${o.nombre}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#131917', border: '1px solid #1E2723', borderRadius: 12, padding: '12px 14px' }}>
+              <div key={`${o.nombre}-${i}`} style={{ display: 'flex', flexDirection: 'column', gap: 10, background: '#131917', border: `1px solid ${abierto === i ? '#2A3733' : '#1E2723'}`, borderRadius: 12, padding: '12px 14px', cursor: o.todas && o.todas.length > 0 ? 'pointer' : 'default' }} onClick={() => setAbierto((a) => (a === i ? null : i))}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <span style={{ flexShrink: 0, width: 26, height: 26, borderRadius: '50%', background: '#1E2723', color: '#8B958F', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   {i + 2}
                 </span>
@@ -276,6 +285,20 @@ export default function LoMasCaliente({ titulo = 'Lo más caliente, ahora.' }: {
                   <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 16, color: ACCENT }}>{o.total}</span>
                   {o.highlight && <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 11, color: '#8B958F' }}>{o.highlight}</span>}
                 </div>
+                {o.todas && o.todas.length > 0 && (
+                  <span aria-hidden style={{ flexShrink: 0, color: '#6B756F', fontSize: 12, transform: abierto === i ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}>▾</span>
+                )}
+              </div>
+              {abierto === i && o.todas && o.todas.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 8, borderTop: '1px solid #22302B' }}>
+                  {o.todas.map((a) => (
+                    <div key={a.label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                      <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 13, color: '#C7CFC9' }}>{a.label}</span>
+                      <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14, color: a.pts.startsWith('−') ? '#FF7A6B' : ACCENT }}>{a.pts}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               </div>
             ))}
           </div>
