@@ -591,6 +591,40 @@ export default function AdminResultadosGolfPage() {
     }
   }
 
+  // 14/10: precios nuevos (algoritmo v3) para los torneos que aún no han empezado.
+  const [mensajePrecios, setMensajePrecios] = useState<string | null>(null);
+  async function recalcularPrecios() {
+    if (!window.confirm('¿Recalcular los precios de los torneos de golf que todavía no han empezado? Los equipos ya hechos no cambian.')) return;
+    setSincronizando(true);
+    setErrorSync(null);
+    setMensajePrecios(null);
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session) {
+      setSincronizando(false);
+      return;
+    }
+    try {
+      const res = await fetch('/api/admin/recalcular-precios-golf', { method: 'POST', headers: { Authorization: `Bearer ${session.access_token}` } });
+      const texto = await res.text();
+      let body: { resultados?: { competicion: string; estado: string; detalle: string }[]; error?: string } = {};
+      try {
+        body = JSON.parse(texto);
+      } catch {
+        setErrorSync(`Respuesta inesperada del servidor (${res.status}). Vuelve a intentarlo.`);
+        return;
+      }
+      if (!res.ok) setErrorSync(body.error ?? 'No se han podido recalcular.');
+      else {
+        const r = body.resultados ?? [];
+        setMensajePrecios(r.length === 0 ? 'No hay torneos sin empezar.' : r.map((x) => `${x.competicion} → ${x.estado}: ${x.detalle}`).join('\n'));
+      }
+    } finally {
+      setSincronizando(false);
+    }
+  }
+
   async function actualizarAhora() {
     setSincronizando(true);
     setErrorSync(null);
@@ -844,9 +878,13 @@ export default function AdminResultadosGolfPage() {
                 <button type="button" disabled={sincronizando} onClick={actualizarAhora} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '8px 14px', opacity: sincronizando ? 0.7 : 1, cursor: 'pointer', border: 'none' }}>
                   {sincronizando ? 'Actualizando...' : 'Actualizar ahora'}
                 </button>
+                <button type="button" disabled={sincronizando} onClick={recalcularPrecios} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '8px 14px', opacity: sincronizando ? 0.7 : 1, cursor: 'pointer', border: 'none' }}>
+                  Recalcular precios (torneos sin empezar)
+                </button>
               </div>
             </div>
 
+            {mensajePrecios && <p style={{ fontSize: 12.5, color: S.MUTED, whiteSpace: 'pre-line', margin: 0 }}>{mensajePrecios}</p>}
             {errorSync && <p style={S.errorText}>{errorSync}</p>}
 
             {resultadoSync && (
