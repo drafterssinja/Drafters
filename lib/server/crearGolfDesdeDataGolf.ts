@@ -380,3 +380,67 @@ export async function crearGolfDesdeDataGolf(admin: Admin): Promise<ResultadoCre
   const euro = await procesarTour(admin, 'euro', pga.evento);
   return [euro, pga];
 }
+
+// ============================================================================
+// RECALCULAR PRECIOS DE LOS TORNEOS DE GOLF QUE TODAVÍA NO HAN EMPEZADO (14/10)
+// ============================================================================
+// Pedido de Iñi al cambiar el algoritmo de precios (lib/precioPorCuota.ts, v3):
+// aplicar los precios nuevos al torneo de esta semana, ya creado. Se vuelven a
+// pedir las cuotas de ganador (bet365) del tour del torneo, se comprueba que
+// son de ESE torneo y se recalcula el precio de todos sus jugadores (el que no
+// tiene cuota, al mínimo). Solo si la inscripción no se ha cerrado. Los
+// equipos ya hechos no cambian.
+export type ResultadoRecalculoGolf = { competicion: string; estado: 'recalculado' | 'sin_cambios' | 'error'; detalle: string };
+
+export async function recalcularPreciosGolfSinEmpezar(admin: Admin): Promise<ResultadoRecalculoGolf[]> {
+  const { data: torneos, error } = await admin.from('torneos_golf_live').select('competicion,tour_datagolf,primera_salida_en').eq('fuente_datos', 'datagolf');
+  if (error) throw new Error(error.message);
+  const resultados: ResultadoRecalculoGolf[] = [];
+  const cuotasPorTour = new Map<string, { eventName: string | null; jugadores: JugadorConCuotaDG[] } | Error>();
+  for (const t of (torneos as { competicion: string; tour_datagolf: DataGolfTour | null; primera_salida_en: string | null }[]) ?? []) {
+    const competicion = t.competicion;
+    try {
+      const { data: salas } = await admin.from('salas').select('fecha_limite_inscripcion').eq('competicion', competicion).eq('deporte', 'golf').order('fecha_limite_inscripcion', { ascending: true }).limit(1);
+      const cierre = (salas as { fecha_limite_inscripcion: string | null }[] | null)?.[0]?.fecha_limite_inscripcion ?? t.primera_salida_en;
+      if (cierre && new Date(cierre).getTime() <= Date.now()) continue; // ya empezado: no se toca
+      if (!t.tour_datagolf) {
+        resultados.push({ competicion, estado: 'error', detalle: 'El torneo no tiene tour de Data Golf.' });
+        continue;
+      }
+      if (!cuotasPorTour.has(t.tour_datagolf)) {
+        try {
+          cuotasPorTour.set(t.tour_datagolf, extraerCuotasDeOutrights(await obtenerCuotasOutrightsDataGolf(t.tour_datagolf, 'win')));
+        } catch (err) {
+          cuotasPorTour.set(t.tour_datagolf, err as Error);
+        }
+      }
+      const cuotas = cuotasPorTour.get(t.tour_datagolf)!;
+      if (cuotas instanceof Error) {
+        resultados.push({ competicion, estado: 'error', detalle: `No se han podido pedir las cuotas: ${cuotas.message}` });
+        continue;
+      }
+      const a = normalizarNombre(competicion);
+      const b = normalizarNombre(cuotas.eventName ?? '');
+      if (!b || !(a === b || a.includes(b) || b.includes(a))) {
+        resultados.push({ competicion, estado: 'sin_cambios', detalle: `Las cuotas disponibles son de otro torneo ("${cuotas.eventName ?? 'sin nombre'}").` });
+        continue;
+      }
+      const { data: jug, error: errJug } = await admin.from('jugadores').select('id,nombre,metadata').eq('deporte', 'golf').eq('competicion', competicion).range(0, 1999);
+      if (errJug) throw new Error(errJug.message);
+      const lista = (jug as { id: string; nombre: string; metadata: Record<string, unknown> | null }[]) ?? [];
+      const cuotaPorNombre = new Map(cuotas.jugadores.map((c) => [normalizarNombre(c.nombre), c.cuota]));
+      const conCuota = lista.map((j) => ({ ...j, cuota: cuotaPorNombre.get(normalizarNombre(j.nombre)) ?? null }));
+      const conPrecio = calcularPreciosPorCuota(conCuota.map((j) => ({ nombre: j.nombre, cuota: j.cuota })));
+      const filas = conCuota.map((j, i) => ({ id: j.id, nombre: j.nombre, deporte: 'golf', competicion, precio: conPrecio[i].precio, metadata: { ...(j.metadata ?? {}), cuota_ganador: j.cuota, precios_v3: true } }));
+      for (let d = 0; d < filas.length; d += 500) {
+        const { error: e } = await admin.from('jugadores').upsert(filas.slice(d, d + 500), { onConflict: 'id' });
+        if (e) throw new Error(e.message);
+      }
+      const max = Math.max(...filas.map((f) => f.precio));
+      resultados.push({ competicion, estado: 'recalculado', detalle: `${filas.length} jugadores (${conCuota.filter((j) => j.cuota !== null).length} con cuota). El más caro: ${max.toLocaleString('es-ES')} €.` });
+    } catch (err) {
+      resultados.push({ competicion, estado: 'error', detalle: (err as Error).message });
+    }
+  }
+  return resultados;
+}

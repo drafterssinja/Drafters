@@ -307,6 +307,95 @@ export type ResultadoPreciosPorCuota = {
   reglasCumplidas: boolean;
 };
 
+// ============================================================================
+// v3 (14/10, pedido de Iñi) — PRECIO POR "FUERZA" EN ESCALA LOGARÍTMICA,
+// CALIBRADO A LA MEDIA DEL PRESUPUESTO
+// ============================================================================
+// Problema de la versión anterior: el favorito costaba entre el 35 % y el 55 %
+// del presupuesto (Rory McIlroy 39.000 € con 100.000 € para 5 jugadores, el
+// doble de la media de 20.000 €) y el jugador que costaba la media era el 24º
+// del campo: casi no se podía fichar a nadie bueno.
+//
+// Idea: el precio debe seguir a lo que un jugador puede aportar en puntos, no
+// a su probabilidad pura de GANAR (que está muy concentrada en 3-4 nombres).
+// Por eso se trabaja con la "fuerza" = logaritmo de la probabilidad implícita
+// de cada cuota (sin el margen de la casa), que separa bien a los de arriba
+// sin disparar al favorito, y se ancla en tres puntos que tienen sentido de
+// juego:
+//   1. Favorito = media × k, con k entre 1,35 y 1,70 según lo destacado que
+//      esté (k = 1,30 + probabilidad del favorito). Con 100.000 € y 5
+//      jugadores (media 20.000 €): favorito normal ≈ 27.000-29.000 €; un
+//      favoritísimo (tenis, cuota 2,60) ≈ 34.000 €.
+//   2. El jugador que cuesta exactamente la MEDIA es el puesto r* ≈ 9 % del
+//      campo (entre el 5º y el 14º): en un torneo de 140 jugadores, el 13º.
+//   3. El último del campo cuesta el mínimo (4.000 €).
+// Entre medias, curva suave: precio = mínimo + (favorito − mínimo) · z^γ, con
+// z = fuerza normalizada (0 el peor, 1 el favorito) y γ calculado para que el
+// punto 2 se cumpla exactamente. Cuotas iguales → mismo precio; nunca un
+// jugador con mejor cuota cuesta menos.
+// Reglas de seguridad que se comprueban (y se corrigen moviendo r*):
+//   - Los 5 más caros NO caben juntos (suman ≥ 110 % del presupuesto).
+//   - Los 2 más caros + los 3 más baratos SÍ caben.
+export const PRECIO_CUOTA_V3 = {
+  kBase: 1.3,
+  kMinimo: 1.35,
+  kMaximo: 1.7,
+  /** Fracción del campo en la que cae el jugador que cuesta la media. */
+  fraccionPuestoMedia: 0.09,
+  puestoMediaMinimo: 5,
+  puestoMediaMaximo: 14,
+  precioMinimo: 4_000,
+  gammaMinimo: 0.5,
+  gammaMaximo: 4,
+} as const;
+
+function preciosV3(cuotasOrdenadas: number[], cfg: ConfigPrecioCuota): { precioDe: (cuota: number) => number; favorito: number; gamma: number; cumple: boolean } {
+  const v = PRECIO_CUOTA_V3;
+  const n = cuotasOrdenadas.length;
+  const media = cfg.presupuesto / cfg.tamanoEquipo;
+  const suma = cuotasOrdenadas.reduce((a, c) => a + 1 / c, 0);
+  const prob = (c: number) => 1 / c / suma;
+  const pFav = prob(cuotasOrdenadas[0]);
+  const k = Math.min(v.kMaximo, Math.max(v.kMinimo, v.kBase + pFav));
+  const favorito = media * k;
+  const lnMax = Math.log(prob(cuotasOrdenadas[0]));
+  const lnMin = Math.log(prob(cuotasOrdenadas[n - 1]));
+  const rango = lnMax - lnMin;
+  const zDe = (c: number) => (rango > 1e-9 ? (Math.log(prob(c)) - lnMin) / rango : 1);
+  const redondear = (x: number) => Math.round(x / cfg.redondeo) * cfg.redondeo;
+  const precioCon = (gamma: number) => (c: number) => redondear(v.precioMinimo + (favorito - v.precioMinimo) * Math.pow(Math.max(0, Math.min(1, zDe(c))), gamma));
+
+  const cumpleReglasV3 = (f: (c: number) => number) => {
+    const precios = cuotasOrdenadas.map(f);
+    const t = cfg.tamanoEquipo;
+    if (n < t) return true;
+    const top = precios.slice(0, t).reduce((a, b) => a + b, 0);
+    const dosMasTres = precios[0] + precios[1] + precios.slice(-3).reduce((a, b) => a + b, 0);
+    return top >= cfg.presupuesto * 1.1 && dosMasTres <= cfg.presupuesto;
+  };
+
+  let rObjetivo = Math.min(v.puestoMediaMaximo, Math.max(v.puestoMediaMinimo, Math.round(n * v.fraccionPuestoMedia)));
+  rObjetivo = Math.min(rObjetivo, Math.max(2, n - 1));
+  let mejor: { gamma: number; cumple: boolean } | null = null;
+  // Si con r* no se cumplen las reglas, se prueba moviendo r* (primero hacia
+  // arriba: más jugadores caros; luego hacia abajo).
+  const candidatos = [rObjetivo, ...Array.from({ length: 10 }, (_, i) => rObjetivo + i + 1), ...Array.from({ length: 4 }, (_, i) => rObjetivo - i - 1)].filter((r) => r >= 2 && r <= n - 1);
+  for (const r of candidatos) {
+    const z = zDe(cuotasOrdenadas[r - 1]);
+    const objetivo = (media - v.precioMinimo) / (favorito - v.precioMinimo);
+    let gamma = z > 0 && z < 1 && objetivo > 0 && objetivo < 1 ? Math.log(objetivo) / Math.log(z) : 1;
+    gamma = Math.min(v.gammaMaximo, Math.max(v.gammaMinimo, gamma));
+    const ok = cumpleReglasV3(precioCon(gamma));
+    if (!mejor) mejor = { gamma, cumple: ok };
+    if (ok) {
+      mejor = { gamma, cumple: true };
+      break;
+    }
+  }
+  const gamma = mejor?.gamma ?? 1;
+  return { precioDe: precioCon(gamma), favorito: redondear(favorito), gamma, cumple: mejor?.cumple ?? false };
+}
+
 export function calcularPreciosPorCuotaDetallado(
   jugadores: JugadorConCuota[],
   config: Partial<ConfigPrecioCuota> = {}
@@ -331,6 +420,23 @@ export function calcularPreciosPorCuotaDetallado(
   const cuotaFavorito = Math.min(...validas);
   const sumaProbabilidades = validas.reduce((s, c) => s + 1 / c, 0);
   const cuotasOrdenadas = [...validas].sort((a, b) => a - b);
+
+  // 14/10: algoritmo v3 (ver arriba). La versión anterior se conserva debajo
+  // solo como referencia; ya no se usa salvo que se pida con config.version = 2.
+  if ((config as { version?: number }).version !== 2) {
+    const v3 = preciosV3(cuotasOrdenadas, cfg);
+    return {
+      precios: jugadores.map((j) =>
+        cuotaValida(j.cuota)
+          ? { nombre: j.nombre, cuota: j.cuota, probabilidad: 1 / j.cuota / sumaProbabilidades, precio: v3.precioDe(j.cuota), sinCuota: false }
+          : { nombre: j.nombre, cuota: null, probabilidad: null, precio: PRECIO_CUOTA_V3.precioMinimo, sinCuota: true }
+      ),
+      fraccionUsada: v3.favorito / cfg.presupuesto,
+      gammaUsado: Math.round(v3.gamma * 100) / 100,
+      precioTopKUsado: PRECIO_CUOTA_V3.precioMinimo,
+      reglasCumplidas: v3.cumple,
+    };
+  }
 
   const { fraccion, gamma, tramoTop, cumple } = buscarFraccionYGamma(cuotasOrdenadas, cuotaFavorito, validas.length, cfg);
   const precioFavorito = cfg.presupuesto * fraccion;
