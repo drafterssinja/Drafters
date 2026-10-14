@@ -571,6 +571,28 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
   const fichasSinPareja = new Map<string, { id: string; nombre: string; equipo: string | null }>();
   let emparejadosTotal = 0;
 
+  // 14/10 (bug de Iñi: se "perdieron" los puntos de los partidos de Champions
+  // de ayer). Los resúmenes de los partidos se piden a la vez (de 4 en 4) para
+  // no pasar del tiempo máximo de la ruta, y si el de un partido falla o llega
+  // sin alineaciones NO se toca nada de ese partido: antes se escribían 0
+  // puntos a todos sus jugadores (y, si el partido había terminado, como
+  // definitivos), y a las 4 h se congelaban así.
+  const resumenes = new Map<string, ResumenPartido | null>();
+  {
+    const aPedir = partidos.filter((p) => {
+      const prev = guardadoPorPartido.get(`${p.local.clave}|${p.visitante.clave}`);
+      if (prev?.descartado) return false;
+      const yaCong = !!prev && congelado(prev) && p.estado === 'finalizado' && !opciones.forzar;
+      return !yaCong && (p.estado === 'en_juego' || p.estado === 'finalizado');
+    });
+    for (let i = 0; i < aPedir.length; i += 4) {
+      const lote = aPedir.slice(i, i + 4);
+      const res = await Promise.all(lote.map((p) => resumenDelPartido(slug, p).catch(() => null)));
+      lote.forEach((p, j) => resumenes.set(p.espnId, res[j]));
+    }
+  }
+  const partidosSinDatos: string[] = [];
+
   for (const p of partidos) {
     const k = `${p.local.clave}|${p.visitante.clave}`;
     const prev = guardadoPorPartido.get(k);
@@ -583,11 +605,39 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
     let detalle: GolDetalle[] = prev?.goles_detalle ?? [];
     let resumen: ResumenPartido | null = null;
     if (!yaCongelado && (p.estado === 'en_juego' || p.estado === 'finalizado')) {
-      try {
-        resumen = await resumenDelPartido(slug, p);
-        if (resumen.goles.length > 0 || p.local.goles + p.visitante.goles === 0) detalle = resumen.goles;
-      } catch {
-        /* se reintenta en la siguiente pasada */
+      resumen = resumenes.get(p.espnId) ?? null;
+      if (resumen && (resumen.goles.length > 0 || p.local.goles + p.visitante.goles === 0)) detalle = resumen.goles;
+      const sinAlineaciones = !resumen || resumen.roster.local.length + resumen.roster.visitante.length === 0;
+      if (sinAlineaciones) {
+        // Sin datos fiables de este partido en esta pasada: se guarda solo el
+        // marcador (sin darlo por actualizado, para que no se congele) y se
+        // dejan los puntos de sus jugadores como estaban. Se reintenta en la
+        // siguiente pasada.
+        partidosSinDatos.push(`${p.local.nombre}-${p.visitante.nombre}`);
+        filasPartido.push({
+          competicion,
+          clave_local: p.local.clave,
+          clave_visitante: p.visitante.clave,
+          espn_id: p.espnId,
+          kickoff: p.kickoff.toISOString(),
+          kickoff_original: kickoffOriginal,
+          descartado: false,
+          equipo_local: p.local.nombre,
+          equipo_visitante: p.visitante.nombre,
+          logo_local: p.local.logo,
+          logo_visitante: p.visitante.logo,
+          goles_local: p.local.goles,
+          goles_visitante: p.visitante.goles,
+          estado: p.estado,
+          reloj: p.reloj,
+          periodo: p.periodo,
+          goles_detalle: detalle,
+          finalizado_visto_en: prev?.finalizado_visto_en ?? null,
+          actualizado: false,
+          actualizado_en: null,
+          updated_at: ahora.toISOString(),
+        });
+        continue;
       }
     }
     const finalizado = p.estado === 'finalizado';
@@ -753,8 +803,11 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
   const normales = vivos.filter((p) => !fueraDePlazo.includes(p));
   const clavesVistas = new Set([...partidos.map((p) => claveDe(p.local.clave, p.visitante.clave)), ...partidosGuardados.map((g) => claveDe(g.clave_local, g.clave_visitante))]);
   const ultimoKickoffNormal = normales.reduce((m, p) => Math.max(m, p.kickoff.getTime()), 0);
-  const cubreTodos = clavesVistas.size * 2 >= nuestros.size - 1 || (normales.length > 0 && ahora.getTime() > ultimoKickoffNormal + 3 * 3600 * 1000);
-  const jornadaTerminada = normales.length > 0 && cubreTodos && normales.every((p) => p.estado === 'finalizado');
+  // 14/10: si falta el partido de algún equipo, se espera 24 h desde el último
+  // partido normal antes de dar la jornada por terminada (antes 3 h), y nunca
+  // se da por terminada si en esta pasada algún partido no ha dado datos.
+  const cubreTodos = clavesVistas.size * 2 >= nuestros.size - 1 || (normales.length > 0 && ahora.getTime() > ultimoKickoffNormal + 24 * 3600 * 1000);
+  const jornadaTerminada = normales.length > 0 && cubreTodos && partidosSinDatos.length === 0 && normales.every((p) => p.estado === 'finalizado');
 
   // Partidos guardados de otras pasadas que ya no aparecen (movidos fuera de
   // la ventana de días) y siguen sin acabar: también quedan fuera de plazo.
@@ -836,7 +889,14 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
       marcador: p.estado === 'pendiente' ? null : `${p.local.goles}-${p.visitante.goles}`,
       actualizado: p.estado === 'finalizado',
     })),
-    aviso: mesasCerradas ? 'Último partido terminado: mesas cerradas con los puntos tal como están (falta confirmar el pago en Pagos pendientes).' : equiposSinPartido.length > 0 ? 'Hay equipos sin partido en el marcador (jornada con aplazados o jornada aún no publicada).' : undefined,
+    aviso:
+      partidosSinDatos.length > 0
+        ? `Sin datos en esta pasada (se reintenta, no se ha tocado nada de ellos): ${partidosSinDatos.join(', ')}.`
+        : mesasCerradas
+          ? 'Último partido terminado: mesas cerradas con los puntos tal como están (falta confirmar el pago en Pagos pendientes).'
+          : equiposSinPartido.length > 0
+            ? 'Hay equipos sin partido en el marcador (jornada con aplazados o jornada aún no publicada).'
+            : undefined,
   });
 }
 
@@ -904,7 +964,12 @@ export async function sincronizarFutbol(admin: Admin, opciones: OpcionesSincroni
   // Una jornada cerrada (todos los partidos terminados) ya no se vuelve a
   // tocar, aunque ESPN corrija estadísticas después (06/10, Iñi: dinero
   // ficticio por ahora; se afinará con un proveedor de datos de pago).
-  const { data: salas, error } = await admin.from('salas').select('competicion,fecha_limite_inscripcion,estado').eq('deporte', 'futbol').neq('estado', 'finalizada');
+  // 14/10: al FORZAR también entran las jornadas ya cerradas de los últimos
+  // 7 días (si una se cerró con puntos mal, forzar la recalcula).
+  let consultaSalas = admin.from('salas').select('competicion,fecha_limite_inscripcion,estado').eq('deporte', 'futbol');
+  if (opciones.forzar) consultaSalas = consultaSalas.gte('fecha_limite_inscripcion', new Date(Date.now() - 7 * 86400000).toISOString());
+  else consultaSalas = consultaSalas.neq('estado', 'finalizada');
+  const { data: salas, error } = await consultaSalas;
   if (error) throw new Error(error.message);
 
   const porCompeticion = new Map<string, Date | null>();
@@ -917,20 +982,20 @@ export async function sincronizarFutbol(admin: Admin, opciones: OpcionesSincroni
   }
   if (porCompeticion.size === 0) return { resultados: [], mensaje: 'No hay mesas de fútbol activas.' };
 
-  const resultados: ResultadoCompeticionFutbol[] = [];
   const alias = await cargarAlias(admin);
-  for (const [competicion, fechaLimite] of Array.from(porCompeticion.entries())) {
-    const liga = ligaEspnDeCompeticion(competicion);
-    if (!liga) {
-      resultados.push(vacio(competicion, 'no_soportada', { aviso: 'Competición no soportada (solo La Liga, Champions League y Premier League).' }));
-      continue;
-    }
-    try {
-      resultados.push(await sincronizarCompeticion(admin, competicion, liga.slug, fechaLimite, alias, opciones));
-    } catch (err) {
-      resultados.push(vacio(competicion, 'error', { ok: false, error: (err as Error).message }));
-    }
-  }
+  // 14/10: las competiciones se sincronizan a la vez (antes una detrás de
+  // otra), para no pasar del tiempo máximo de la ruta con Champions + Liga.
+  const resultados: ResultadoCompeticionFutbol[] = await Promise.all(
+    Array.from(porCompeticion.entries()).map(async ([competicion, fechaLimite]) => {
+      const liga = ligaEspnDeCompeticion(competicion);
+      if (!liga) return vacio(competicion, 'no_soportada', { aviso: 'Competición no soportada (solo La Liga, Champions League y Premier League).' });
+      try {
+        return await sincronizarCompeticion(admin, competicion, liga.slug, fechaLimite, alias, opciones);
+      } catch (err) {
+        return vacio(competicion, 'error', { ok: false, error: (err as Error).message });
+      }
+    })
+  );
 
   // Escudos: si todavía no hay ninguno guardado (o se fuerza), se descargan.
   let escudos: { liga: string; equipos: number; error?: string }[] | undefined;
