@@ -23,10 +23,18 @@ export const MODALIDAD_DESC: Record<Modalidad, string> = {
 export type Premio = {
   tipo: 'dinero' | 'otro' | 'nada';
   aportacion: number | null; // dinero: € que pone cada uno
-  descripcion: string; // otro: "un cubata", "una cena"...
-  ganadores: number;
-  reparto: number[]; // porcentajes del bote para 1º, 2º... (suman 100)
+  descripcion: string; // otro: "una cena", "un cubata"...
+  ganadores: number; // dinero: cuántos cobran
+  reparto: number[]; // dinero: porcentajes del bote para 1º, 2º... (suman 100)
+  // 16/10 (Iñi): con "otra cosa" no hay porcentajes: se dice qué es y cuántos
+  // lo pagan (los últimos de la clasificación). Ej.: "los 2 últimos pagan la cena".
+  pagan?: number;
+  // 15/10 (Iñi): y opcionalmente cuántos ganan (los primeros). Entre medias,
+  // "tierra de nadie": ni ganan ni pagan.
+  ganan?: number;
 };
+
+export type GrupoOtro = 'gana' | 'nada' | 'paga';
 
 export type Amistoso = {
   id: string;
@@ -40,6 +48,8 @@ export type Amistoso = {
   estado: 'abierto' | 'completo' | 'finalizado';
   premio: Premio | null;
   created_at: string;
+  // 16/10: true = el mismo equipo para todas las jornadas de la sala.
+  equipo_fijo?: boolean;
 };
 
 export type AmistosoJornada = {
@@ -56,7 +66,7 @@ export type Resumen = {
   participantes: { usuario_id: string; nombre: string; unido_en: string }[];
   nombres: Record<string, string>;
   equipos_hechos: { competicion: string; usuario_id: string }[];
-  jornadas: { competicion: string; empezada: boolean; terminada: boolean }[];
+  jornadas: { competicion: string; publicada?: boolean; empezada: boolean; terminada: boolean }[];
 };
 
 export type Mensaje = {
@@ -129,26 +139,46 @@ export function textoBote(premio: Premio | null, participantes: number): string 
     const bote = (premio.aportacion ?? 0) * participantes;
     return `Cada uno pone ${formatoEuros(premio.aportacion ?? 0)} · bote de ${formatoEuros(bote)}`;
   }
-  return `Cada uno pone ${premio.descripcion || 'algo'} · en juego: ${participantes} × ${premio.descripcion || 'algo'}`;
+  return textoPagan(premio);
+}
+
+// "Otra cosa": quién gana, quién se queda en tierra de nadie y quién paga.
+export function textoPagan(premio: Premio, participantes?: number): string {
+  const pagan = Math.max(1, premio.pagan ?? 1);
+  const ganan = Math.max(0, premio.ganan ?? 0);
+  const que = premio.descripcion || 'lo que os jugáis';
+  const partePagan = pagan === 1 ? `Paga el último` : `Pagan los ${pagan} últimos`;
+  const parteGanan = ganan === 0 ? '' : ganan === 1 ? ' · gana el 1º' : ` · ganan los ${ganan} primeros`;
+  let medio = '';
+  if (participantes && ganan > 0) {
+    const desde = ganan + 1;
+    const hasta = participantes - pagan;
+    if (hasta >= desde) medio = desde === hasta ? ` · el ${desde}º ni gana ni paga` : ` · del ${desde}º al ${hasta}º ni ganan ni pagan`;
+  }
+  return `${partePagan} ${que}${parteGanan}${medio}`;
 }
 
 export function textoPuesto(premio: Premio, i: number, participantes: number): string {
   const pct = premio.reparto[i] ?? 0;
-  if (premio.tipo === 'dinero') return `${formatoEuros(((premio.aportacion ?? 0) * participantes * pct) / 100)} (${pct} %)`;
-  const unidades = Math.round(((participantes * pct) / 100) * 10) / 10;
-  return `${String(unidades).replace('.', ',')} × ${premio.descripcion || 'premio'} (${pct} %)`;
+  return `${formatoEuros(((premio.aportacion ?? 0) * participantes * pct) / 100)} (${pct} %)`;
 }
 
 export function formatoEuros(n: number): string {
   return `${n.toLocaleString('es-ES', { minimumFractionDigits: n % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 })} €`;
 }
 
-export type FilaPremio = { usuarioId: string; total: number; puesto: string; premioTexto: string | null };
+export type FilaPremio = { usuarioId: string; total: number; puesto: string; premioTexto: string | null; paga: string | null; grupo: GrupoOtro | null };
 
-// filas ordenadas de más a menos puntos.
+// filas ordenadas de más a menos puntos. Dinero: los empatados se reparten a
+// partes iguales lo de sus puestos. Otra cosa: pagan los N últimos; si hay
+// empate justo en el corte, pagan todos los empatados (a escote).
 export function repartirPremio(filas: { usuarioId: string; total: number }[], premio: Premio | null): FilaPremio[] {
   const res: FilaPremio[] = [];
   const participantes = filas.length;
+  const pagan = premio?.tipo === 'otro' ? Math.min(Math.max(1, premio.pagan ?? 1), Math.max(participantes - 1, 1)) : 0;
+  const ganan = premio?.tipo === 'otro' ? Math.min(Math.max(0, premio.ganan ?? 0), participantes - pagan) : 0;
+  const corte = participantes - pagan; // índice desde el que se paga
+  // Empate en el corte de los ganadores: ganan todos los empatados.
   let i = 0;
   while (i < filas.length) {
     let j = i;
@@ -156,25 +186,30 @@ export function repartirPremio(filas: { usuarioId: string; total: number }[], pr
     const empatados = j - i + 1;
     const puesto = `${empatados > 1 ? 'T' : ''}${i + 1}º`;
     let pctGrupo = 0;
-    if (premio && premio.tipo !== 'nada') for (let k = i; k <= j; k++) pctGrupo += premio.reparto[k] ?? 0;
+    if (premio?.tipo === 'dinero') for (let k = i; k <= j; k++) pctGrupo += premio.reparto[k] ?? 0;
     const pctCada = pctGrupo / empatados;
+    const pagaGrupo = pagan > 0 && participantes > 1 && j >= corte;
+    const ganaGrupo = !pagaGrupo && ganan > 0 && i < ganan;
+    const grupo: GrupoOtro | null = premio?.tipo === 'otro' ? (pagaGrupo ? 'paga' : ganaGrupo ? 'gana' : 'nada') : null;
     for (let k = i; k <= j; k++) {
       let premioTexto: string | null = null;
-      if (premio && premio.tipo !== 'nada' && pctCada > 0) {
-        if (premio.tipo === 'dinero') premioTexto = formatoEuros(Math.round(((premio.aportacion ?? 0) * participantes * pctCada) / 100 * 100) / 100);
-        else premioTexto = `${String(Math.round(((participantes * pctCada) / 100) * 10) / 10).replace('.', ',')} × ${premio.descripcion || 'premio'}`;
-      }
-      res.push({ usuarioId: filas[k].usuarioId, total: filas[k].total, puesto, premioTexto });
+      if (premio?.tipo === 'dinero' && pctCada > 0) premioTexto = formatoEuros(Math.round((((premio.aportacion ?? 0) * participantes * pctCada) / 100) * 100) / 100);
+      res.push({ usuarioId: filas[k].usuarioId, total: filas[k].total, puesto, premioTexto, paga: pagaGrupo && premio ? premio.descripcion || 'lo que os jugáis' : null, grupo });
     }
     i = j + 1;
   }
   return res;
 }
 
-export function premioValido(p: Premio): string | null {
+export function premioValido(p: Premio, participantes?: number): string | null {
   if (p.tipo === 'nada') return null;
-  if (p.tipo === 'dinero' && (!p.aportacion || p.aportacion <= 0)) return 'Indica cuánto pone cada uno.';
-  if (p.tipo === 'otro' && !p.descripcion.trim()) return 'Indica qué pone cada uno (un cubata, una cena...).';
+  if (p.tipo === 'otro') {
+    if (!p.descripcion.trim()) return 'Indica qué os jugáis (una cena, un cubata...).';
+    if (!p.pagan || p.pagan < 1) return 'Indica cuántos pagan.';
+    if (participantes && (p.pagan ?? 1) + (p.ganan ?? 0) > participantes) return 'Entre los que ganan y los que pagan no puede haber más gente que en la sala.';
+    return null;
+  }
+  if (!p.aportacion || p.aportacion <= 0) return 'Indica cuánto pone cada uno.';
   if (p.ganadores < 1) return 'Tiene que haber al menos un ganador.';
   if (p.reparto.length !== p.ganadores) return 'El reparto no cuadra con el número de ganadores.';
   const suma = p.reparto.reduce((a, b) => a + b, 0);
@@ -184,9 +219,9 @@ export function premioValido(p: Premio): string | null {
 
 export function resumenPremio(p: Premio | null): string {
   if (!p || p.tipo === 'nada') return 'Solo por la gloria';
-  const que = p.tipo === 'dinero' ? `${formatoEuros(p.aportacion ?? 0)} cada uno` : `${p.descripcion} cada uno`;
+  if (p.tipo === 'otro') return textoPagan(p);
   const rep = p.ganadores === 1 ? 'el ganador se lo lleva todo' : `${p.ganadores} ganadores (${p.reparto.map((x) => `${x} %`).join(' / ')})`;
-  return `${que} · ${rep}`;
+  return `${formatoEuros(p.aportacion ?? 0)} cada uno · ${rep}`;
 }
 
 export function fechaCorta(iso: string | null): string {
