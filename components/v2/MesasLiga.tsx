@@ -12,6 +12,7 @@ import type { TipoSala } from '@/lib/repartoPremios';
 import { IconoCredito, type DeporteV2 } from '@/components/v2/IconosV2';
 import { RecargaVideo, avisarCambioCreditos } from '@/components/v2/creditos';
 import { Panel } from '@/components/v2/MarcoV2';
+import PanelLiga, { type Info as InfoLiga } from '@/components/v2/PanelLiga';
 import { fechaCorta, mensajeError } from '@/lib/v2';
 
 // ============================================================================
@@ -60,10 +61,17 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
   const [entrando, setEntrando] = useState<string | null>(null);
   const [cambiadas, setCambiadas] = useState<Set<string>>(new Set());
   const previos = useRef<Map<string, number> | null>(null);
-  const [temporada, setTemporada] = useState<{ liga: string; numero: number; en_curso: boolean; inicio: string; yo: unknown; apuntados: number } | null>(null);
-  useEffect(() => {
-    supabase.rpc('v2_liga_info', { p_deporte: deporte }).then(({ data }) => setTemporada((data as typeof temporada) ?? null));
+  // 15/10 (Iñi): las mesas de la liga son solo para los apuntados. Si no lo
+  // estás, en vez de las mesas se ve directamente la información de la
+  // temporada con el botón grande para apuntarte.
+  const [temporada, setTemporada] = useState<InfoLiga | null | undefined>(undefined);
+  const cargarLiga = useCallback(async () => {
+    const { data } = await supabase.rpc('v2_liga_info', { p_deporte: deporte });
+    setTemporada((data as InfoLiga | null) ?? null);
   }, [deporte]);
+  useEffect(() => {
+    void cargarLiga();
+  }, [cargarLiga]);
   const sinApuntar = !!temporada && !temporada.yo;
 
   const cargarSalas = useCallback(async () => {
@@ -161,7 +169,8 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
     const { data, error } = await supabase.rpc('v2_info_entrada', { p_sala: s.id });
     setEntrando(null);
     if (error) return setAviso(mensajeError(error));
-    const info = data as { saldo: number; mesas: number; maximo: number };
+    const info = data as { saldo: number; mesas: number; maximo: number; apuntado?: boolean };
+    if (info.apuntado === false) return setAviso('Las mesas de la liga son solo para los apuntados a la liga. Apúntate primero (es gratis).');
     if (info.mesas >= info.maximo) return setAviso(`Ya tienes ${info.maximo} mesas ${deporte === 'futbol' ? 'en esta jornada' : 'esta semana'}: es el máximo.`);
     if (info.saldo < 1) return setRecargarPara(s.id);
     router.push(`/salas/${s.id}/crear-equipo?v2=1`);
@@ -170,6 +179,16 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
   const enJuego = misEquipos.filter((e) => e.salas && e.salas.estado !== 'finalizada');
   const finalizadas = misEquipos.filter((e) => e.salas && e.salas.estado === 'finalizada');
   const listaMias = verMias === 'en_juego' ? enJuego : finalizadas;
+
+  if (temporada === undefined) return <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>Cargando...</p>;
+  if (temporada === null)
+    return (
+      <div style={{ background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 16, padding: 18, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <span style={{ fontWeight: 800, fontSize: 15, color: S.TEXT }}>La liga todavía no ha abierto temporada</span>
+        <span style={{ fontSize: 13, color: S.MUTED_2, lineHeight: 1.5 }}>En cuanto se abra podrás apuntarte desde aquí y jugar sus mesas. Mientras tanto puedes jugar amistosos.</span>
+      </div>
+    );
+  if (sinApuntar) return <PanelLiga info={temporada} deporte={deporte} onApuntado={() => void cargarLiga()} />;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -180,11 +199,9 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
       >
         <span style={{ fontSize: 22 }}>🏆</span>
         <span style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 18, color: '#F0B94D' }}>{sinApuntar ? `¡Apúntate a la ${temporada?.liga ?? 'liga'}!` : `Clasificación${temporada ? ` · ${temporada.liga}` : ' de la liga'}`}</span>
+          <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 18, color: '#F0B94D' }}>Clasificación · {temporada.liga}</span>
           <span style={{ fontSize: 11.5, color: S.MUTED_2 }}>
-            {sinApuntar
-              ? `Temporada ${temporada?.numero} · ${temporada?.apuntados ?? 0} apuntados · es gratis`
-              : temporada
+            {temporada
               ? temporada.en_curso
                 ? `Temporada ${temporada.numero} en juego · tus draftis y los de todos`
                 : `La Temporada ${temporada.numero} empieza el ${new Date(temporada.inicio).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}`

@@ -22,6 +22,41 @@ import { DEPORTES_V2, DEPORTE_NOMBRE, PelotaDeporte, type DeporteV2 } from '@/co
 type Liga = { id: string; deporte: DeporteV2; nombre: string; created_at: string };
 type Temporada = { id: string; liga_id: string; numero: number; inicio: string; fin: string };
 type Division = { id: string; temporada_id: string; nivel: number; nombre: string; grupos: number };
+type JornadaCal = { liga: string; numero: number; competicion: string; inicio: string; fin: string };
+
+const LIGA_CORTA = (l: string) => l.replace('Champions League', 'Champions');
+function diaCorto(iso: string) {
+  return new Date(iso).toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+// 15/10 (Iñi): en fútbol la temporada empieza el primer día de una jornada (Liga
+// o Champions) y acaba el último día de una (lunes Liga, miércoles Champions).
+function opcionesInicio(cal: JornadaCal[]) {
+  const m = new Map<string, string[]>();
+  [...cal].sort((a, b) => a.inicio.localeCompare(b.inicio)).forEach((c) => {
+    const k = aFecha(c.inicio);
+    m.set(k, [...(m.get(k) ?? []), `${LIGA_CORTA(c.liga)} J${c.numero}`]);
+  });
+  return Array.from(m.entries()).map(([valor, js]) => ({ valor, texto: `${diaCorto(`${valor}T12:00:00`)} · empieza ${js.join(' y ')}` }));
+}
+function opcionesFin(cal: JornadaCal[], desde: string) {
+  const m = new Map<string, string[]>();
+  [...cal].sort((a, b) => a.fin.localeCompare(b.fin)).forEach((c) => {
+    const k = aFecha(c.fin);
+    if (desde && k < desde) return;
+    m.set(k, [...(m.get(k) ?? []), `${LIGA_CORTA(c.liga)} J${c.numero}`]);
+  });
+  return Array.from(m.entries()).map(([valor, js]) => ({ valor, texto: `${diaCorto(`${valor}T12:00:00`)} · acaba ${js.join(' y ')}` }));
+}
+function jornadasQueCuentan(cal: JornadaCal[], inicio: string, fin: string): string {
+  const dentro = cal.filter((c) => aFecha(c.inicio) >= aFecha(inicio) && aFecha(c.fin) <= aFecha(fin));
+  const porLiga = new Map<string, number[]>();
+  dentro.forEach((c) => porLiga.set(c.liga, [...(porLiga.get(c.liga) ?? []), c.numero]));
+  if (porLiga.size === 0) return 'Ninguna jornada del calendario cae dentro de estas fechas.';
+  return Array.from(porLiga.entries())
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([l, ns]) => `${LIGA_CORTA(l)} J${Math.min(...ns)}${ns.length > 1 ? `–J${Math.max(...ns)}` : ''} (${ns.length})`)
+    .join(' · ');
+}
 
 const NOMBRE_NIVEL: Record<number, string> = { 1: 'Primera', 2: 'Segunda', 3: 'Tercera' };
 const COLOR_NIVEL: Record<number, string> = { 1: '#D4A537', 2: '#BCC3CB', 3: '#B9763E' };
@@ -59,6 +94,8 @@ export default function AdminLigasPage() {
   const [renombrando, setRenombrando] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
+  const [calendario, setCalendario] = useState<JornadaCal[]>([]);
+  const [actualizandoCal, setActualizandoCal] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -79,6 +116,8 @@ export default function AdminLigasPage() {
       supabase.from('liga_temporadas').select('*').order('numero'),
       supabase.from('liga_divisiones').select('*').order('nivel'),
     ]);
+    const { data: cal } = await supabase.from('futbol_calendario').select('liga,numero,competicion,inicio,fin').order('inicio');
+    setCalendario((cal as JornadaCal[]) ?? []);
     setLigas((l as Liga[]) ?? []);
     setTemporadas((t as Temporada[]) ?? []);
     setDivisiones((d as Division[]) ?? []);
@@ -99,6 +138,30 @@ export default function AdminLigasPage() {
     setOk(mensaje);
     await cargar();
     return true;
+  }
+
+  async function actualizarCalendario() {
+    setActualizandoCal(true);
+    setError(null);
+    setOk(null);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const r = await fetch('/api/admin/calendario-futbol', { method: 'POST', headers: { Authorization: `Bearer ${session?.access_token ?? ''}` } });
+      const texto = await r.text();
+      let json: { jornadas?: number; porLiga?: Record<string, number>; error?: string } = {};
+      try {
+        json = JSON.parse(texto);
+      } catch {
+        json = { error: 'El servidor ha tardado demasiado. Prueba otra vez.' };
+      }
+      if (!r.ok || json.error) setError(json.error ?? 'No se ha podido actualizar el calendario.');
+      else setOk(`Calendario actualizado: ${Object.entries(json.porLiga ?? {}).map(([l, n]) => `${LIGA_CORTA(l)} ${n} jornadas`).join(' · ')}.`);
+    } finally {
+      setActualizandoCal(false);
+      await cargar();
+    }
   }
 
   async function crearLiga() {
@@ -181,6 +244,7 @@ export default function AdminLigasPage() {
   }
 
   const ligasDeporte = ligas.filter((l) => l.deporte === deporte);
+  const esFutbolConCal = deporte === 'futbol' && calendario.length > 0;
 
   return (
     <main className="v2" style={S.mainReset}>
@@ -199,6 +263,20 @@ export default function AdminLigasPage() {
               </button>
             ))}
           </div>
+
+          {deporte === 'futbol' && (
+            <div style={{ ...caja, gap: 8 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: S.TEXT }}>Calendario de jornadas (La Liga y Champions)</span>
+              <span style={{ fontSize: 12, color: S.MUTED_2, lineHeight: 1.5 }}>
+                {calendario.length > 0
+                  ? `${calendario.length} jornadas cargadas. Las temporadas de fútbol solo pueden empezar el primer día de una jornada y acabar el último día de una (lunes si es de Liga, miércoles si es de Champions).`
+                  : 'Todavía no está cargado. Cárgalo para que las temporadas empiecen y acaben con una jornada.'}
+              </span>
+              <button type="button" onClick={actualizarCalendario} disabled={actualizandoCal} style={{ ...botonPeq(), alignSelf: 'flex-start', opacity: actualizandoCal ? 0.6 : 1 }}>
+                {actualizandoCal ? 'Actualizando…' : calendario.length > 0 ? 'Actualizar calendario' : 'Cargar calendario'}
+              </button>
+            </div>
+          )}
 
           {error && <p style={S.errorText}>{error}</p>}
           {ok && <p style={S.infoText}>{ok}</p>}
@@ -252,7 +330,34 @@ export default function AdminLigasPage() {
                       </div>
                       {ed ? (
                         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: S.MUTED_2 }}>
+                          {esFutbolConCal ? (
+                            <>
+                              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: S.MUTED_2 }}>
+                      Empieza
+                      <select value={ed.inicio} onChange={(e) => setEditando((x) => ({ ...x, [t.id]: { ...ed, inicio: e.target.value } }))} style={{ ...S.selectInput, padding: '8px 10px' }}>
+                        <option value="">Elige…</option>
+                        {opcionesInicio(calendario).map((o) => (
+                          <option key={o.valor} value={o.valor}>
+                            {o.texto}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: S.MUTED_2 }}>
+                      Termina
+                      <select value={ed.fin} onChange={(e) => setEditando((x) => ({ ...x, [t.id]: { ...ed, fin: e.target.value } }))} style={{ ...S.selectInput, padding: '8px 10px' }}>
+                        <option value="">Elige…</option>
+                        {opcionesFin(calendario, ed.inicio).map((o) => (
+                          <option key={o.valor} value={o.valor}>
+                            {o.texto}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                            </>
+                          ) : (
+                            <>
+                              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: S.MUTED_2 }}>
                             Empieza
                             <input type="date" value={ed.inicio} onChange={(e) => setEditando((x) => ({ ...x, [t.id]: { ...ed, inicio: e.target.value } }))} style={{ ...S.input, padding: '8px 10px' }} />
                           </label>
@@ -260,13 +365,18 @@ export default function AdminLigasPage() {
                             Termina
                             <input type="date" value={ed.fin} onChange={(e) => setEditando((x) => ({ ...x, [t.id]: { ...ed, fin: e.target.value } }))} style={{ ...S.input, padding: '8px 10px' }} />
                           </label>
+                            </>
+                          )}
                           <button type="button" onClick={() => guardarFechas(t)} style={botonPeq()}>
                             Guardar
                           </button>
                         </div>
                       ) : (
-                        <span style={{ fontSize: 13, color: S.MUTED }}>
-                          Del {fechaLarga(t.inicio)} al {fechaLarga(t.fin)}
+                        <span style={{ fontSize: 13, color: S.MUTED, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          <span>
+                            Del {fechaLarga(t.inicio)} al {fechaLarga(t.fin)}
+                          </span>
+                          {deporte === 'futbol' && calendario.length > 0 && <span style={{ fontSize: 12, color: '#F0B94D' }}>Cuentan: {jornadasQueCuentan(calendario, t.inicio, t.fin)}</span>}
                         </span>
                       )}
 
@@ -299,7 +409,34 @@ export default function AdminLigasPage() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8, borderTop: `1px solid ${S.CARD_BORDER}`, paddingTop: 12 }}>
                   <span style={{ fontSize: 12.5, fontWeight: 700, color: S.TEXT }}>Nueva temporada (Temporada {Math.max(0, ...temporadas.filter((t) => t.liga_id === liga.id).map((t) => t.numero)) + 1})</span>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                    <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: S.MUTED_2 }}>
+                    {esFutbolConCal ? (
+                      <>
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: S.MUTED_2 }}>
+                      Empieza
+                      <select value={nt.inicio} onChange={(e) => setNuevaTemp((x) => ({ ...x, [liga.id]: { inicio: e.target.value, fin: nt.fin && nt.fin < e.target.value ? '' : nt.fin } }))} style={{ ...S.selectInput, padding: '8px 10px' }}>
+                        <option value="">Elige…</option>
+                        {opcionesInicio(calendario.filter((c) => new Date(c.fin).getTime() > Date.now())).map((o) => (
+                          <option key={o.valor} value={o.valor}>
+                            {o.texto}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: S.MUTED_2 }}>
+                      Termina
+                      <select value={nt.fin} onChange={(e) => setNuevaTemp((x) => ({ ...x, [liga.id]: { ...nt, fin: e.target.value } }))} style={{ ...S.selectInput, padding: '8px 10px' }}>
+                        <option value="">Elige…</option>
+                        {opcionesFin(calendario, nt.inicio).map((o) => (
+                          <option key={o.valor} value={o.valor}>
+                            {o.texto}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                      </>
+                    ) : (
+                      <>
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: S.MUTED_2 }}>
                       Empieza
                       <input type="date" value={nt.inicio} onChange={(e) => setNuevaTemp((x) => ({ ...x, [liga.id]: { ...nt, inicio: e.target.value } }))} style={{ ...S.input, padding: '8px 10px' }} />
                     </label>
@@ -307,6 +444,8 @@ export default function AdminLigasPage() {
                       Termina
                       <input type="date" value={nt.fin} onChange={(e) => setNuevaTemp((x) => ({ ...x, [liga.id]: { ...nt, fin: e.target.value } }))} style={{ ...S.input, padding: '8px 10px' }} />
                     </label>
+                      </>
+                    )}
                     <button type="button" onClick={() => crearTemporada(liga)} style={{ ...botonPeq(), background: S.ACCENT, color: '#04140B' }}>
                       Crear temporada
                     </button>
