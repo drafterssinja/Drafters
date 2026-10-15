@@ -51,6 +51,8 @@ export type Perfil = {
   // perfiles.acepta_notificaciones_email. Respuesta obligatoria sí/no en
   // el registro, justo debajo del email.
   acepta_notificaciones_email?: boolean;
+  // Acceso a Drafters V2 (amistosos), lo da el admin en /admin/usuarios (15/10).
+  acceso_v2?: boolean;
 };
 
 export type Movimiento = {
