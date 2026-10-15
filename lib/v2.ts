@@ -147,15 +147,14 @@ export function textoPagan(premio: Premio, participantes?: number): string {
   const pagan = Math.max(1, premio.pagan ?? 1);
   const ganan = Math.max(0, premio.ganan ?? 0);
   const que = premio.descripcion || 'lo que os jugáis';
-  const partePagan = pagan === 1 ? `Paga el último` : `Pagan los ${pagan} últimos`;
-  const parteGanan = ganan === 0 ? '' : ganan === 1 ? ' · gana el 1º' : ` · ganan los ${ganan} primeros`;
-  let medio = '';
+  const partes = [`${que}: ${pagan === 1 ? 'paga el último' : `pagan los ${pagan} últimos`}`];
+  if (ganan > 0) partes.push(ganan === 1 ? 'gana el 1º' : `ganan los ${ganan} primeros`);
   if (participantes && ganan > 0) {
     const desde = ganan + 1;
     const hasta = participantes - pagan;
-    if (hasta >= desde) medio = desde === hasta ? ` · el ${desde}º ni gana ni paga` : ` · del ${desde}º al ${hasta}º ni ganan ni pagan`;
+    if (hasta >= desde) partes.push(desde === hasta ? `el ${desde}º ni gana ni paga` : `del ${desde}º al ${hasta}º ni ganan ni pagan`);
   }
-  return `${partePagan} ${que}${parteGanan}${medio}`;
+  return partes.join(' · ');
 }
 
 export function textoPuesto(premio: Premio, i: number, participantes: number): string {

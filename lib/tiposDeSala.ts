@@ -140,6 +140,9 @@ export interface SalaNueva {
   aforo: number | null;
   buy_in: number;
   fecha_limite_inscripcion: string | null;
+  // 15/10 (Iñi: "no mezclar mesas"): 1 = mesas de la V1 (con €), 2 = mesas de
+  // la liga de Drafters V2 (se entra con 1 crédito, se juegan draftis).
+  version?: number;
 }
 
 // Genera todas las salas que hay que crear al abrir un torneo/jornada nuevo:
@@ -177,6 +180,11 @@ export function generarSalasParaTorneo(params: {
       buy_in: MARATON_BUY_IN,
       fecha_limite_inscripcion: fechaLimiteIso,
     });
+    // Mesas de la liga de Drafters V2: una de cada tipo y tamaño, aparte de las
+    // de la V1 (15/10). Al llenarse, se crea otra igual (disparador en la BD).
+    VARIANTES_FUTBOL.forEach((v) =>
+      mesas.push({ nombre: v.label, deporte, competicion: competicionLabel, tipo: v.tipo, aforo: v.aforo, buy_in: 0, fecha_limite_inscripcion: fechaLimiteIso, version: 2 })
+    );
     return mesas;
   }
 

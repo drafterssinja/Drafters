@@ -21,7 +21,7 @@ import { parteParaPremios } from '@/lib/salaShared';
 
 type Admin = ReturnType<typeof crearClienteAdmin>;
 
-type SalaRow = { id: string; nombre: string; tipo: TipoSala; aforo: number | null; buy_in: number; deporte: string; competicion: string };
+type SalaRow = { id: string; nombre: string; tipo: TipoSala; aforo: number | null; buy_in: number; deporte: string; competicion: string; version?: number };
 type EquipoRow = { id: string; sala_id: string; jugadores: string[] | null; inscripciones: { estado: string }[] };
 
 export type ResultadoMesa = { salaId: string; nombre: string; ok: boolean; motivo: string };
@@ -48,7 +48,7 @@ async function todasLasFilas<T>(consulta: (desde: number, hasta: number) => Prom
 
 export async function mesasJugadasPendientes(admin: Admin, competicion: string) {
   const salas = await todasLasFilas<SalaRow>((d, h) =>
-    admin.from('salas').select('id,nombre,tipo,aforo,buy_in,deporte,competicion').eq('competicion', competicion).range(d, h)
+    admin.from('salas').select('id,nombre,tipo,aforo,buy_in,deporte,competicion,version').eq('competicion', competicion).range(d, h)
   );
   const liquidadas = await todasLasFilas<{ sala_id: string }>((d, h) =>
     admin.from('liquidaciones').select('sala_id').eq('tipo', 'sala').not('sala_id', 'is', null).range(d, h)
@@ -127,10 +127,15 @@ export async function liquidarMesasDeCompeticion(
         valor: Math.round((e.jugadores ?? []).reduce((a, id) => a + (puntos.get(id) ?? 0), 0) * 100) / 100,
       }));
       const tramos = calcularReparto(sala.tipo, sala.aforo, equipos.length);
-      const bote = parteParaPremios(Number(sala.buy_in)) * equipos.length;
+      // 15/10: las mesas de la liga V2 reparten draftis (100 por jugador, sin
+      // comisión) y no €: v2_liquidar_mesa (SQL 36).
+      const esV2 = sala.version === 2;
+      const bote = esV2 ? 100 * equipos.length : parteParaPremios(Number(sala.buy_in)) * equipos.length;
       const reparto = repartirPremiosConEmpates(clasificacion, tramos, bote, 'desc');
       const p_reparto = reparto.map((r) => ({ equipo_id: r.equipoId, posicion: r.posicion, importe: r.importe }));
-      const { error } = await admin.rpc('liquidar_evento', { p_tipo: 'sala', p_id: sala.id, p_reparto });
+      const { error } = esV2
+        ? await admin.rpc('v2_liquidar_mesa', { p_sala: sala.id, p_reparto })
+        : await admin.rpc('liquidar_evento', { p_tipo: 'sala', p_id: sala.id, p_reparto });
       if (error) {
         base.resultados.push({ salaId: sala.id, nombre: sala.nombre, ok: false, motivo: error.message.replace(/^ERROR:\s*/i, '') });
       } else {
