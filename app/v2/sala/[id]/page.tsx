@@ -10,9 +10,10 @@ import { useSesionV2 } from '@/components/v2/useSesionV2';
 import { IconoCandado } from '@/components/v2/IconosV2';
 import ChatAmistoso from '@/components/v2/ChatAmistoso';
 import EditorPartidos from '@/components/v2/EditorPartidos';
+import TiraPuestos from '@/components/v2/TiraPuestos';
 import ClasificacionAmistoso from '@/components/v2/ClasificacionAmistoso';
 import EditorPremio, { PREMIO_VACIO } from '@/components/v2/EditorPremio';
-import { MODALIDAD_DESC, MODALIDAD_LABEL, cadaXSegundos, fechaCorta, mensajeError, premioValido, resumenPremio, textoBote, textoPuesto, type Amistoso, type AmistosoJornada, type Mensaje, type Premio, type Resumen } from '@/lib/v2';
+import { MODALIDAD_DESC, MODALIDAD_LABEL, cadaXSegundos, fechaCorta, mensajeError, premioValido,  type Amistoso, type AmistosoJornada, type Mensaje, type Premio, type Resumen } from '@/lib/v2';
 
 // ============================================================================
 // DRAFTERS V2 — PANTALLA DE UNA SALA (15/10)
@@ -192,7 +193,11 @@ export default function V2Sala() {
           {!soyParticipante && (
             <Panel>
               <span style={{ fontSize: 13, color: S.MUTED, lineHeight: 1.5 }}>{MODALIDAD_DESC[amistoso.modalidad]}</span>
-              <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>🏆 {resumenPremio(amistoso.premio)}</span>
+              {amistoso.premio && amistoso.premio.tipo !== 'nada' ? (
+                <TiraPuestos premio={amistoso.premio} participantes={amistoso.num_jugadores} />
+              ) : (
+                <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>🏆 Solo por la gloria</span>
+              )}
               {empezada ? (
                 <span style={{ fontSize: 13, color: S.MUTED_3 }}>Esta sala ya ha empezado.</span>
               ) : n >= amistoso.num_jugadores ? (
@@ -324,16 +329,11 @@ export default function V2Sala() {
                       </>
                     ) : (
                       <>
-                        <span style={{ fontSize: 13.5, color: S.TEXT, fontWeight: 600 }}>{resumenPremio(amistoso.premio)}</span>
-                        {amistoso.premio && amistoso.premio.tipo === 'dinero' && (
-                          <div style={{ fontSize: 12, color: S.MUTED_2, lineHeight: 1.6 }}>
-                            <div>{textoBote(amistoso.premio, n)}</div>
-                            {amistoso.premio.reparto.map((_, i) => (
-                              <div key={i}>
-                                {i + 1}º → {textoPuesto(amistoso.premio as Premio, i, n)}
-                              </div>
-                            ))}
-                          </div>
+                        {/* 15/10 (Iñi): la misma tira de puestos que al crear la sala. */}
+                        {amistoso.premio && amistoso.premio.tipo !== 'nada' ? (
+                          <TiraPuestos premio={amistoso.premio} participantes={amistoso.num_jugadores} />
+                        ) : (
+                          <span style={{ fontSize: 13.5, color: S.TEXT, fontWeight: 600 }}>Solo por la gloria</span>
                         )}
                         {!amistoso.privada && (
                           <button type="button" onClick={() => setPestana('chat')} style={{ ...S.secondaryLinkButton, borderColor: V2_COLOR, color: V2_COLOR }}>

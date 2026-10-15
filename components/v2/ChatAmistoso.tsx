@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabaseClient';
 import * as S from '@/lib/mockupStyles';
 import EditorPremio, { PREMIO_VACIO } from '@/components/v2/EditorPremio';
 import { V2_COLOR } from '@/components/v2/MarcoV2';
+import TiraPuestos from '@/components/v2/TiraPuestos';
 import { mensajeError, premioValido, resumenPremio, type Mensaje, type Premio } from '@/lib/v2';
 
 type Voto = { mensaje_id: number; usuario_id: string; acepta: boolean };
@@ -88,7 +89,7 @@ export default function ChatAmistoso({
             return (
               <div key={m.id} style={{ border: `1px solid ${V2_COLOR}`, borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 6, background: 'rgba(167,139,250,0.06)' }}>
                 <span style={{ fontSize: 12, fontWeight: 800, color: V2_COLOR }}>🤝 @{autor} propone jugarse algo</span>
-                <span style={{ fontSize: 13.5, color: S.TEXT, fontWeight: 600 }}>{resumenPremio(m.datos)}</span>
+                {m.datos && m.datos.tipo !== 'nada' ? <TiraPuestos premio={m.datos} participantes={participantes} /> : <span style={{ fontSize: 13.5, color: S.TEXT, fontWeight: 600 }}>{resumenPremio(m.datos)}</span>}
                 <span style={{ fontSize: 11.5, color: S.MUTED_2 }}>
                   {m.estado === 'pendiente' && `Aceptan ${si.length} de ${participantes}: ${si.join(', ')}`}
                   {m.estado === 'aceptada' && '✅ Aceptada por todos: es lo que se juega la sala.'}

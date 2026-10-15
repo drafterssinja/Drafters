@@ -97,7 +97,8 @@ function MesasPageInner() {
           .from('salas')
           .select('id,nombre,competicion,deporte,tipo,aforo,buy_in,estado,fecha_limite_inscripcion')
           .neq('tipo', 'maraton')
-          .neq('estado', 'finalizada'),
+          .neq('estado', 'finalizada')
+          .eq('version', 1), // 15/10: las mesas de la liga V2 van aparte
         // inscritos_por_sala() es una función de base de datos (RPC) — hace
         // falta porque equipos/inscripciones tienen RLS que solo deja ver
         // las filas propias de cada usuario, pero el número de inscritos de
@@ -107,7 +108,7 @@ function MesasPageInner() {
         // 'porra' (esas viven en /porras, no aquí).
         supabase
           .from('equipos')
-          .select('id, sala_id, nombre_equipo, jugadores, salas(id,nombre,competicion,deporte,estado,tipo), inscripciones(estado)')
+          .select('id, sala_id, nombre_equipo, jugadores, salas(id,nombre,competicion,deporte,estado,tipo,version), inscripciones(estado)')
           .eq('usuario_id', session.user.id)
           .neq('modo', 'porra')
           .order('created_at', { ascending: false }),
@@ -122,7 +123,7 @@ function MesasPageInner() {
       ((inscritosData as { sala_id: string; inscritos: number }[]) ?? []).forEach((fila) => mapaInscritos.set(fila.sala_id, Number(fila.inscritos)));
       setInscritosPorSala(mapaInscritos);
 
-      const mesas = ((equiposData as unknown as EquipoMesaFila[]) ?? []).filter((eq) => eq.inscripciones.some((i) => i.estado !== 'reembolsada'));
+      const mesas = ((equiposData as unknown as EquipoMesaFila[]) ?? []).filter((eq) => eq.inscripciones.some((i) => i.estado !== 'reembolsada') && (eq.salas as { version?: number } | null)?.version !== 2);
       setMisMesas(mesas);
 
       const idsJugadores = Array.from(new Set(mesas.flatMap((eq) => eq.jugadores ?? [])));

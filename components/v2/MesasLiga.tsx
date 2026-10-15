@@ -17,9 +17,10 @@ import { fechaCorta, mensajeError } from '@/lib/v2';
 // ============================================================================
 // MESAS DE LIGA DE UN DEPORTE (V2, 15/10)
 // ============================================================================
-// Las mesas Drafters de siempre, pero se entra con 1 crédito del deporte (no
-// con €). Se enseña una mesa de cada tipo y tamaño (las de 10 €; el importe ya
-// no cuenta en V2). Máximo 3 mesas por jornada (fútbol) o semana (golf/tenis).
+// Mesas propias de la liga V2 (salas.version = 2, separadas de las de la V1
+// desde el 15/10): se entra con 1 crédito del deporte y se juegan draftis. Se
+// enseña una mesa de cada tipo y tamaño. Máximo 3 mesas por jornada (fútbol) o
+// semana (golf/tenis).
 
 type Sala = { id: string; nombre: string; competicion: string; tipo: TipoSala; aforo: number | null; buy_in: number; estado: string; fecha_limite_inscripcion: string | null };
 type MiEquipo = { id: string; sala_id: string; salas: Sala | null; inscripciones: { estado: string }[] };
@@ -59,10 +60,15 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
   const [entrando, setEntrando] = useState<string | null>(null);
   const [cambiadas, setCambiadas] = useState<Set<string>>(new Set());
   const previos = useRef<Map<string, number> | null>(null);
+  const [temporada, setTemporada] = useState<{ liga: string; numero: number; en_curso: boolean; inicio: string; yo: unknown; apuntados: number } | null>(null);
+  useEffect(() => {
+    supabase.rpc('v2_liga_info', { p_deporte: deporte }).then(({ data }) => setTemporada((data as typeof temporada) ?? null));
+  }, [deporte]);
+  const sinApuntar = !!temporada && !temporada.yo;
 
   const cargarSalas = useCallback(async () => {
     const { data } = await todasLasFilas<Sala>((d, h) =>
-      supabase.from('salas').select('id,nombre,competicion,tipo,aforo,buy_in,estado,fecha_limite_inscripcion').eq('deporte', deporte).neq('tipo', 'maraton').order('id').range(d, h)
+      supabase.from('salas').select('id,nombre,competicion,tipo,aforo,buy_in,estado,fecha_limite_inscripcion').eq('deporte', deporte).eq('version', 2).neq('tipo', 'maraton').order('id').range(d, h)
     );
     setSalas(data);
   }, [deporte]);
@@ -89,6 +95,7 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
       .select('id,sala_id,salas!inner(id,nombre,competicion,tipo,aforo,buy_in,estado,fecha_limite_inscripcion,deporte),inscripciones(estado)')
       .eq('usuario_id', miId)
       .eq('salas.deporte', deporte)
+      .eq('salas.version', 2)
       .order('created_at', { ascending: false });
     setMisEquipos(((data as unknown as MiEquipo[]) ?? []).filter((e) => e.inscripciones.some((i) => i.estado !== 'reembolsada')));
   }, [miId, deporte]);
@@ -107,7 +114,7 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
 
   const ahora = Date.now();
   const abiertas = useMemo(
-    () => (salas ?? []).filter((s) => Number(s.buy_in) === 10 && s.estado !== 'finalizada' && s.estado !== 'completa' && (!s.fecha_limite_inscripcion || new Date(s.fecha_limite_inscripcion).getTime() > ahora)),
+    () => (salas ?? []).filter((s) => s.estado !== 'finalizada' && s.estado !== 'completa' && (!s.fecha_limite_inscripcion || new Date(s.fecha_limite_inscripcion).getTime() > ahora)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [salas]
   );
@@ -173,8 +180,16 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
       >
         <span style={{ fontSize: 22 }}>🏆</span>
         <span style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 18, color: '#F0B94D' }}>Clasificación de la liga</span>
-          <span style={{ fontSize: 11.5, color: S.MUTED_2 }}>Tus draftis y los de todos los que juegan la liga de {deporte === 'futbol' ? 'fútbol' : deporte}</span>
+          <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 18, color: '#F0B94D' }}>{sinApuntar ? `¡Apúntate a la ${temporada?.liga ?? 'liga'}!` : `Clasificación${temporada ? ` · ${temporada.liga}` : ' de la liga'}`}</span>
+          <span style={{ fontSize: 11.5, color: S.MUTED_2 }}>
+            {sinApuntar
+              ? `Temporada ${temporada?.numero} · ${temporada?.apuntados ?? 0} apuntados · es gratis`
+              : temporada
+              ? temporada.en_curso
+                ? `Temporada ${temporada.numero} en juego · tus draftis y los de todos`
+                : `La Temporada ${temporada.numero} empieza el ${new Date(temporada.inicio).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}`
+              : `Tus draftis y los de todos los que juegan la liga de ${deporte === 'futbol' ? 'fútbol' : deporte}`}
+          </span>
         </span>
         <span style={{ fontSize: 18, color: '#F0B94D' }}>›</span>
       </Link>

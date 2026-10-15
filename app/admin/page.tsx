@@ -84,6 +84,7 @@ const TARJETAS_GESTION: { href: string; titulo: string; subtitulo: string }[] = 
   { href: '/admin/rankings', titulo: 'Ranking de jugadores', subtitulo: 'Ranking mundial de golf y tenis' },
   // Nueva (29/09, pedido de Iñi): "diseña lo que haga falta para que esos
   // pagos... queden hechos" — ver app/admin/pagos-pendientes.
+  { href: '/admin/ligas', titulo: 'Ligas y temporadas (V2)', subtitulo: 'Crear las ligas de cada deporte, sus temporadas (inicio y fin) y sus divisiones' },
   { href: '/admin/pagos-pendientes', titulo: 'Pagos pendientes', subtitulo: 'Revisar y confirmar el reparto de premios de salas y porras acabadas' },
   // Nueva (28/09, pedido de Iñi): conectar cada competición con su torneo
   // en ESPN para que la clasificación en directo se rellene sola, sin

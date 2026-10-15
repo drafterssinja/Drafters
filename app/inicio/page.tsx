@@ -90,7 +90,7 @@ export default function InicioPage() {
         supabase
           .from('equipos')
           .select(
-            'id, modo, sala_id, porra_id, nombre_equipo, jugadores, gasto_total, salas(id,nombre,competicion,deporte,estado,tipo,fecha_limite_inscripcion), porras(id,major,estado,competicion,fecha_limite_inscripcion), inscripciones(estado)'
+            'id, modo, sala_id, porra_id, nombre_equipo, jugadores, gasto_total, salas(id,nombre,competicion,deporte,estado,tipo,fecha_limite_inscripcion,version), porras(id,major,estado,competicion,fecha_limite_inscripcion), inscripciones(estado)'
           )
           .eq('usuario_id', session.user.id)
           .order('created_at', { ascending: false }),
@@ -100,8 +100,9 @@ export default function InicioPage() {
 
       if (perfilData) setPerfil(perfilData as Perfil);
 
-      const misEquipos = ((equiposData as unknown as EquipoFila[]) ?? []).filter((eq) =>
-        eq.inscripciones.some((i) => i.estado !== 'reembolsada')
+      // 15/10: las mesas de la liga de V2 no se mezclan con las de la V1.
+      const misEquipos = ((equiposData as unknown as EquipoFila[]) ?? []).filter(
+        (eq) => eq.inscripciones.some((i) => i.estado !== 'reembolsada') && (eq.salas as { version?: number } | null)?.version !== 2
       );
       setEquipos(misEquipos);
 

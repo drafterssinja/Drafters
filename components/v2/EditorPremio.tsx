@@ -1,6 +1,7 @@
 'use client';
 
 import * as S from '@/lib/mockupStyles';
+import TiraPuestos from '@/components/v2/TiraPuestos';
 import { repartoPorDefecto, textoBote, textoPagan, textoPuesto, type Premio } from '@/lib/v2';
 
 export const PREMIO_VACIO: Premio = { tipo: 'nada', aportacion: null, descripcion: '', ganadores: 1, reparto: [100], pagan: 1, ganan: 0 };
@@ -12,7 +13,6 @@ export const PREMIO_VACIO: Premio = { tipo: 'nada', aportacion: null, descripcio
 export default function EditorPremio({ premio, onChange, participantes }: { premio: Premio; onChange: (p: Premio) => void; participantes: number }) {
   const set = (cambios: Partial<Premio>) => onChange({ ...premio, ...cambios });
   const maxGanadores = Math.max(1, Math.min(participantes - 1, 6));
-  const maxPagan = Math.max(1, participantes - 1);
   const numeros = (max: number) => Array.from({ length: max }, (_, i) => i + 1);
   const pillNumero = (on: boolean) => ({ ...S.pill(on), minWidth: 40, textAlign: 'center' as const });
 
@@ -120,23 +120,8 @@ export default function EditorPremio({ premio, onChange, participantes }: { prem
                 {paso(pagan, 1, n - ganan, (v) => set({ pagan: v, ganan }), '#FF8A8A')}
               </div>
             </div>
-            {/* Así queda la clasificación, puesto a puesto */}
-            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-              {Array.from({ length: n }, (_, i) => {
-                const zona = i >= n - pagan ? 'paga' : i < ganan ? 'gana' : 'nada';
-                const c = zona === 'paga' ? { bg: 'rgba(255,92,92,0.16)', bd: 'rgba(255,92,92,0.6)', tx: '#FF8A8A' } : zona === 'gana' ? { bg: 'rgba(61,220,132,0.16)', bd: 'rgba(61,220,132,0.6)', tx: '#3DDC84' } : { bg: 'rgba(255,255,255,0.04)', bd: S.BORDER, tx: S.MUTED_2 };
-                return (
-                  <span key={i} style={{ minWidth: 34, padding: '6px 0', textAlign: 'center', borderRadius: 8, fontSize: 12, fontWeight: 800, background: c.bg, border: `1px solid ${c.bd}`, color: c.tx }}>
-                    {i + 1}º
-                  </span>
-                );
-              })}
-            </div>
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 11.5, color: S.MUTED_2 }}>
-              {ganan > 0 && <span><span style={{ color: '#3DDC84' }}>■</span> Ganan</span>}
-              {n - ganan - pagan > 0 && <span><span style={{ color: S.MUTED_3 }}>■</span> Ni ganan ni pagan</span>}
-              <span><span style={{ color: '#FF8A8A' }}>■</span> Pagan</span>
-            </div>
+            {/* Así queda la clasificación, puesto a puesto (la misma tira se ve luego en la sala) */}
+            <TiraPuestos premio={{ ...premio, pagan, ganan }} participantes={n} sinTitulo />
             <div style={{ fontSize: 12.5, color: S.MUTED, lineHeight: 1.6, background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: '10px 12px' }}>
               <div style={{ fontWeight: 700, color: S.TEXT }}>{textoPagan({ ...premio, pagan, ganan }, n)}.</div>
               <div style={{ marginTop: 4, color: S.MUTED_3 }}>Si hay empate justo en un corte, entran todos los empatados (los que pagan, a escote).</div>

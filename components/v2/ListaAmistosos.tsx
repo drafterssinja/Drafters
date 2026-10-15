@@ -6,8 +6,9 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import * as S from '@/lib/mockupStyles';
 import { Panel, V2_COLOR } from '@/components/v2/MarcoV2';
+import TiraPuestos from '@/components/v2/TiraPuestos';
 import { IconoCandado, type DeporteV2 } from '@/components/v2/IconosV2';
-import { MODALIDAD_LABEL, cadaXSegundos, fechaCorta, mensajeError, resumenPremio, type Modalidad, type Premio } from '@/lib/v2';
+import { MODALIDAD_LABEL, cadaXSegundos, fechaCorta, mensajeError, type Modalidad, type Premio } from '@/lib/v2';
 
 // Amistosos de un deporte: mis salas, las públicas abiertas, entrar con código y crear.
 type FilaLista = {
@@ -111,7 +112,11 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
                 {a.privada && <span>· creada por @{a.creador}</span>}
                 {a.cierre && <span>· empieza {fechaCorta(a.cierre)}</span>}
               </div>
-              {(a.privada || (a.premio && a.premio.tipo !== 'nada')) && <span style={{ fontSize: 11.5, color: S.MUTED_3 }}>🏆 {resumenPremio(a.premio)}</span>}
+              {a.premio && a.premio.tipo !== 'nada' ? (
+                <TiraPuestos premio={a.premio} participantes={a.num_jugadores} compacta />
+              ) : (
+                a.privada && <span style={{ fontSize: 11.5, color: S.MUTED_3 }}>🏆 Solo por la gloria</span>
+              )}
             </Link>
           );
         })}

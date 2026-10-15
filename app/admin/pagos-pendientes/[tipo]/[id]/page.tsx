@@ -34,7 +34,7 @@ import { PorraFormato, PORRA_FORMATO_LABELS } from '@/lib/porraFormato';
 type Tipo = 'sala' | 'porra';
 
 type PorraRow = { id: string; major: string; formato: PorraFormato; precio: number; competicion: string | null };
-type SalaRow = { id: string; nombre: string; tipo: TipoSala; aforo: number | null; buy_in: number; deporte: string; competicion: string };
+type SalaRow = { id: string; nombre: string; tipo: TipoSala; aforo: number | null; buy_in: number; deporte: string; competicion: string; version?: number };
 type EquipoRow = { id: string; nombre_equipo: string | null; usuario_id: string; jugadores: string[] };
 // CAMBIO 03/10 (pedido de Iñi): el desempate del bono de podio ya no mira el
 // grupo del jugador, mira su precio — ver lib/golfScoring.ts.
@@ -130,7 +130,7 @@ export default function AdminLiquidarPage() {
           }
         }
       } else {
-        const { data: salaData } = await supabase.from('salas').select('id, nombre, tipo, aforo, buy_in, deporte, competicion').eq('id', itemId).single();
+        const { data: salaData } = await supabase.from('salas').select('id, nombre, tipo, aforo, buy_in, deporte, competicion, version').eq('id', itemId).single();
         if (!activo) return;
         if (!salaData) {
           setError('No se ha encontrado esta sala.');
@@ -246,7 +246,9 @@ export default function AdminLiquidarPage() {
 
   const inscritos = tipo === 'porra' ? equipos.length : equipos.length;
   const precio = tipo === 'porra' ? porra?.precio ?? 0 : sala?.buy_in ?? 0;
-  const bote = parteParaPremios(precio) * inscritos;
+  // 15/10: mesa de la liga V2 → se reparten draftis (100 por jugador), no €.
+  const esMesaV2 = tipo === 'sala' && sala?.version === 2;
+  const bote = esMesaV2 ? 100 * inscritos : parteParaPremios(precio) * inscritos;
   const tramos = useMemo(() => {
     if (tipo === 'porra') return calcularTramosPorInscritos(inscritos);
     if (sala) return calcularReparto(sala.tipo, sala.aforo, inscritos);
@@ -271,7 +273,9 @@ export default function AdminLiquidarPage() {
     setConfirmando(true);
     setError(null);
     const p_reparto = reparto.map((r) => ({ equipo_id: r.equipoId, posicion: r.posicion, importe: r.importe }));
-    const { error: rpcError } = await supabase.rpc('liquidar_evento', { p_tipo: tipo, p_id: itemId, p_reparto });
+    const { error: rpcError } = esMesaV2
+      ? await supabase.rpc('v2_liquidar_mesa', { p_sala: itemId, p_reparto })
+      : await supabase.rpc('liquidar_evento', { p_tipo: tipo, p_id: itemId, p_reparto });
     setConfirmando(false);
     if (rpcError) {
       setError(rpcError.message.replace(/^ERROR:\s*/i, ''));
@@ -319,7 +323,7 @@ export default function AdminLiquidarPage() {
             </Link>
             <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT, fontFamily: "'Barlow Condensed', sans-serif", margin: 0 }}>{titulo}</h1>
             <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>
-              {equipos.length} equipo{equipos.length === 1 ? '' : 's'} · Bote {formatEuros(bote)}
+              {equipos.length} equipo{equipos.length === 1 ? '' : 's'} · {esMesaV2 ? `Mesa de la liga V2 · ${bote} draftis en juego` : `Bote ${formatEuros(bote)}`}
               {tipo === 'porra' && porra && ` · ${PORRA_FORMATO_LABELS[porra.formato]}`}
               {esGolf && ' · Bono de podio activo'}
             </p>
@@ -358,7 +362,7 @@ export default function AdminLiquidarPage() {
                   />
                 )}
                 <span style={{ flexShrink: 0, width: 70, textAlign: 'right', fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13, color: r.importe > 0 ? '#3DDC84' : S.MUTED_3 }}>
-                  {formatEuros(r.importe)}
+                  {esMesaV2 ? `${Math.round(r.importe) - 100 >= 0 ? "+" : ""}${Math.round(r.importe) - 100} draftis` : formatEuros(r.importe)}
                 </span>
               </div>
             ))}
