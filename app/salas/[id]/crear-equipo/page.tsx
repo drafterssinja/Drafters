@@ -14,6 +14,9 @@ import { tablaPuntuacionPorDeporte } from '@/lib/puntuaciones';
 import { escudoLaLiga, claveEquipoFutbol } from '@/lib/futbolLaLiga';
 import { esEquipoFilial, nombrePrimerEquipo } from '@/lib/aliasEquipos';
 import EscudoEquipo from '@/components/EscudoEquipo';
+import CabeceraV2 from '@/components/v2/CabeceraV2';
+import { avisarCambioCreditos } from '@/components/v2/creditos';
+import type { DeporteV2 } from '@/components/v2/IconosV2';
 
 // ============================================================================
 // CREAR EQUIPO EN UNA SALA (isCrearEquipo + isConfirmarEquipo de Main.dc.html,
@@ -97,6 +100,9 @@ export default function CrearEquipoPage() {
   // del detalle de sala enlaza aquí con este parámetro).
   const equipoEditandoId = searchParams.get('equipo');
   const modoEdicion = !!equipoEditandoId;
+  // Drafters V2 (15/10): con ?v2=1 se entra en la mesa con 1 crédito del
+  // deporte (v2_inscribirse_mesa, SQL 34) en vez de pagar el buy-in en €.
+  const v2 = searchParams.get('v2') === '1';
 
   const [perfil, setPerfil] = useState<Perfil | null>(null);
   const [sala, setSala] = useState<SalaRow | null>(null);
@@ -356,7 +362,7 @@ export default function CrearEquipoPage() {
     if (step === 'confirm' || (step === 'draft' && !modoEdicion)) {
       window.history.back();
     } else {
-      router.push(`/salas/${salaId}`);
+      router.push(v2 && sala ? `/v2/${sala.deporte}` : `/salas/${salaId}`);
     }
   }
 
@@ -642,7 +648,7 @@ export default function CrearEquipoPage() {
           p_jugadores: selected,
           p_alineacion: isFutbol ? alineacion : null,
         })
-      : await supabase.rpc('inscribirse_en_sala', {
+      : await supabase.rpc(v2 ? 'v2_inscribirse_mesa' : 'inscribirse_en_sala', {
           p_sala_id: salaId,
           p_jugadores: selected,
           p_alineacion: isFutbol ? alineacion : null,
@@ -656,7 +662,7 @@ export default function CrearEquipoPage() {
     // Registro de actividad (28/09, pedido de Iñi): solo la inscripción
     // nueva, no al editar un equipo ya inscrito.
     if (!modoEdicion && sala) {
-      await supabase.rpc('registrar_evento_actividad', { p_tipo: 'inscripcion', p_detalle: { modo: 'sala', nombre: sala.nombre } });
+      await supabase.rpc('registrar_evento_actividad', { p_tipo: 'inscripcion', p_detalle: v2 ? { modo: 'sala', nombre: sala.nombre, v2: true } : { modo: 'sala', nombre: sala.nombre } });
     }
     // Favoritos por defecto (04/10, pedido de Iñi, mismo criterio que
     // app/porras/[id]/crear-equipo — ver el comentario largo en
@@ -669,6 +675,11 @@ export default function CrearEquipoPage() {
     // sentido en el historial (si vuelves a ella, redirige otra vez a la
     // sala) — con push, la flecha de "volver" quedaba atrapada rebotando
     // entre las dos pantallas en vez de salir a /salas.
+    if (v2 && sala) {
+      avisarCambioCreditos();
+      router.replace(`/v2/${sala.deporte}`);
+      return;
+    }
     router.replace(`/salas/${salaId}`);
   }
 
@@ -692,7 +703,7 @@ export default function CrearEquipoPage() {
     return (
       <main style={S.mainReset}>
         <div style={S.pageFrame}>
-          <DraftersHeader saldoLabel={saldoLabel} accountInitials={initials} />
+          {v2 ? <CabeceraV2 perfil={perfil} deporte={(sala?.deporte ?? 'futbol') as DeporteV2} /> : <DraftersHeader saldoLabel={saldoLabel} accountInitials={initials} />}
           <div style={{ padding: '40px 20px' }}>
             <p style={{ fontSize: 14, color: S.ERROR }}>{error ?? 'No se ha encontrado esta sala.'}</p>
           </div>
@@ -704,7 +715,7 @@ export default function CrearEquipoPage() {
   return (
     <main style={S.mainReset}>
       <div style={S.pageFrame}>
-        <DraftersHeader sinVolver saldoLabel={saldoLabel} accountInitials={initials} />
+        {v2 ? <CabeceraV2 perfil={perfil} deporte={sala.deporte as DeporteV2} /> : <DraftersHeader sinVolver saldoLabel={saldoLabel} accountInitials={initials} />}
 
         <style jsx>{`
           .partidos-scroll::-webkit-scrollbar {
@@ -1100,7 +1111,7 @@ export default function CrearEquipoPage() {
                     se pagó al inscribirse la primera vez; modificar el
                     equipo nunca vuelve a cobrar (ver editar_equipo_sala() en
                     drafters-schema.sql). */}
-                {modoEdicion ? sala.nombre : `${sala.nombre} · Buy-in ${formatEuros(sala.buy_in)}`}
+                {modoEdicion ? sala.nombre : v2 ? `${sala.nombre.replace(/\s*·\s*\d+\s*€\s*$/, '')} · Entrada: 1 crédito` : `${sala.nombre} · Buy-in ${formatEuros(sala.buy_in)}`}
               </p>
             </div>
 

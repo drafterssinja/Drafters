@@ -26,6 +26,21 @@ export default function AdminUsuariosPage() {
   const [error, setError] = useState<string | null>(null);
   // 09/10 (Iñi): las Mesas Drafters ya están abiertas a todo el mundo — se
   // quita el interruptor de acceso por usuario que había aquí desde el 01/10.
+  // 15/10 (Iñi): interruptor de acceso a Drafters V2 (amistosos) por usuario.
+  const [cambiandoV2, setCambiandoV2] = useState<string | null>(null);
+  const [soloV2, setSoloV2] = useState(false);
+
+  async function cambiarAccesoV2(u: Perfil) {
+    setCambiandoV2(u.id);
+    const nuevo = !u.acceso_v2;
+    const { error: e } = await supabase.rpc('admin_set_acceso_v2', { p_usuario: u.id, p_acceso: nuevo });
+    setCambiandoV2(null);
+    if (e) {
+      setError(`No se ha podido cambiar el acceso a V2: ${e.message}`);
+      return;
+    }
+    setUsuarios((lista) => lista.map((x) => (x.id === u.id ? { ...x, acceso_v2: nuevo } : x)));
+  }
 
   useEffect(() => {
     let activo = true;
@@ -55,7 +70,7 @@ export default function AdminUsuariosPage() {
 
       const { data: usuariosData, error: usuariosError } = await supabase
         .from('perfiles')
-        .select('id, nombre, apellido, nombre_usuario, email, rol, created_at, acceso_mesas_drafters')
+        .select('id, nombre, apellido, nombre_usuario, email, rol, created_at, acceso_mesas_drafters, acceso_v2')
         .order('created_at', { ascending: false });
 
       if (!activo) return;
@@ -89,8 +104,9 @@ export default function AdminUsuariosPage() {
 
 
   const busquedaNorm = busqueda.trim().toLowerCase();
+  const usuariosBase = soloV2 ? usuarios.filter((u) => u.acceso_v2) : usuarios;
   const usuariosFiltrados = busquedaNorm
-    ? usuarios.filter((u) => {
+    ? usuariosBase.filter((u) => {
         const nombreCompleto = `${u.nombre} ${u.apellido ?? ''}`.toLowerCase();
         return (
           (u.nombre_usuario ?? '').toLowerCase().includes(busquedaNorm) ||
@@ -98,7 +114,7 @@ export default function AdminUsuariosPage() {
           (u.email ?? '').toLowerCase().includes(busquedaNorm)
         );
       })
-    : usuarios;
+    : usuariosBase;
 
   const saldoLabel = `${perfil.saldo_simulado.toFixed(2)} €`;
   const initials = S.iniciales(perfil.nombre, perfil.apellido);
@@ -126,6 +142,14 @@ export default function AdminUsuariosPage() {
               placeholder="Buscar por nombre de usuario, nombre o correo..."
               style={S.input}
             />
+          </div>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <button type="button" style={S.pill(!soloV2)} onClick={() => setSoloV2(false)}>
+              Todos
+            </button>
+            <button type="button" style={S.pill(soloV2)} onClick={() => setSoloV2(true)}>
+              Con Drafters V2 ({usuarios.filter((u) => u.acceso_v2).length})
+            </button>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -172,6 +196,10 @@ export default function AdminUsuariosPage() {
                     {new Date(u.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })}
                   </span>
                 </div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: u.acceso_v2 ? '#A78BFA' : S.MUTED_2, cursor: 'pointer', marginTop: 4 }}>
+                  <input type="checkbox" checked={!!u.acceso_v2} disabled={cambiandoV2 === u.id} onChange={() => cambiarAccesoV2(u)} style={{ width: 18, height: 18, accentColor: '#A78BFA' }} />
+                  Acceso a Drafters V2 (amistosos){u.rol === 'admin' ? ' · los admin lo tienen siempre' : ''}
+                </label>
 
               </div>
             ))}

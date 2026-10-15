@@ -165,6 +165,32 @@ export default function InicioPage() {
             </p>
           </div>
 
+          {/* Drafters V2 (15/10): solo para quien tiene acceso (lo da el admin en
+              /admin/usuarios) mientras está en pruebas. La V1 sigue igual. */}
+          {(perfil.acceso_v2 || perfil.rol === 'admin') && (
+            <Link
+              href="/v2"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+                borderRadius: 16,
+                border: '1px solid rgba(167,139,250,0.5)',
+                background: 'linear-gradient(135deg, #1A1433 0%, #2A1F4D 60%, #3A2A6B 100%)',
+                padding: '16px 18px',
+                textDecoration: 'none',
+                boxShadow: '0 0 22px rgba(167,139,250,0.18)',
+              }}
+            >
+              <span style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontStyle: 'italic', fontSize: 24, color: '#A78BFA', lineHeight: 1 }}>DRAFTERS V2</span>
+                <span style={{ fontSize: 12, color: 'rgba(245,247,245,0.75)', fontWeight: 600 }}>Amistosos con tus amigos: presupuesto, libre o draft por turnos.</span>
+              </span>
+              <span style={{ fontSize: 10, fontWeight: 800, color: '#A78BFA', border: '1px solid #A78BFA', borderRadius: 999, padding: '3px 8px', flexShrink: 0 }}>BETA</span>
+            </Link>
+          )}
+
           {/* Los dos únicos recuadros de más abajo (pedido de Iñi, 27/09):
               izquierda = Mesas Drafters (todo lo construido hasta ahora,
               salas + maratón, sin porras), derecha = Porras clásicas de
