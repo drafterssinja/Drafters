@@ -234,7 +234,7 @@ export default function V2Equipo() {
                 Mostrar los {lista.length - visibles.length} restantes
               </button>
             )}
-            {lista.length === 0 && <p style={{ fontSize: 13, color: S.MUTED_3 }}>No hay jugadores con ese filtro.</p>}
+            {lista.length === 0 && <p style={{ fontSize: 13, color: S.MUTED_3 }}>{jugadores.length === 0 ? 'Todavía no hay jugadores cargados para esta jornada. Podrás hacer el equipo en cuanto se publique.' : 'No hay jugadores con ese filtro.'}</p>}
           </div>
         </>
       )}

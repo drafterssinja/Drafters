@@ -19,7 +19,11 @@ import { MODALIDAD_DESC, MODALIDAD_LABEL, fechaCorta, mensajeError, premioValido
 // (presupuesto / libre / draft), pública o privada con contraseña y, en las
 // privadas, lo que se juega cada uno y cómo se reparte.
 
-type Comp = { deporte: string; competicion: string; cierre: string };
+type Comp = { deporte: string; competicion: string; cierre: string | null };
+
+// 15/10 (Iñi): se puede llegar hasta cualquier jornada de la competición,
+// aunque todavía no tenga horarios; se va completando sola al publicarse.
+const JORNADAS_POR_LIGA: Record<string, number> = { 'La Liga': 38, 'Premier League': 38, 'Champions League': 8 };
 type Partido = { local: string; visitante: string; kickoff: string | null };
 
 function ligaDe(competicion: string): string {
@@ -58,6 +62,7 @@ function V2CrearInner() {
   const [privada, setPrivada] = useState(true);
   const [contrasena, setContrasena] = useState('');
   const [premio, setPremio] = useState<Premio>(PREMIO_VACIO);
+  const [equipoFijo, setEquipoFijo] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -69,18 +74,27 @@ function V2CrearInner() {
   const futbol = useMemo(() => (comps ?? []).filter((c) => c.deporte === 'futbol'), [comps]);
   const golf = useMemo(() => (comps ?? []).filter((c) => c.deporte === 'golf'), [comps]);
   const ligas = useMemo(() => Array.from(new Set(futbol.map((c) => ligaDe(c.competicion)))), [futbol]);
-  const jornadasLiga = useMemo(() => futbol.filter((c) => ligaDe(c.competicion) === liga).sort((a, b) => numeroJornada(a.competicion) - numeroJornada(b.competicion)), [futbol, liga]);
+  const publicadasLiga = useMemo(() => futbol.filter((c) => ligaDe(c.competicion) === liga).sort((a, b) => numeroJornada(a.competicion) - numeroJornada(b.competicion)), [futbol, liga]);
+  // Publicadas + las que vienen detrás (sin horarios todavía) hasta el final de la competición.
+  const jornadasLiga = useMemo(() => {
+    if (publicadasLiga.length === 0) return [] as Comp[];
+    const ultima = numeroJornada(publicadasLiga[publicadasLiga.length - 1].competicion);
+    const maximo = Math.max(JORNADAS_POR_LIGA[liga] ?? 38, ultima);
+    const futuras: Comp[] = [];
+    for (let n = ultima + 1; n <= maximo; n++) futuras.push({ deporte: 'futbol', competicion: `${liga} - Jornada ${n}`, cierre: null });
+    return [...publicadasLiga, ...futuras];
+  }, [publicadasLiga, liga]);
 
   // Valores por defecto al cargar / cambiar de liga.
   useEffect(() => {
     if (!liga && ligas.length) setLiga(ligas[0]);
   }, [ligas, liga]);
   useEffect(() => {
-    if (jornadasLiga.length) {
-      setDesde(jornadasLiga[0].competicion);
-      setHasta(jornadasLiga[0].competicion);
+    if (publicadasLiga.length) {
+      setDesde(publicadasLiga[0].competicion);
+      setHasta(publicadasLiga[0].competicion);
     }
-  }, [jornadasLiga]);
+  }, [publicadasLiga]);
   useEffect(() => {
     if (!torneo && golf.length) setTorneo(golf[0].competicion);
   }, [golf, torneo]);
@@ -93,7 +107,10 @@ function V2CrearInner() {
     return jornadasLiga.slice(a, b + 1).map((c) => c.competicion);
   }, [deporte, torneo, jornadasLiga, desde, hasta]);
 
-  const unaJornadaFutbol = deporte === 'futbol' && seleccion.length === 1 ? seleccion[0] : null;
+  // Los partidos se eligen aquí solo para la primera jornada; los de las
+  // siguientes, desde la sala cuando se publiquen (15/10, Iñi).
+  const unaJornadaFutbol = deporte === 'futbol' && seleccion.length >= 1 ? seleccion[0] : null;
+  const varias = seleccion.length > 1;
 
   // Partidos de la jornada (solo si es una) para elegir cuáles entran.
   useEffect(() => {
@@ -154,7 +171,7 @@ function V2CrearInner() {
     if (unaJornadaFutbol && partidos.length > 0 && partidosOn.size === 0) return setError('Elige al menos un partido.');
     if (avisoDraft) return setError(avisoDraft);
     const premioFinal = privada ? premio : PREMIO_VACIO;
-    const errPremio = premioValido(premioFinal);
+    const errPremio = premioValido(premioFinal, numJugadores);
     if (errPremio) return setError(errPremio);
 
     const jornadas = seleccion.map((competicion) => {
@@ -167,7 +184,7 @@ function V2CrearInner() {
 
     setEnviando(true);
     const { data, error: e } = await supabase.rpc('amistoso_crear', {
-      p: { nombre: nombre.trim(), deporte, modalidad, num_jugadores: numJugadores, privada, contrasena: privada ? contrasena.trim() : null, premio: premioFinal.tipo === 'nada' ? null : premioFinal, jornadas },
+      p: { nombre: nombre.trim(), deporte, modalidad, num_jugadores: numJugadores, privada, contrasena: privada ? contrasena.trim() : null, premio: premioFinal.tipo === 'nada' ? null : premioFinal, jornadas, equipo_fijo: varias && equipoFijo },
     });
     setEnviando(false);
     if (e) return setError(mensajeError(e));
@@ -218,7 +235,7 @@ function V2CrearInner() {
                     }}
                     style={S.selectInput}
                   >
-                    {jornadasLiga.map((c) => (
+                    {publicadasLiga.map((c) => (
                       <option key={c.competicion} value={c.competicion}>
                         Jornada {numeroJornada(c.competicion)}
                       </option>
@@ -233,17 +250,40 @@ function V2CrearInner() {
                       .map((c) => (
                         <option key={c.competicion} value={c.competicion}>
                           Jornada {numeroJornada(c.competicion)}
+                          {c.cierre ? '' : ' (sin horarios aún)'}
                         </option>
                       ))}
                   </select>
                 </label>
               </div>
-              <span style={{ fontSize: 12, color: S.MUTED_2 }}>
-                {seleccion.length > 1 ? `${seleccion.length} jornadas seguidas: gana quien más puntos sume entre todas. Se hace un equipo${modalidad === 'draft' ? ' (y un draft)' : ''} por jornada.` : jornadasLiga.find((c) => c.competicion === desde) ? `Empieza ${fechaCorta(jornadasLiga.find((c) => c.competicion === desde)?.cierre ?? null)}` : ''}
+              <span style={{ fontSize: 12, color: S.MUTED_2, lineHeight: 1.5 }}>
+                {publicadasLiga.find((c) => c.competicion === desde) ? `Empieza ${fechaCorta(publicadasLiga.find((c) => c.competicion === desde)?.cierre ?? null)}. ` : ''}
+                {varias ? `${seleccion.length} jornadas seguidas: gana quien más puntos sume entre todas. Las que todavía no tienen horarios se completan solas cuando se publiquen.` : ''}
               </span>
+              {varias && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+                  <span style={S.label}>Equipo</span>
+                  {(
+                    [
+                      [false, 'Un equipo nuevo cada jornada', modalidad === 'draft' ? 'Un draft antes de cada jornada.' : 'Cada fin de semana cada uno hace su equipo.'],
+                      [true, 'El mismo equipo para todas', modalidad === 'draft' ? 'Un solo draft al principio y ese equipo juega todas las jornadas.' : 'Se hace en la primera jornada y juega todas las demás.'],
+                    ] as const
+                  ).map(([valor, titulo, desc]) => (
+                    <button
+                      key={String(valor)}
+                      type="button"
+                      onClick={() => setEquipoFijo(valor)}
+                      style={{ textAlign: 'left', background: equipoFijo === valor ? 'rgba(167,139,250,0.12)' : 'transparent', border: `1px solid ${equipoFijo === valor ? V2_COLOR : S.BORDER}`, borderRadius: 12, padding: '11px 14px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 3 }}
+                    >
+                      <span style={{ fontWeight: 800, fontSize: 13.5, color: equipoFijo === valor ? V2_COLOR : S.TEXT }}>{titulo}</span>
+                      <span style={{ fontSize: 12, color: S.MUTED_2 }}>{desc}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           ),
-          'Una sola jornada o varias seguidas de la misma competición. Solo salen las que ya están cargadas.'
+          'Desde la próxima jornada publicada hasta la que quieras de la misma competición.'
         )}
 
       {comps !== null && deporte === 'golf' &&
@@ -265,7 +305,7 @@ function V2CrearInner() {
       {unaJornadaFutbol &&
         partidos.length > 0 &&
         bloque(
-          `Partidos (${partidosOn.size} de ${partidos.length})`,
+          `Partidos${varias ? ` de la jornada ${numeroJornada(unaJornadaFutbol)}` : ''} (${partidosOn.size} de ${partidos.length})`,
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <div style={{ display: 'flex', gap: 6 }}>
               <button type="button" style={S.pill(todosLosPartidos)} onClick={() => setPartidosOn(new Set(partidos.map((p) => `${p.local}|${p.visitante}`)))}>
@@ -299,7 +339,11 @@ function V2CrearInner() {
               );
             })}
           </div>,
-          'Solo se podrán elegir jugadores de los partidos marcados.'
+          varias
+            ? equipoFijo
+              ? 'Solo se podrán elegir jugadores de los partidos marcados. Con el mismo equipo para todas, los partidos solo se eligen en la primera jornada.'
+              : 'Solo se podrán elegir jugadores de los partidos marcados. Los de las siguientes jornadas los eliges desde la sala cuando se publiquen (si no, entran todos).'
+            : 'Solo se podrán elegir jugadores de los partidos marcados.'
         )}
 
       {bloque(

@@ -22,10 +22,11 @@ export default function CabeceraV2({ perfil, deporte, volverA }: { perfil: Perfi
   const { creditos } = useCreditosV2(!!perfil);
   const [ficha, setFicha] = useState(false);
   const [noLeidas, setNoLeidas] = useState(0);
-  // Con el nombre del deporte al lado de su pelota, en móviles estrechos se encoge el logo.
-  const [estrecho, setEstrecho] = useState(false);
+  // 15/10 (Iñi: "la parte superior está muy achatada"): más alta, y tres
+  // tamaños según el ancho del móvil para que todo quepa sin aplastarse.
+  const [ancho, setAncho] = useState(400);
   useEffect(() => {
-    const medir = () => setEstrecho(window.innerWidth < 370);
+    const medir = () => setAncho(window.innerWidth);
     medir();
     window.addEventListener('resize', medir);
     return () => window.removeEventListener('resize', medir);
@@ -41,15 +42,16 @@ export default function CabeceraV2({ perfil, deporte, volverA }: { perfil: Perfi
   }, [perfil]);
 
   const info = creditos?.[deporte] ?? null;
+  const t = ancho >= 400 ? { logo: 26, bola: 30, icono: 21, boton: 32, pad: 16 } : ancho >= 370 ? { logo: 23, bola: 27, icono: 19, boton: 31, pad: 14 } : { logo: 21, bola: 25, icono: 18, boton: 29, pad: 12 };
 
   return (
-    <>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, padding: estrecho ? '16px 12px' : '16px 14px', borderBottom: '1px solid #1A211D' }}>
+    <div className="v2">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, minHeight: 68, padding: `18px ${t.pad}px`, borderBottom: '1px solid #1A211D' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-          <Link href="/v2/futbol" style={{ display: 'inline-flex', alignItems: 'center', minWidth: 0, flexShrink: 1, overflow: 'hidden' }} aria-label="Drafters">
-            <LogoDrafters size={estrecho ? 21 : 25} />
+          <Link href="/v2/futbol" style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }} aria-label="Drafters">
+            <LogoDrafters size={t.logo} />
           </Link>
-          <nav style={{ display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0 }} aria-label="Deportes">
+          <nav style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }} aria-label="Deportes">
             {DEPORTES_V2.map((d) => {
               const activo = d === deporte;
               return (
@@ -59,9 +61,10 @@ export default function CabeceraV2({ perfil, deporte, volverA }: { perfil: Perfi
                   aria-label={DEPORTE_NOMBRE[d]}
                   aria-current={activo ? 'page' : undefined}
                   style={{
-                    height: 28,
-                    minWidth: estrecho && !activo ? 24 : 28,
-                    padding: activo ? '0 9px 0 3px' : 0,
+                    height: t.bola + 2,
+                    minWidth: t.bola,
+                    flexShrink: 0,
+                    padding: activo ? '0 10px 0 4px' : 0,
                     borderRadius: 999,
                     display: 'flex',
                     alignItems: 'center',
@@ -74,9 +77,9 @@ export default function CabeceraV2({ perfil, deporte, volverA }: { perfil: Perfi
                     transition: 'all 0.15s',
                   }}
                 >
-                  <PelotaDeporte deporte={d} size={19} />
+                  <PelotaDeporte deporte={d} size={t.icono} />
                   {/* 15/10 (Iñi): el nombre del deporte solo junto a la pelota seleccionada. */}
-                  {activo && <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 11.5, color: S.ACCENT, whiteSpace: 'nowrap' }}>{DEPORTE_NOMBRE[d]}</span>}
+                  {activo && <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: ancho >= 400 ? 13 : 12, color: S.ACCENT, whiteSpace: 'nowrap' }}>{DEPORTE_NOMBRE[d]}</span>}
                 </Link>
               );
             })}
@@ -85,7 +88,7 @@ export default function CabeceraV2({ perfil, deporte, volverA }: { perfil: Perfi
 
         {perfil && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
-            <Link href="/notificaciones" aria-label="Notificaciones" style={{ position: 'relative', width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#C9D2CC', background: '#131917', border: '1px solid #2A3733', borderRadius: 8 }}>
+            <Link href="/notificaciones" aria-label="Notificaciones" style={{ position: 'relative', flexShrink: 0, width: t.boton, height: t.boton, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#C9D2CC', background: '#131917', border: '1px solid #2A3733', borderRadius: 8 }}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
                 <path d="M13.73 21a2 2 0 0 1-3.46 0" />
@@ -100,12 +103,12 @@ export default function CabeceraV2({ perfil, deporte, volverA }: { perfil: Perfi
               type="button"
               onClick={() => setFicha(true)}
               aria-label={`Créditos de ${DEPORTE_NOMBRE[deporte]}`}
-              style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#131917', border: '1px solid #2A3733', borderRadius: 8, padding: '5px 7px', cursor: 'pointer' }}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, height: t.boton, background: '#131917', border: '1px solid #2A3733', borderRadius: 8, padding: '0 9px', cursor: 'pointer' }}
             >
-              <IconoCredito size={14} />
+              <IconoCredito size={15} />
               <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13, color: S.TEXT }}>{info ? info.saldo : '–'}</span>
             </button>
-            <Link href="/cuenta" aria-label="Mi cuenta" style={{ width: 28, height: 28, borderRadius: '50%', background: S.ACCENT, color: '#04140B', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 12.5, display: 'flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none' }}>
+            <Link href="/cuenta" aria-label="Mi cuenta" style={{ flexShrink: 0, width: t.boton, height: t.boton, borderRadius: '50%', background: S.ACCENT, color: '#04140B', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 12.5, display: 'flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none' }}>
               {S.iniciales(perfil.nombre, perfil.apellido)}
             </Link>
           </div>
@@ -119,6 +122,6 @@ export default function CabeceraV2({ perfil, deporte, volverA }: { perfil: Perfi
         </div>
       )}
       {ficha && <FichaCreditos deporte={deporte} info={info} onCerrar={() => setFicha(false)} />}
-    </>
+    </div>
   );
 }

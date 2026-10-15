@@ -32,7 +32,9 @@ export default function ClasificacionAmistoso({ amistoso, jornadas, resumen, miI
     let activo = true;
     let nombresCargados = new Set<string>();
     async function cargar() {
-      const { data } = await supabase.from('amistoso_equipos').select('competicion,usuario_id,jugadores,alineacion').eq('amistoso_id', amistoso.id);
+      // 15/10: por función, para que con "el mismo equipo todas las jornadas"
+      // el equipo de la primera se traslade a cada jornada siguiente.
+      const { data } = await supabase.rpc('amistoso_equipos_clasificacion', { p_amistoso: amistoso.id });
       const eqs = (data as Equipo[]) ?? [];
       const ids = Array.from(new Set(eqs.flatMap((e) => e.jugadores)));
       const faltan = ids.filter((id) => !nombresCargados.has(id));
@@ -120,6 +122,9 @@ export default function ClasificacionAmistoso({ amistoso, jornadas, resumen, miI
                 <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
                   <span style={{ fontWeight: 700, fontSize: 13.5, color: S.TEXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>@{nombre}</span>
                   {f.premioTexto && <span style={{ fontSize: 11.5, color: V2_COLOR, fontWeight: 700 }}>{todasTerminadas ? 'Se lleva' : 'Iría'} {f.premioTexto}</span>}
+                  {f.grupo === 'paga' && <span style={{ fontSize: 11.5, color: '#FF8A8A', fontWeight: 700 }}>{todasTerminadas ? 'Paga' : 'Ahora mismo pagaría'} {f.paga}</span>}
+                  {f.grupo === 'gana' && <span style={{ fontSize: 11.5, color: S.ACCENT, fontWeight: 700 }}>🏆 {todasTerminadas ? 'Gana' : 'Ahora mismo ganaría'}</span>}
+                  {f.grupo === 'nada' && <span style={{ fontSize: 11.5, color: S.MUTED_3, fontWeight: 700 }}>Ni gana ni paga</span>}
                 </span>
                 <span style={{ fontWeight: 800, fontSize: 15, color: S.TEXT }}>{formatPuntos(f.total)}</span>
                 <span style={{ fontSize: 11, color: S.MUTED_3 }}>{abierto === f.usuarioId ? '▲' : '▼'}</span>

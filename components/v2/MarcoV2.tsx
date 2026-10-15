@@ -12,7 +12,7 @@ export const V2_COLOR = '#A78BFA';
 // Envoltorio común de las pantallas de Drafters V2 (cabecera + aviso de beta).
 export default function MarcoV2({ perfil, estado, volverA, deporte = 'futbol', children }: { perfil: Perfil | null; estado: 'cargando' | 'ok' | 'sin_acceso'; volverA?: string; deporte?: DeporteV2; children: ReactNode }) {
   return (
-    <main style={S.mainReset}>
+    <main className="v2" style={S.mainReset}>
       <div style={S.pageFrame}>
         <CabeceraV2 perfil={estado === 'ok' ? perfil : null} deporte={deporte} volverA={volverA} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18, padding: '20px 20px 64px' }}>
@@ -35,7 +35,7 @@ export default function MarcoV2({ perfil, estado, volverA, deporte = 'futbol', c
 
 export function EtiquetaBeta() {
   return (
-    <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.06em', color: V2_COLOR, border: `1px solid ${V2_COLOR}`, borderRadius: 999, padding: '2px 8px', textTransform: 'uppercase' }}>
+    <span style={{ alignSelf: 'flex-start', fontSize: 10, fontWeight: 800, letterSpacing: '0.06em', color: V2_COLOR, border: `1px solid ${V2_COLOR}`, borderRadius: 999, padding: '2px 8px', textTransform: 'uppercase' }}>
       V2 · beta
     </span>
   );

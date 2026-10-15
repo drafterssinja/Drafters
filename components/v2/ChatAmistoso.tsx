@@ -50,7 +50,7 @@ export default function ChatAmistoso({
 
   async function proponer() {
     setError(null);
-    const err = premioValido(propuesta);
+    const err = premioValido(propuesta, participantes);
     if (err) return setError(err);
     if (propuesta.tipo === 'nada') return setError('Elige dinero u otra cosa.');
     const { error: e } = await supabase.rpc('amistoso_proponer_premio', { p_amistoso: amistosoId, p_premio: propuesta });

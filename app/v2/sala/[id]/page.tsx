@@ -9,6 +9,7 @@ import MarcoV2, { EtiquetaBeta, Panel, Titulo, V2_COLOR } from '@/components/v2/
 import { useSesionV2 } from '@/components/v2/useSesionV2';
 import { IconoCandado } from '@/components/v2/IconosV2';
 import ChatAmistoso from '@/components/v2/ChatAmistoso';
+import EditorPartidos from '@/components/v2/EditorPartidos';
 import ClasificacionAmistoso from '@/components/v2/ClasificacionAmistoso';
 import EditorPremio, { PREMIO_VACIO } from '@/components/v2/EditorPremio';
 import { MODALIDAD_DESC, MODALIDAD_LABEL, cadaXSegundos, fechaCorta, mensajeError, premioValido, resumenPremio, textoBote, textoPuesto, type Amistoso, type AmistosoJornada, type Mensaje, type Premio, type Resumen } from '@/lib/v2';
@@ -119,7 +120,7 @@ export default function V2Sala() {
 
   async function guardarPremio() {
     if (!editandoPremio) return;
-    const err = premioValido(editandoPremio);
+    const err = premioValido(editandoPremio, amistoso?.num_jugadores);
     if (err) return setError(err);
     const { error: e } = await supabase.rpc('amistoso_editar_premio', { p_amistoso: id, p_premio: editandoPremio.tipo === 'nada' ? null : editandoPremio });
     if (e) return setError(mensajeError(e));
@@ -230,13 +231,18 @@ export default function V2Sala() {
               {pestana === 'sala' && (
                 <>
                   <Panel>
-                    <span style={S.sectionLabel}>{amistoso.modalidad === 'draft' ? 'Drafts' : 'Tu equipo'}</span>
-                    {jornadas.map((j) => {
+                    <span style={S.sectionLabel}>
+                      {amistoso.modalidad === 'draft' ? (amistoso.equipo_fijo ? 'Draft (un equipo para todas las jornadas)' : 'Drafts') : amistoso.equipo_fijo ? 'Tu equipo (el mismo para todas las jornadas)' : 'Tu equipo'}
+                    </span>
+                    {/* 15/10: con equipo fijo solo se hace (o se draftea) en la primera jornada. */}
+                    {(amistoso.equipo_fijo ? jornadas.slice(0, 1) : jornadas).map((j) => {
                       const info = resumen.jornadas.find((x) => x.competicion === j.competicion);
                       const hechos = resumen.equipos_hechos.filter((e) => e.competicion === j.competicion);
                       const tengo = hechos.some((e) => e.usuario_id === miId);
                       const d = drafts.find((x) => x.competicion === j.competicion);
                       const cerrada = !!info?.empezada;
+                      const publicada = !!j.cierre;
+                      const puedeElegirPartidos = esCreador && amistoso.deporte === 'futbol' && publicada && !cerrada && hechos.length === 0 && !d?.iniciado_en;
                       return (
                         <div key={j.competicion} style={{ display: 'flex', flexDirection: 'column', gap: 6, borderTop: `1px solid ${S.CARD_BORDER}`, paddingTop: 10 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline' }}>
@@ -244,7 +250,10 @@ export default function V2Sala() {
                             <span style={{ fontSize: 11, color: info?.terminada ? S.MUTED_3 : cerrada ? '#FF5C5C' : S.MUTED_2 }}>{info?.terminada ? 'Terminada' : cerrada ? 'En juego' : j.cierre ? `Cierra ${fechaCorta(j.cierre)}` : ''}</span>
                           </div>
                           {j.partidos && <span style={{ fontSize: 11.5, color: S.MUTED_3 }}>Solo {j.partidos.map((p) => `${p.local}–${p.visitante}`).join(', ')}</span>}
-                          {amistoso.modalidad === 'draft' ? (
+                          {puedeElegirPartidos && <EditorPartidos amistosoId={id} competicion={j.competicion} actuales={j.partidos} onGuardado={() => void Promise.all([cargarSala(), cargarChat()])} />}
+                          {!publicada ? (
+                            <span style={{ fontSize: 12, color: S.MUTED_3 }}>Sin horarios todavía. {amistoso.modalidad === 'draft' ? 'El draft' : 'El equipo'} se podrá hacer cuando se publique la jornada.</span>
+                          ) : amistoso.modalidad === 'draft' ? (
                             <>
                               <span style={{ fontSize: 12, color: S.MUTED_2 }}>
                                 {d?.terminado_en
@@ -276,6 +285,20 @@ export default function V2Sala() {
                         </div>
                       );
                     })}
+                    {amistoso.equipo_fijo && jornadas.length > 1 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, borderTop: `1px solid ${S.CARD_BORDER}`, paddingTop: 10 }}>
+                        <span style={{ fontSize: 12, color: S.MUTED_2 }}>Ese mismo equipo juega también:</span>
+                        {jornadas.slice(1).map((j) => {
+                          const info = resumen.jornadas.find((x) => x.competicion === j.competicion);
+                          return (
+                            <div key={j.competicion} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12.5 }}>
+                              <span style={{ color: S.TEXT }}>{j.competicion}</span>
+                              <span style={{ color: info?.terminada ? S.MUTED_3 : info?.empezada ? '#FF5C5C' : S.MUTED_3 }}>{info?.terminada ? 'Terminada' : info?.empezada ? 'En juego' : j.cierre ? `Empieza ${fechaCorta(j.cierre)}` : 'Sin horarios todavía'}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </Panel>
 
                   <Panel>
@@ -302,7 +325,7 @@ export default function V2Sala() {
                     ) : (
                       <>
                         <span style={{ fontSize: 13.5, color: S.TEXT, fontWeight: 600 }}>{resumenPremio(amistoso.premio)}</span>
-                        {amistoso.premio && amistoso.premio.tipo !== 'nada' && (
+                        {amistoso.premio && amistoso.premio.tipo === 'dinero' && (
                           <div style={{ fontSize: 12, color: S.MUTED_2, lineHeight: 1.6 }}>
                             <div>{textoBote(amistoso.premio, n)}</div>
                             {amistoso.premio.reparto.map((_, i) => (

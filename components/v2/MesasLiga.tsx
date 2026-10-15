@@ -166,6 +166,19 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* 15/10 (Iñi): enlace a la clasificación de la liga del deporte. */}
+      <Link
+        href={`/v2/${deporte}/clasificacion`}
+        style={{ display: 'flex', alignItems: 'center', gap: 12, textDecoration: 'none', borderRadius: 14, padding: '13px 16px', border: '1px solid rgba(240,185,77,0.45)', background: 'linear-gradient(135deg, #2A2210 0%, #3A2E12 100%)' }}
+      >
+        <span style={{ fontSize: 22 }}>🏆</span>
+        <span style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 18, color: '#F0B94D' }}>Clasificación de la liga</span>
+          <span style={{ fontSize: 11.5, color: S.MUTED_2 }}>Tus draftis y los de todos los que juegan la liga de {deporte === 'futbol' ? 'fútbol' : deporte}</span>
+        </span>
+        <span style={{ fontSize: 18, color: '#F0B94D' }}>›</span>
+      </Link>
+
       {misEquipos.length > 0 && (
         <Panel>
           <div style={{ display: 'flex', gap: 6 }}>
@@ -242,7 +255,7 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
                     </div>
                   </div>
                   {dentro ? (
-                    <Link href={`/salas/${s.id}`} style={{ fontSize: 12, fontWeight: 800, color: S.ACCENT, textDecoration: 'none', border: `1px solid rgba(61,220,132,0.45)`, borderRadius: 10, padding: '8px 10px' }}>
+                    <Link href={`/salas/${s.id}`} style={{ flexShrink: 0, whiteSpace: 'nowrap', fontSize: 12, fontWeight: 800, color: S.ACCENT, textDecoration: 'none', border: `1px solid rgba(61,220,132,0.45)`, borderRadius: 10, padding: '8px 10px' }}>
                       Ya estás ✓
                     </Link>
                   ) : (
@@ -250,9 +263,9 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
                       type="button"
                       disabled={entrando === s.id}
                       onClick={() => entrar(s)}
-                      style={{ display: 'flex', alignItems: 'center', gap: 6, background: S.ACCENT, color: '#04140B', border: 'none', borderRadius: 10, padding: '9px 12px', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, cursor: 'pointer', opacity: entrando === s.id ? 0.6 : 1 }}
+                      style={{ flexShrink: 0, whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 7, background: S.ACCENT, color: '#04140B', border: 'none', borderRadius: 10, padding: '10px 14px', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 16, letterSpacing: '0.02em', cursor: 'pointer', opacity: entrando === s.id ? 0.6 : 1 }}
                     >
-                      ENTRAR · 1 <IconoCredito size={12} />
+                      ENTRAR · 1 <IconoCredito size={13} oscuro />
                     </button>
                   )}
                 </motion.div>

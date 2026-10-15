@@ -48,12 +48,15 @@ export function PelotaDeporte({ deporte, size = 24 }: { deporte: DeporteV2; size
 }
 
 // Crédito Drafters — "el pase": entrada verde con muescas y la D.
-export function IconoCredito({ size = 18 }: { size?: number }) {
+// `oscuro`: para ponerlo encima de un botón verde (entrada oscura, D verde).
+export function IconoCredito({ size = 18, oscuro = false }: { size?: number; oscuro?: boolean }) {
+  const fondo = oscuro ? '#04140B' : '#3DDC84';
+  const trazo = oscuro ? '#3DDC84' : '#04140B';
   return (
-    <svg width={size * 1.45} height={size} viewBox="0 0 29 20" aria-hidden>
-      <path d="M3 1h23a2 2 0 0 1 2 2v4.2a2.8 2.8 0 0 0 0 5.6V17a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2v-4.2a2.8 2.8 0 0 0 0-5.6V3a2 2 0 0 1 2-2z" fill="#3DDC84" />
-      <path d="M8.5 3.5v13" stroke="#04140B" strokeWidth="1" strokeDasharray="1.6 1.6" opacity="0.55" />
-      <path d="M13.5 5.5h3.4a4.5 4.5 0 0 1 0 9h-3.4z" fill="none" stroke="#04140B" strokeWidth="2.2" strokeLinejoin="round" />
+    <svg width={size * 1.45} height={size} viewBox="0 0 29 20" aria-hidden style={{ flexShrink: 0 }}>
+      <path d="M3 1h23a2 2 0 0 1 2 2v4.2a2.8 2.8 0 0 0 0 5.6V17a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2v-4.2a2.8 2.8 0 0 0 0-5.6V3a2 2 0 0 1 2-2z" fill={fondo} />
+      <path d="M8.5 3.5v13" stroke={trazo} strokeWidth="1" strokeDasharray="1.6 1.6" opacity="0.55" />
+      <path d="M13.5 5.5h3.4a4.5 4.5 0 0 1 0 9h-3.4z" fill="none" stroke={trazo} strokeWidth="2.2" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -70,6 +73,18 @@ export function IconoCandado({ size = 13, color = '#F0B94D' }: { size?: number; 
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-label="Privada" style={{ flexShrink: 0 }}>
       <rect x="4.5" y="10.5" width="15" height="10.5" rx="2.2" fill={color} fillOpacity="0.18" />
       <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
+    </svg>
+  );
+}
+
+// Draftis — "la gema" (hexágono tallado con la D; oro = Primera, diseño 07/10).
+export function IconoGema({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden style={{ flexShrink: 0 }}>
+      <path d="M12 1.5l9.1 5.25v10.5L12 22.5l-9.1-5.25V6.75z" fill="#D4A537" />
+      <path d="M12 1.5l9.1 5.25L12 12 2.9 6.75z" fill="#F3D27A" />
+      <path d="M12 12l9.1-5.25v10.5L12 22.5z" fill="#9C7419" />
+      <path d="M9.6 8.2h2.2a3.8 3.8 0 0 1 0 7.6H9.6z" fill="none" stroke="#3A2A08" strokeWidth="1.7" strokeLinejoin="round" />
     </svg>
   );
 }

@@ -286,3 +286,26 @@ th, td {
 .mesas-anuncio:empty {
   display: none;
 }
+
+/* Drafters V2 (15/10): los estilos genéricos de arriba (button al 100 % de
+   ancho, label en bloque, input al 100 %) deformaban las pantallas de V2
+   (botón "Entrar" encima del texto, píldoras a lo ancho, cabecera
+   aplastada). Dentro de .v2 cada elemento lleva su propio estilo. */
+.v2 button {
+  width: auto;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+}
+.v2 label {
+  margin-bottom: 0;
+  font-size: inherit;
+  color: inherit;
+}
+.v2 input[type='checkbox'] {
+  width: auto;
+  padding: 0;
+}
