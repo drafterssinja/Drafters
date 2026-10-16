@@ -10,6 +10,7 @@ import * as S from '@/lib/mockupStyles';
 import MarcoV2, { EtiquetaBeta, Panel, Titulo, V2_COLOR } from '@/components/v2/MarcoV2';
 import { useSesionV2 } from '@/components/v2/useSesionV2';
 import SorteoDraft from '@/components/v2/SorteoDraft';
+import CampoAlineacion from '@/components/v2/CampoAlineacion';
 import SelectorDraft, { MAX_POR_EQUIPO_DRAFT, type PartidoDraft } from '@/components/v2/SelectorDraft';
 import { lineaDePosicion, type LineaFutbol } from '@/lib/salaShared';
 import { reproducirSonidoAviso } from '@/lib/sonidoAviso';
@@ -397,6 +398,10 @@ export default function V2Draft() {
                   if (suyos.length === 0) return <span style={{ fontSize: 12.5, color: S.MUTED_3 }}>Todavía no ha elegido a nadie.</span>;
                   const js = suyos.map((p) => ({ p, j: porId.get(p.jugador_id) }));
                   const c = conteo(js.map((x) => x.j).filter(Boolean) as Jug[]);
+                  // 16/10 (Iñi): con el draft terminado, cada equipo se ve dibujado en un campo.
+                  if (draft.terminado_en && futbol) {
+                    return <CampoAlineacion key={u} titulo={`@${nombres[u] ?? '?'}${u === miId ? ' (tú)' : ''}`} jugadores={js.map((x) => x.j).filter(Boolean) as Jug[]} />;
+                  }
                   return (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                       {futbol && (
