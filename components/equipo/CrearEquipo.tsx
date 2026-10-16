@@ -260,7 +260,7 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
           : Promise.resolve({ data: null as { id: string; jugadores: string[]; alineacion: string | null } | null }),
         supabase
           .from('equipos')
-          .select('id, nombre_equipo, jugadores, alineacion, sala_id, created_at, salas!inner(nombre, competicion, deporte, aforo)')
+          .select('id, nombre_equipo, jugadores, alineacion, sala_id, created_at, salas!inner(nombre, competicion, deporte, aforo, version)')
           .eq('usuario_id', session.user.id)
           .neq('sala_id', salaId)
           .eq('salas.competicion', salaRow.competicion)
@@ -301,18 +301,41 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
       }
 
       {
-        type FilaHecho = { id: string; nombre_equipo: string | null; jugadores: string[] | null; alineacion: string | null; salas: { nombre: string; aforo: number | null } | { nombre: string; aforo: number | null }[] | null };
+        type SalaHecho = { nombre: string; aforo: number | null; version?: number | null };
+        type FilaHecho = { id: string; nombre_equipo: string | null; jugadores: string[] | null; alineacion: string | null; salas: SalaHecho | SalaHecho[] | null };
         const vistos = new Set<string>();
         const hechos: EquipoHecho[] = [];
-        for (const e of (hechosData as FilaHecho[] | null) ?? []) {
-          const jugs = Array.isArray(e.jugadores) ? e.jugadores : [];
-          if (jugs.length === 0) continue;
-          const firma = `${[...jugs].sort().join(',')}|${e.alineacion ?? ''}`;
-          if (vistos.has(firma)) continue; // el mismo equipo en varias mesas: una sola vez
+        const meter = (e: EquipoHecho) => {
+          if (e.jugadores.length === 0) return;
+          const firma = `${[...e.jugadores].sort().join(',')}|${e.alineacion ?? ''}`;
+          if (vistos.has(firma)) return; // el mismo equipo en varias salas: una sola vez
           vistos.add(firma);
+          hechos.push(e);
+        };
+        // 16/10 (Iñi): la V1 y la V2 son cosas distintas. En las mesas de la liga
+        // V2 solo salen equipos de V2 de esta jornada (los guardados, los de los
+        // amistosos y los de otras mesas de la liga), igual que en los amistosos;
+        // en las mesas de la V1, solo los de la V1.
+        if (v2) {
+          const [{ data: gs }, { data: ams }] = await Promise.all([
+            supabase.from('v2_equipos_guardados').select('id,nombre,competicion,jugadores,alineacion').eq('deporte', salaRow.deporte).eq('competicion', salaRow.competicion).order('created_at', { ascending: false }),
+            supabase.from('amistoso_equipos').select('id,competicion,jugadores,alineacion,amistosos(nombre,deporte)').eq('usuario_id', session.user.id).eq('competicion', salaRow.competicion).order('updated_at', { ascending: false }).limit(30),
+          ]);
+          for (const g of (gs as { id: string; nombre: string; jugadores: string[]; alineacion: string | null }[] | null) ?? []) {
+            meter({ id: `g:${g.id}`, etiqueta: g.nombre, jugadores: g.jugadores ?? [], alineacion: g.alineacion, grupo: 'Equipos guardados' });
+          }
+          for (const e of (ams as { id: string; competicion: string; jugadores: string[]; alineacion: string | null; amistosos: { nombre: string } | { nombre: string }[] | null }[] | null) ?? []) {
+            const a0 = Array.isArray(e.amistosos) ? e.amistosos[0] : e.amistosos;
+            meter({ id: `a:${e.id}`, etiqueta: `${a0?.nombre ?? 'Amistoso'} · ${e.competicion}`, jugadores: e.jugadores ?? [], alineacion: e.alineacion, grupo: 'Tus amistosos' });
+          }
+        }
+        for (const e of (hechosData as FilaHecho[] | null) ?? []) {
           const s0 = Array.isArray(e.salas) ? e.salas[0] : e.salas;
+          const esV2 = (s0?.version ?? 1) === 2;
+          if (esV2 !== v2) continue;
+          const jugs = Array.isArray(e.jugadores) ? e.jugadores : [];
           const mesa = s0 ? `${s0.nombre}${s0.aforo ? ` (${s0.aforo} jugadores)` : ''}` : 'otra mesa';
-          hechos.push({ id: e.id, etiqueta: `${e.nombre_equipo ? `${e.nombre_equipo} · ` : ''}equipo de ${mesa}`, jugadores: jugs, alineacion: e.alineacion });
+          meter({ id: e.id, etiqueta: `${e.nombre_equipo ? `${e.nombre_equipo} · ` : ''}equipo de ${mesa}`, jugadores: jugs, alineacion: e.alineacion, grupo: v2 ? 'Tus mesas de la liga' : undefined });
         }
         setEquiposHechos(hechos);
       }
@@ -365,7 +388,7 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
         // 16/10 (Iñi): "que me deje elegir un equipo que tenía guardado en la V1".
         supabase
           .from('equipos')
-          .select('id, nombre_equipo, jugadores, alineacion, created_at, salas!inner(nombre, competicion, deporte, aforo)')
+          .select('id, nombre_equipo, jugadores, alineacion, created_at, salas!inner(nombre, competicion, deporte, aforo, version)')
           .eq('usuario_id', uid)
           .eq('salas.deporte', a.deporte)
           .order('created_at', { ascending: false })
@@ -394,10 +417,11 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
         if (soloEstaJornada && e.competicion !== jo.competicion) continue;
         meter({ id: `a:${e.id}`, etiqueta: `${s0?.nombre ?? 'Amistoso'} · ${e.competicion}`, jugadores: e.jugadores ?? [], alineacion: e.alineacion, grupo: 'Otros amistosos' });
       }
-      for (const e of (v1Data as { id: string; nombre_equipo: string | null; jugadores: string[] | null; alineacion: string | null; salas: Uno<{ nombre: string; competicion: string; aforo: number | null }> }[] | null) ?? []) {
+      for (const e of (v1Data as { id: string; nombre_equipo: string | null; jugadores: string[] | null; alineacion: string | null; salas: Uno<{ nombre: string; competicion: string; aforo: number | null; version?: number | null }> }[] | null) ?? []) {
         const s0 = uno(e.salas);
         if (soloEstaJornada && s0?.competicion !== jo.competicion) continue;
-        meter({ id: `v1:${e.id}`, etiqueta: `${e.nombre_equipo ? `${e.nombre_equipo} · ` : ''}${s0?.nombre ?? 'Mesa'} · ${s0?.competicion ?? ''}`, jugadores: Array.isArray(e.jugadores) ? e.jugadores : [], alineacion: e.alineacion, grupo: 'Tus equipos de las mesas (V1)' });
+        const esV2 = (s0?.version ?? 1) === 2;
+        meter({ id: `v1:${e.id}`, etiqueta: `${e.nombre_equipo ? `${e.nombre_equipo} · ` : ''}${s0?.nombre ?? 'Mesa'} · ${s0?.competicion ?? ''}`, jugadores: Array.isArray(e.jugadores) ? e.jugadores : [], alineacion: e.alineacion, grupo: esV2 ? 'Tus mesas de la liga' : 'Tus equipos de las mesas (V1)' });
       }
 
       const mio = mioData as { jugadores: string[]; alineacion: string | null } | null;
@@ -715,7 +739,7 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
     let ids = e.jugadores;
     // Amistosos: el equipo puede venir de otra jornada / torneo → se buscan los
     // mismos jugadores en esta (v2_mapear_jugadores, SQL 40).
-    if (esAmistoso) {
+    if (v2) {
       const { data, error: errMapa } = await supabase.rpc('v2_mapear_jugadores', { p_jugadores: e.jugadores, p_competicion: sala.competicion });
       if (errMapa) return setAvisoEquipoHecho('No se ha podido cargar ese equipo. Inténtalo otra vez.');
       ids = (data as string[]) ?? [];
@@ -993,7 +1017,7 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
                     <option value="" disabled>
                       {esAmistoso && libre ? '📂 Usar un equipo guardado o de otra sala' : isFutbol ? 'Elige un equipo que ya has hecho en esta jornada' : 'Elige un equipo que ya has hecho en este torneo'}
                     </option>
-                    {esAmistoso
+                    {v2
                       ? Array.from(new Set(equiposHechos.map((e) => e.grupo ?? ''))).map((g) => (
                           <optgroup key={g} label={g}>
                             {equiposHechos
