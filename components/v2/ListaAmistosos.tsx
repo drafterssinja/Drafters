@@ -30,7 +30,8 @@ type FilaLista = {
 export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
   const router = useRouter();
   const [lista, setLista] = useState<FilaLista[] | null>(null);
-  const [pestana, setPestana] = useState<'mias' | 'publicas' | null>(null);
+  // 16/10 (Iñi): por defecto siempre "Abiertos", no las salas en las que ya estás.
+  const [pestana, setPestana] = useState<'mias' | 'publicas'>('publicas');
   const [codigo, setCodigo] = useState('');
   // 16/10 (Iñi): se ven también las privadas (con candado) y hay un buscador arriba.
   const [busqueda, setBusqueda] = useState('');
@@ -60,7 +61,7 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
       .includes(q);
   const mias = (lista ?? []).filter((l) => l.soy_participante && coincide(l));
   const publicas = (lista ?? []).filter((l) => !l.soy_participante && coincide(l)).sort((a, b) => b.inscritos / b.num_jugadores - a.inscritos / a.num_jugadores);
-  const vista = pestana ?? (lista && mias.length === 0 ? 'publicas' : 'mias');
+  const vista = pestana;
   const mostradas = vista === 'mias' ? mias : publicas;
 
   async function buscarCodigo() {
@@ -92,11 +93,11 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
       </Panel>
 
       <div style={{ display: 'flex', gap: 6 }}>
-        <button type="button" style={S.pill(vista === 'mias')} onClick={() => setPestana('mias')}>
-          Mis amistosos ({mias.length})
-        </button>
         <button type="button" style={S.pill(vista === 'publicas')} onClick={() => setPestana('publicas')}>
           Abiertos ({publicas.length})
+        </button>
+        <button type="button" style={S.pill(vista === 'mias')} onClick={() => setPestana('mias')}>
+          Mis amistosos ({mias.length})
         </button>
       </div>
 
