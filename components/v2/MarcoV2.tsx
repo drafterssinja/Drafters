@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import CabeceraV2 from '@/components/v2/CabeceraV2';
+import AvisosV2 from '@/components/v2/AvisosV2';
 import type { DeporteV2 } from '@/components/v2/IconosV2';
 import type { Perfil } from '@/lib/supabaseClient';
 import * as S from '@/lib/mockupStyles';
@@ -27,6 +28,8 @@ export default function MarcoV2({ perfil, estado, volverA, deporte = 'futbol', c
             </div>
           )}
           {estado === 'ok' && children}
+          {/* 16/10: aviso si el admin de un amistoso tuyo ha cambiado la modalidad */}
+          {estado === 'ok' && <AvisosV2 />}
         </div>
       </div>
     </main>

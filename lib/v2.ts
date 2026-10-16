@@ -246,3 +246,30 @@ export function cadaXSegundos(fn: () => void, segundos: number): () => void {
 export function mensajeError(e: { message?: string } | null | undefined): string {
   return (e?.message ?? 'Algo ha fallado.').replace(/^ERROR:\s*/i, '');
 }
+
+// ---------------------------------------------------------------------------
+// 16/10 (Iñi): el admin puede cambiar la modalidad de un amistoso. Al que se le
+// quita el equipo le sale un aviso y puede guardarlo para otra sala.
+// ---------------------------------------------------------------------------
+export type EquipoAviso = { competicion: string; jugadores: string[]; alineacion: string | null; gasto: number };
+
+export type AvisoModalidad = {
+  id: number;
+  amistoso_id: string;
+  modalidad_antes: Modalidad | null;
+  modalidad_nueva: Modalidad | null;
+  equipo_borrado: boolean;
+  equipos: EquipoAviso[] | null;
+  created_at: string;
+  amistosos: { nombre: string; deporte: 'futbol' | 'golf' | 'tenis'; modalidad: Modalidad } | null;
+};
+
+export type EquipoGuardado = { id: string; deporte: string; competicion: string; nombre: string; jugadores: string[]; alineacion: string | null; created_at: string };
+
+// Qué pasa con los equipos ya hechos al pasar de una modalidad a otra.
+export function efectoCambioModalidad(antes: Modalidad, despues: Modalidad): 'todos' | 'caros' | 'ninguno' {
+  if (antes === despues) return 'ninguno';
+  if (despues === 'draft') return 'todos';
+  if (antes === 'libre' && despues === 'presupuesto') return 'caros';
+  return 'ninguno';
+}
