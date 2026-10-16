@@ -11,6 +11,7 @@ import { IconoCandado } from '@/components/v2/IconosV2';
 import ChatAmistoso from '@/components/v2/ChatAmistoso';
 import EditorPartidos from '@/components/v2/EditorPartidos';
 import TiraPuestos from '@/components/v2/TiraPuestos';
+import EditorSala from '@/components/v2/EditorSala';
 import ClasificacionAmistoso from '@/components/v2/ClasificacionAmistoso';
 import EditorPremio, { PREMIO_VACIO } from '@/components/v2/EditorPremio';
 import { MODALIDAD_DESC, MODALIDAD_LABEL, cadaXSegundos, fechaCorta, mensajeError, premioValido,  type Amistoso, type AmistosoJornada, type Mensaje, type Premio, type Resumen } from '@/lib/v2';
@@ -41,6 +42,10 @@ export default function V2Sala() {
   const [error, setError] = useState<string | null>(null);
   const [editandoPremio, setEditandoPremio] = useState<Premio | null>(null);
   const [copiado, setCopiado] = useState(false);
+  // 16/10 (Iñi): el admin edita la sala, cede el mando y puede empezar con menos jugadores.
+  const [editandoSala, setEditandoSala] = useState(false);
+  const [codigoCopiado, setCodigoCopiado] = useState(false);
+  const [aviso, setAviso] = useState<string | null>(null);
 
   const miId = perfil?.id ?? '';
   const soyParticipante = !!resumen?.participantes.some((p) => p.usuario_id === miId);
@@ -127,6 +132,33 @@ export default function V2Sala() {
     if (e) return setError(mensajeError(e));
     setEditandoPremio(null);
     await Promise.all([cargarSala(), cargarChat()]);
+  }
+
+  async function copiarCodigo() {
+    if (!amistoso) return;
+    try {
+      await navigator.clipboard.writeText(amistoso.codigo);
+      setCodigoCopiado(true);
+      setTimeout(() => setCodigoCopiado(false), 2000);
+    } catch {
+      window.prompt('Copia el código:', amistoso.codigo);
+    }
+  }
+
+  async function cederAdmin(usuarioId: string, nombre: string) {
+    if (!window.confirm(`¿Hacer a @${nombre} administrador de la sala? Tú dejarás de serlo.`)) return;
+    const { error: e } = await supabase.rpc('amistoso_ceder_admin', { p_amistoso: id, p_usuario: usuarioId });
+    if (e) return setError(mensajeError(e));
+    await Promise.all([cargarSala(), cargarChat()]);
+  }
+
+  async function empezarConLosQueHay(dentro: number) {
+    if (!window.confirm(`¿Cerrar la sala y jugar los ${dentro} que estáis? Después ajusta quién gana y quién paga.`)) return;
+    const { error: e } = await supabase.rpc('amistoso_cerrar_plazas', { p_amistoso: id });
+    if (e) return setError(mensajeError(e));
+    await Promise.all([cargarSala(), cargarChat()]);
+    setAviso(`Sala cerrada con ${dentro} jugadores. Revisa quién gana y quién paga con ${dentro}.`);
+    setEditandoSala(true);
   }
 
   async function compartir() {
@@ -235,6 +267,48 @@ export default function V2Sala() {
 
               {pestana === 'sala' && (
                 <>
+                  {esCreador && (
+                    <Panel style={{ borderColor: 'rgba(240,185,77,0.45)' }}>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: '#F0B94D', textTransform: 'uppercase', letterSpacing: '0.05em' }}>👑 Eres el administrador</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>Código</span>
+                        <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 26, letterSpacing: '0.18em', color: S.TEXT }}>{amistoso.codigo}</span>
+                        <button type="button" onClick={copiarCodigo} style={{ marginLeft: 'auto', border: `1px solid ${codigoCopiado ? S.ACCENT : S.BORDER}`, background: codigoCopiado ? 'rgba(61,220,132,0.12)' : 'transparent', color: codigoCopiado ? S.ACCENT : S.TEXT, borderRadius: 10, padding: '8px 12px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer' }}>
+                          {codigoCopiado ? '✓ Copiado' : '📋 Copiar'}
+                        </button>
+                      </div>
+                      {aviso && <span style={{ fontSize: 12.5, color: '#F0B94D' }}>{aviso}</span>}
+                      {editandoSala ? (
+                        <EditorSala
+                          amistoso={amistoso}
+                          dentro={n}
+                          empezada={empezada || draftEmpezado}
+                          onCancelar={() => {
+                            setEditandoSala(false);
+                            setAviso(null);
+                          }}
+                          onGuardado={() => {
+                            setEditandoSala(false);
+                            setAviso(null);
+                            void Promise.all([cargarSala(), cargarChat()]);
+                          }}
+                        />
+                      ) : (
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          <button type="button" onClick={() => setEditandoSala(true)} style={{ border: `1px solid ${V2_COLOR}`, color: V2_COLOR, background: 'transparent', borderRadius: 10, padding: '9px 14px', fontSize: 13, fontWeight: 800, cursor: 'pointer' }}>
+                            ✏️ Editar sala
+                          </button>
+                          {!empezada && !draftEmpezado && n >= 2 && n < amistoso.num_jugadores && (
+                            <button type="button" onClick={() => empezarConLosQueHay(n)} style={{ border: `1px solid ${S.BORDER}`, color: S.TEXT, background: 'transparent', borderRadius: 10, padding: '9px 14px', fontSize: 13, fontWeight: 800, cursor: 'pointer' }}>
+                              ▶ Empezar con los {n} que estamos
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      {!editandoSala && <span style={{ fontSize: 11.5, color: S.MUTED_3 }}>Para pasar el mando a otro, pulsa &quot;Hacer admin&quot; junto a su nombre en la lista de jugadores.</span>}
+                    </Panel>
+                  )}
+
                   <Panel>
                     <span style={S.sectionLabel}>
                       {amistoso.modalidad === 'draft' ? (amistoso.equipo_fijo ? 'Draft (un equipo para todas las jornadas)' : 'Drafts') : amistoso.equipo_fijo ? 'Tu equipo (el mismo para todas las jornadas)' : 'Tu equipo'}
@@ -309,7 +383,7 @@ export default function V2Sala() {
                   <Panel>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span style={S.sectionLabel}>Lo que os jugáis</span>
-                      {esCreador && amistoso.privada && !editandoPremio && (
+                      {esCreador && !editandoPremio && !editandoSala && (
                         <button type="button" onClick={() => setEditandoPremio(amistoso.premio ?? PREMIO_VACIO)} style={{ background: 'none', border: 'none', color: V2_COLOR, fontWeight: 700, fontSize: 12.5, cursor: 'pointer' }}>
                           Editar
                         </button>
@@ -356,19 +430,30 @@ export default function V2Sala() {
                           @{p.nombre}
                           {p.usuario_id === miId ? ' (tú)' : ''}
                         </span>
-                        {amistoso.privada && p.usuario_id === amistoso.creador_id && <span style={{ fontSize: 10.5, fontWeight: 700, color: '#F0B94D' }}>👑 ADMIN</span>}
+                        {p.usuario_id === amistoso.creador_id && <span style={{ fontSize: 10.5, fontWeight: 700, color: '#F0B94D' }}>👑 ADMIN</span>}
+                        {esCreador && p.usuario_id !== miId && (
+                          <button type="button" onClick={() => cederAdmin(p.usuario_id, p.nombre)} style={{ border: `1px solid ${S.BORDER}`, background: 'transparent', color: S.MUTED, borderRadius: 8, padding: '4px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                            Hacer admin
+                          </button>
+                        )}
                       </div>
                     ))}
-                    {Array.from({ length: Math.max(0, amistoso.num_jugadores - n) }).map((_, i) => (
-                      <div key={i} style={{ fontSize: 12.5, color: S.FAINT }}>
-                        Hueco libre
-                      </div>
-                    ))}
+                    {amistoso.num_jugadores - n > 4 ? (
+                      <div style={{ fontSize: 12.5, color: S.FAINT }}>{amistoso.num_jugadores - n} huecos libres</div>
+                    ) : (
+                      Array.from({ length: Math.max(0, amistoso.num_jugadores - n) }).map((_, i) => (
+                        <div key={i} style={{ fontSize: 12.5, color: S.FAINT }}>
+                          Hueco libre
+                        </div>
+                      ))
+                    )}
                     {!empezada && n < amistoso.num_jugadores && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
-                        <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>
-                          Código de la sala: <b style={{ color: S.TEXT, letterSpacing: '0.15em' }}>{amistoso.codigo}</b>
-                        </span>
+                        {!esCreador && (
+                          <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>
+                            Código de la sala: <b style={{ color: S.TEXT, letterSpacing: '0.15em' }}>{amistoso.codigo}</b>
+                          </span>
+                        )}
                         <button type="button" onClick={compartir} style={{ ...S.primaryButton, background: V2_COLOR, marginTop: 0 }}>
                           {copiado ? '¡Copiado!' : 'Invitar amigos'}
                         </button>

@@ -7,6 +7,7 @@ import { todasLasFilas } from '@/lib/paginar';
 import * as S from '@/lib/mockupStyles';
 import MarcoV2, { EtiquetaBeta, Panel, Titulo, V2_COLOR } from '@/components/v2/MarcoV2';
 import EditorPremio, { PREMIO_VACIO } from '@/components/v2/EditorPremio';
+import SelectorJugadores from '@/components/v2/SelectorJugadores';
 import { useSesionV2 } from '@/components/v2/useSesionV2';
 import { MODALIDAD_DESC, MODALIDAD_LABEL, fechaCorta, mensajeError, premioValido, type Modalidad, type Premio } from '@/lib/v2';
 
@@ -348,13 +349,8 @@ function V2CrearInner() {
 
       {bloque(
         'Jugadores en la sala',
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {Array.from({ length: 11 }, (_, i) => i + 2).map((n) => (
-            <button key={n} type="button" style={{ ...S.pill(numJugadores === n), minWidth: 38 }} onClick={() => setNumJugadores(n)}>
-              {n}
-            </button>
-          ))}
-        </div>
+        <SelectorJugadores valor={numJugadores} onChange={setNumJugadores} />,
+        'Si al final sois menos, el administrador puede empezar con los que haya y ajustar quién gana y quién paga.'
       )}
 
       {bloque(

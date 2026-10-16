@@ -22,12 +22,12 @@ import PorrasGolf from '@/components/v2/PorrasGolf';
 type Modo = 'liga' | 'amistosos' | 'porras';
 const MODOS: Record<DeporteV2, { id: Modo; label: string }[]> = {
   futbol: [
-    { id: 'liga', label: 'Liga' },
     { id: 'amistosos', label: 'Amistosos' },
+    { id: 'liga', label: 'Liga' },
   ],
   golf: [
-    { id: 'liga', label: 'Mesas' },
     { id: 'amistosos', label: 'Amistosos' },
+    { id: 'liga', label: 'Mesas' },
     { id: 'porras', label: 'Porras' },
   ],
   tenis: [],
@@ -40,7 +40,8 @@ export default function V2Deporte() {
   const deporte: DeporteV2 = esDeporteV2(params.deporte) ? params.deporte : 'futbol';
   const { perfil, estado } = useSesionV2();
   const modos = MODOS[deporte];
-  const [modo, setModo] = useState<Modo>('liga');
+  // 16/10 (Iñi): de momento, de serie primero los amistosos y luego la liga.
+  const [modo, setModo] = useState<Modo>('amistosos');
 
   useEffect(() => {
     if (!esDeporteV2(params.deporte)) router.replace('/v2/futbol');
@@ -51,17 +52,17 @@ export default function V2Deporte() {
     let inicial: string | null = modoParam;
     if (!inicial) {
       try {
-        inicial = localStorage.getItem(`v2_modo_${deporte}`);
+        inicial = localStorage.getItem(`v2_modo2_${deporte}`);
       } catch {}
     }
-    setModo(modos.some((m) => m.id === inicial) ? (inicial as Modo) : 'liga');
+    setModo(modos.some((m) => m.id === inicial) ? (inicial as Modo) : 'amistosos');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deporte, modoParam]);
 
   function elegir(m: Modo) {
     setModo(m);
     try {
-      localStorage.setItem(`v2_modo_${deporte}`, m);
+      localStorage.setItem(`v2_modo2_${deporte}`, m);
     } catch {}
   }
 
