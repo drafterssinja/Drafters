@@ -15,6 +15,7 @@ import TiraPuestos from '@/components/v2/TiraPuestos';
 import EditorSala from '@/components/v2/EditorSala';
 import CajaContrasena from '@/components/v2/CajaContrasena';
 import CosteCredito from '@/components/v2/CosteCredito';
+import MiEquipoAmistoso from '@/components/v2/MiEquipoAmistoso';
 import { avisarCambioCreditos } from '@/components/v2/creditos';
 import ClasificacionAmistoso from '@/components/v2/ClasificacionAmistoso';
 import EditorPremio, { PREMIO_VACIO } from '@/components/v2/EditorPremio';
@@ -125,6 +126,30 @@ export default function V2Sala() {
     await cargarSala();
   }
 
+  // 16/10 (Iñi): en las salas con presupuesto o libres, "Unirme a la sala"
+  // te lleva a cómo puntúan y a hacer tu equipo; entras en la sala (y se usa
+  // el crédito) al guardar el equipo (SQL 47). En draft se entra directamente.
+  const jornadaParaEquipo = (() => {
+    if (!amistoso || amistoso.modalidad === 'draft') return null;
+    const ahora = Date.now();
+    const candidatas = amistoso.equipo_fijo ? jornadas.slice(0, 1) : jornadas;
+    return candidatas.find((x) => x.cierre && new Date(x.cierre).getTime() > ahora) ?? null;
+  })();
+
+  async function unirseOHacerEquipo() {
+    setError(null);
+    if (!jornadaParaEquipo) return unirse();
+    if (amistoso?.privada) {
+      const { data: ok, error: e } = await supabase.rpc('amistoso_comprobar_clave', { p_amistoso: id, p_contrasena: contrasena.trim() });
+      if (e) return setError(mensajeError(e));
+      if (!ok) return setError(`❌ Esa contraseña no es la buena. Revísala (mayúsculas, espacios...) o pídesela otra vez a @${resumen?.nombres[amistoso?.creador_id ?? ''] ?? 'quien creó la sala'}.`);
+      try {
+        sessionStorage.setItem(`v2_clave_${id}`, contrasena.trim());
+      } catch {}
+    }
+    router.push(`/v2/sala/${id}/equipo?c=${encodeURIComponent(jornadaParaEquipo.competicion)}&unirse=1`);
+  }
+
   async function salir() {
     if (!window.confirm('¿Seguro que quieres salir de la sala? Se te devuelve el crédito.')) return;
     const { error: e } = await supabase.rpc('amistoso_salir', { p_amistoso: id });
@@ -215,6 +240,65 @@ export default function V2Sala() {
   const primeraCierre = jornadas[0]?.cierre ?? null;
   const draftEmpezado = drafts.some((d) => d.iniciado_en);
 
+  // Quién está en la sala (también se ve antes de unirte).
+  const panelJugadores = (soloLectura: boolean) => (
+    <Panel>
+      <span style={S.sectionLabel}>
+        Jugadores ({n}/{amistoso!.num_jugadores})
+      </span>
+      {resumen!.participantes.map((p) => (
+        <div key={p.usuario_id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, color: S.TEXT }}>
+          <span style={{ width: 28, height: 28, borderRadius: 999, background: 'rgba(167,139,250,0.15)', color: V2_COLOR, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800 }}>{p.nombre.slice(0, 1).toUpperCase()}</span>
+          <span style={{ flex: 1 }}>
+            @{p.nombre}
+            {p.usuario_id === miId ? ' (tú)' : ''}
+          </span>
+          {p.usuario_id === amistoso!.creador_id && <span style={{ fontSize: 10.5, fontWeight: 700, color: '#F0B94D' }}>👑 ADMIN</span>}
+          {!soloLectura && esCreador && p.usuario_id !== miId && (
+            <button type="button" onClick={() => cederAdmin(p.usuario_id, p.nombre)} style={{ border: `1px solid ${S.BORDER}`, background: 'transparent', color: S.MUTED, borderRadius: 8, padding: '4px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+              Hacer admin
+            </button>
+          )}
+        </div>
+      ))}
+      {amistoso!.num_jugadores - n > 4 ? (
+        <div style={{ fontSize: 12.5, color: S.FAINT }}>{amistoso!.num_jugadores - n} huecos libres</div>
+      ) : (
+        Array.from({ length: Math.max(0, amistoso!.num_jugadores - n) }).map((_, i) => (
+          <div key={i} style={{ fontSize: 12.5, color: S.FAINT }}>
+            Hueco libre
+          </div>
+        ))
+      )}
+      {!soloLectura && !empezada && n < amistoso!.num_jugadores && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+          {!esCreador && (
+            <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>
+              Código de la sala: <b style={{ color: S.TEXT, letterSpacing: '0.15em' }}>{amistoso!.codigo}</b>
+            </span>
+          )}
+          <button type="button" onClick={compartir} style={{ ...S.primaryButton, background: V2_COLOR, marginTop: 0 }}>
+            {copiado ? '¡Copiado!' : 'Invitar amigos'}
+          </button>
+          {/* 16/10 (Iñi): invitar directamente a tus amigos de Drafters. */}
+          <InvitarAmigos amistosoId={id} dentro={resumen!.participantes.map((p) => p.usuario_id)} />
+        </div>
+      )}
+    </Panel>
+  );
+
+  // Lo que se juega la sala, para quien todavía no está dentro.
+  const panelPremioLectura = () => (
+    <Panel>
+      <span style={S.sectionLabel}>Lo que os jugáis</span>
+      {amistoso!.premio && amistoso!.premio.tipo !== 'nada' ? (
+        <TiraPuestos premio={amistoso!.premio} participantes={amistoso!.num_jugadores} />
+      ) : (
+        <span style={{ fontSize: 13.5, color: S.TEXT, fontWeight: 600 }}>🏆 Solo por la gloria</span>
+      )}
+    </Panel>
+  );
+
   return (
     <MarcoV2 perfil={perfil} estado={estado} deporte={amistoso?.deporte ?? 'futbol'} volverA={`/v2/${amistoso?.deporte ?? 'futbol'}?modo=amistosos`}>
       {cargando ? (
@@ -240,13 +324,10 @@ export default function V2Sala() {
           </div>
 
           {!soyParticipante && (
+            <>
+            {/* 16/10 (Iñi): primero apuntarte, luego quién está y abajo lo que os jugáis. */}
             <Panel>
               <span style={{ fontSize: 13, color: S.MUTED, lineHeight: 1.5 }}>{MODALIDAD_DESC[amistoso.modalidad]}</span>
-              {amistoso.premio && amistoso.premio.tipo !== 'nada' ? (
-                <TiraPuestos premio={amistoso.premio} participantes={amistoso.num_jugadores} />
-              ) : (
-                <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>🏆 Solo por la gloria</span>
-              )}
               {empezada ? (
                 <span style={{ fontSize: 13, color: S.MUTED_3 }}>Esta sala ya ha empezado.</span>
               ) : n >= amistoso.num_jugadores ? (
@@ -261,15 +342,20 @@ export default function V2Sala() {
                         setContrasena(v);
                         setError(null);
                       }}
-                      onEnter={() => void unirse()}
+                      onEnter={() => void unirseOHacerEquipo()}
                       creador={resumen.nombres[amistoso.creador_id] ?? null}
                     />
                   )}
                   {/* 16/10 (Iñi): entrar en un amistoso cuesta 1 crédito Drafters (SQL 45). */}
                   {amistoso.deporte !== 'tenis' && <CosteCredito deporte={amistoso.deporte} />}
+                  {jornadaParaEquipo && (
+                    <span style={{ fontSize: 12.5, color: S.MUTED_2, lineHeight: 1.5 }}>
+                      Al pulsar verás cómo puntúan los jugadores y harás tu equipo. <b style={{ color: S.TEXT }}>Entras en la sala (y se usa el crédito) cuando guardas tu equipo.</b>
+                    </span>
+                  )}
                   <button
                     type="button"
-                    onClick={unirse}
+                    onClick={() => void unirseOHacerEquipo()}
                     disabled={amistoso.privada && !contrasena.trim()}
                     style={{ ...S.primaryButton, background: V2_COLOR, fontSize: 16, minHeight: 52, opacity: amistoso.privada && !contrasena.trim() ? 0.5 : 1 }}
                   >
@@ -279,6 +365,9 @@ export default function V2Sala() {
               )}
               {error && <p style={S.errorText}>{error}</p>}
             </Panel>
+            {panelJugadores(true)}
+            {panelPremioLectura()}
+            </>
           )}
 
           {soyParticipante && (
@@ -385,10 +474,8 @@ export default function V2Sala() {
                             </>
                           ) : (
                             <>
-                              <span style={{ fontSize: 12, color: S.MUTED_2 }}>
-                                Equipos hechos: {hechos.length} de {n}
-                                {hechos.length > 0 && ` (${hechos.map((h) => '@' + (resumen.nombres[h.usuario_id] ?? '?')).join(', ')})`}
-                              </span>
+                              {/* 16/10 (Iñi): tu equipo en el campo, en vez de "equipos hechos 2 de 3". */}
+                              {tengo && <MiEquipoAmistoso amistosoId={id} competicion={j.competicion} deporte={amistoso.deporte} miId={miId} />}
                               {!cerrada && (
                                 <Link href={`/v2/sala/${id}/equipo?c=${encodeURIComponent(j.competicion)}`} style={{ ...(tengo ? S.secondaryLinkButton : { ...S.primaryButton, marginTop: 0 }), textAlign: 'center', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                   {tengo ? 'Cambiar mi equipo' : 'Hacer mi equipo'}
@@ -415,6 +502,9 @@ export default function V2Sala() {
                       </div>
                     )}
                   </Panel>
+
+
+                  {panelJugadores(false)}
 
                   <Panel>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -459,50 +549,6 @@ export default function V2Sala() {
                         )}
                         <span style={{ fontSize: 11, color: S.MUTED_3 }}>Drafters no cobra ni paga nada en los amistosos: solo calcula cuánto le toca a cada uno.</span>
                       </>
-                    )}
-                  </Panel>
-
-                  <Panel>
-                    <span style={S.sectionLabel}>
-                      Jugadores ({n}/{amistoso.num_jugadores})
-                    </span>
-                    {resumen.participantes.map((p) => (
-                      <div key={p.usuario_id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, color: S.TEXT }}>
-                        <span style={{ width: 28, height: 28, borderRadius: 999, background: 'rgba(167,139,250,0.15)', color: V2_COLOR, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800 }}>{p.nombre.slice(0, 1).toUpperCase()}</span>
-                        <span style={{ flex: 1 }}>
-                          @{p.nombre}
-                          {p.usuario_id === miId ? ' (tú)' : ''}
-                        </span>
-                        {p.usuario_id === amistoso.creador_id && <span style={{ fontSize: 10.5, fontWeight: 700, color: '#F0B94D' }}>👑 ADMIN</span>}
-                        {esCreador && p.usuario_id !== miId && (
-                          <button type="button" onClick={() => cederAdmin(p.usuario_id, p.nombre)} style={{ border: `1px solid ${S.BORDER}`, background: 'transparent', color: S.MUTED, borderRadius: 8, padding: '4px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
-                            Hacer admin
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                    {amistoso.num_jugadores - n > 4 ? (
-                      <div style={{ fontSize: 12.5, color: S.FAINT }}>{amistoso.num_jugadores - n} huecos libres</div>
-                    ) : (
-                      Array.from({ length: Math.max(0, amistoso.num_jugadores - n) }).map((_, i) => (
-                        <div key={i} style={{ fontSize: 12.5, color: S.FAINT }}>
-                          Hueco libre
-                        </div>
-                      ))
-                    )}
-                    {!empezada && n < amistoso.num_jugadores && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
-                        {!esCreador && (
-                          <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>
-                            Código de la sala: <b style={{ color: S.TEXT, letterSpacing: '0.15em' }}>{amistoso.codigo}</b>
-                          </span>
-                        )}
-                        <button type="button" onClick={compartir} style={{ ...S.primaryButton, background: V2_COLOR, marginTop: 0 }}>
-                          {copiado ? '¡Copiado!' : 'Invitar amigos'}
-                        </button>
-                        {/* 16/10 (Iñi): invitar directamente a tus amigos de Drafters. */}
-                        <InvitarAmigos amistosoId={id} dentro={resumen.participantes.map((p) => p.usuario_id)} />
-                      </div>
                     )}
                   </Panel>
 

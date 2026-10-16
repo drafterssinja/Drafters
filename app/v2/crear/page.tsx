@@ -202,6 +202,12 @@ function V2CrearInner() {
     setEnviando(false);
     if (e) return setError(mensajeError(e));
     avisarCambioCreditos();
+    // 16/10 (Iñi): en las salas con presupuesto o libres, al crearla vas directo
+    // a cómo puntúan y a hacer tu equipo (en draft, a la sala).
+    if (modalidad !== 'draft' && seleccion.length > 0) {
+      router.replace(`/v2/sala/${data as string}/equipo?c=${encodeURIComponent(seleccion[0])}`);
+      return;
+    }
     router.replace(`/v2/sala/${data as string}`);
   }
 
