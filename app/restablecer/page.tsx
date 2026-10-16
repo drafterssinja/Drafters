@@ -1,5 +1,6 @@
 'use client';
 
+import Cargando from '@/components/Cargando';
 import { useEffect, useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -84,7 +85,7 @@ export default function RestablecerPage() {
             <p style={{ fontSize: 14, color: S.MUTED, margin: 0 }}>Escribe la nueva contraseña para tu cuenta de Drafters.</p>
           </div>
 
-          {!listo && !enlaceInvalido && <p style={{ fontSize: 14, color: S.MUTED_2 }}>Comprobando el enlace...</p>}
+          {!listo && !enlaceInvalido && <Cargando texto="Comprobando el enlace" />}
 
           {enlaceInvalido && !guardadoOk && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

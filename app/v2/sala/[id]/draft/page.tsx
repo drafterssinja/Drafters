@@ -15,6 +15,7 @@ import SelectorDraft, { MAX_POR_EQUIPO_DRAFT, type PartidoDraft } from '@/compon
 import { lineaDePosicion, type LineaFutbol } from '@/lib/salaShared';
 import { reproducirSonidoAviso } from '@/lib/sonidoAviso';
 import { TAMANO_EQUIPO_V2, alineacionPosible, cadaXSegundos, fechaCorta, mensajeError, ordenDeRonda, turnoDraft, type Amistoso, type AmistosoJornada, type Resumen } from '@/lib/v2';
+import Cargando from '@/components/Cargando';
 
 // ============================================================================
 // DRAFTERS V2 — SALA DEL DRAFT (15/10)
@@ -265,7 +266,7 @@ export default function V2Draft() {
         )}
       </AnimatePresence>
       {cargando ? (
-        <p style={{ fontSize: 14, color: error ? S.ERROR : S.MUTED }}>{error ?? 'Cargando draft...'}</p>
+        error ? <p style={{ fontSize: 14, color: S.ERROR }}>{error}</p> : <Cargando />
       ) : (
         <>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>

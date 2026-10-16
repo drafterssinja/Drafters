@@ -11,6 +11,7 @@ import { GRUPO_PORRA_LABELS, ORDEN_GRUPOS, COLOR_GRUPO, type GrupoPorra } from '
 import { EQUIPO_PRESUPUESTO, TAMANO_EQUIPO_GOLF_TENIS, colorPresupuesto } from '@/lib/draftConfig';
 import { PorraFormato, PORRA_FORMATO_LABELS, PORRA_FORMATO_COLOR } from '@/lib/porraFormato';
 import EscudoEquipoFutbol from '@/components/EscudoEquipoFutbol';
+import Cargando from '@/components/Cargando';
 
 // ============================================================================
 // CREAR EQUIPO EN UNA PORRA — dos formatos (isPorraEquipo + isPorraConfirmar
@@ -427,7 +428,7 @@ export default function CrearEquipoPorraPage() {
         <div style={S.pageFrame}>
           <DraftersHeader />
           <div style={{ padding: '40px 20px' }}>
-            <p style={{ fontSize: 14, color: S.MUTED }}>Cargando...</p>
+            <Cargando />
           </div>
         </div>
       </main>

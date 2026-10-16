@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { supabase, Perfil } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
+import Cargando from '@/components/Cargando';
 
 // ============================================================================
 // RECARGA DE SALDO — 20€ gratis al mes + 20€ por cada vídeo visto (27/09,
@@ -126,7 +127,7 @@ export default function RecargarPage() {
         <div style={S.pageFrame}>
           <DraftersHeader />
           <div style={S.accountSection}>
-            <p style={{ fontSize: 14, color: S.MUTED }}>Cargando...</p>
+            <Cargando />
           </div>
         </div>
       </main>

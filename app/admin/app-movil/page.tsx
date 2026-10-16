@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
+import Cargando from '@/components/Cargando';
 
 // ============================================================================
 // APP EN EL MÓVIL — ESTADÍSTICAS (13/10, pedido de Iñi)
@@ -73,7 +74,7 @@ export default function AdminAppMovilPage() {
             iPhone no avisa al instalar: cuenta como &quot;tiene la app&quot; quien la ha abierto alguna vez desde el icono. Las desinstalaciones no se pueden saber; por eso se muestran también los activos de los últimos 7 días.
           </p>
           {error && <p style={{ fontSize: 13, color: S.ERROR, margin: 0 }}>{error}</p>}
-          {!datos && !error && <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>Cargando…</p>}
+          {!datos && !error && <Cargando compacto />}
           {datos && (
             <>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>

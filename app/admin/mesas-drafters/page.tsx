@@ -1,5 +1,6 @@
 'use client';
 
+import Cargando from '@/components/Cargando';
 import { todasLasFilas } from '@/lib/paginar';
 import { useEffect, useMemo, useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
@@ -1109,7 +1110,7 @@ export default function AdminMesasDraftersPage() {
         <div style={S.pageFrame}>
           <DraftersHeader sinVolver />
           <div style={S.accountSection}>
-            <p style={{ fontSize: 14, color: S.MUTED }}>Comprobando acceso...</p>
+            <Cargando />
           </div>
         </div>
       </main>

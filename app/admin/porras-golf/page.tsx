@@ -13,6 +13,7 @@ import { calcularPreciosPorCuota, cuotaValida } from '@/lib/precioPorCuota';
 import { calcularGrupoPorra, UMBRAL_MINIMO_ESPANOLES, PUESTO_NO_ENCONTRADO } from '@/lib/porraGrupos';
 import { normalizarNombre } from '@/lib/nombreMatch';
 import { PorraFormato, PORRA_FORMATO_LABELS, PORRA_FORMATO_COLOR, PORRA_FORMATO_DESCRIPCION_LARGA } from '@/lib/porraFormato';
+import Cargando from '@/components/Cargando';
 
 // ============================================================================
 // PORRAS DE GOLF — menú de administración dedicado (nuevo, 28/09)
@@ -517,7 +518,7 @@ export default function AdminPorrasGolfPage() {
         <div style={S.pageFrame}>
           <DraftersHeader sinVolver />
           <div style={{ padding: '40px 20px' }}>
-            <p style={{ fontSize: 14, color: S.MUTED }}>Cargando...</p>
+            <Cargando />
           </div>
         </div>
       </main>
@@ -722,7 +723,7 @@ export default function AdminPorrasGolfPage() {
                             : 'Esta porra es de presupuesto: no usa listas por color, no hace falta marcar españoles.'}
                           {' '}Con la × das de baja a un jugador que no va a jugar: si nadie lo ha fichado desaparece de la porra y de las mesas; si ya lo tienen equipos, se quedan con él (con aviso para que lo cambien) y no suma puntos si no lo cambian. Nadie más podrá fichar a una baja.
                         </p>
-                        {cargandoRevision && <p style={{ fontSize: 12, color: S.MUTED_3, margin: 0 }}>Cargando jugadores...</p>}
+                        {cargandoRevision && <Cargando compacto />}
                         {!cargandoRevision && (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 360, overflowY: 'auto' }}>
                             {jugadoresRevision.map((j, idx) => {

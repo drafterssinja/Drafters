@@ -7,6 +7,7 @@ import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
 import { formatEuros, closesAtLabel } from '@/lib/salaShared';
 import { PorraFormato, PORRA_FORMATO_LABELS, PORRA_FORMATO_COLOR } from '@/lib/porraFormato';
+import Cargando from '@/components/Cargando';
 
 // ============================================================================
 // PORRAS CLÁSICAS DE GOLF — pantalla índice (isPorras de Main.dc.html,
@@ -94,7 +95,7 @@ export default function PorrasIndexPage() {
         <div style={S.pageFrame}>
           <DraftersHeader />
           <div style={{ padding: '40px 20px' }}>
-            <p style={{ fontSize: 14, color: S.MUTED }}>Cargando...</p>
+            <Cargando />
           </div>
         </div>
       </main>

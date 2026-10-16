@@ -6,6 +6,7 @@ import { supabase, Perfil } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
 import { conTiempoMaximo } from '@/lib/conTiempoMaximo';
+import Cargando from '@/components/Cargando';
 
 // ============================================================================
 // INTENTOS DE MESAS DRAFTERS SIN ACCESO (nuevo, 03/10 — pedido de Iñi)
@@ -168,7 +169,7 @@ export default function AdminMesasSinAccesoPage() {
         <div style={S.pageFrame}>
           <DraftersHeader sinVolver />
           <div style={S.accountSection}>
-            <p style={{ fontSize: 14, color: S.MUTED_2 }}>Comprobando acceso...</p>
+            <Cargando />
           </div>
         </div>
       </main>
@@ -218,7 +219,7 @@ export default function AdminMesasSinAccesoPage() {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {cargandoIntentos && <p style={{ fontSize: 12.5, color: S.MUTED_3, margin: 0 }}>Cargando...</p>}
+            {cargandoIntentos && <Cargando compacto />}
             {!cargandoIntentos && intentos.length === 0 && (
               <p style={{ fontSize: 12.5, color: S.MUTED_3, margin: 0 }}>Todavía no se ha registrado ningún intento.</p>
             )}

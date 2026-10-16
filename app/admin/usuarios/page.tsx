@@ -1,5 +1,6 @@
 'use client';
 
+import Cargando from '@/components/Cargando';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase, Perfil } from '@/lib/supabaseClient';
@@ -95,7 +96,7 @@ export default function AdminUsuariosPage() {
         <div style={S.pageFrame}>
           <DraftersHeader />
           <div style={S.accountSection}>
-            <p style={{ fontSize: 14, color: S.MUTED_2 }}>Comprobando acceso...</p>
+            <Cargando />
           </div>
         </div>
       </main>

@@ -21,6 +21,7 @@ import {
   capacidadLabel,
 } from '@/lib/salaShared';
 import type { TipoSala } from '@/lib/repartoPremios';
+import Cargando from '@/components/Cargando';
 
 // ============================================================================
 // LISTADO DE SALAS (isSalas de Main.dc.html, líneas 563-632)
@@ -719,7 +720,7 @@ function SalasPageInner() {
               </button>
             </div>
 
-            {cargando && <p style={{ fontSize: 13, color: S.MUTED_2, padding: '0 14px' }}>Cargando salas...</p>}
+            {cargando && <Cargando compacto />}
             {!cargando && salasFiltradas.length === 0 && <p style={{ fontSize: 13, color: S.MUTED_2, padding: '0 14px' }}>{competicionActual ? 'No hay salas que encajen con estos filtros.' : 'Todavía no hay mesas para esta competición: se crean solas en cuanto se confirman los horarios.'}</p>}
 
             {salasFiltradas.map((s) => tarjetaSala(s))}
@@ -813,7 +814,7 @@ const sortHeaderStyle: CSSProperties = {
 
 export default function SalasPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<Cargando />}>
       <SalasPageInner />
     </Suspense>
   );

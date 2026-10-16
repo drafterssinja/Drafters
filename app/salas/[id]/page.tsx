@@ -24,6 +24,7 @@ import {
   numeroRomano,
   type LineaFutbol,
 } from '@/lib/salaShared';
+import Cargando from '@/components/Cargando';
 
 // ============================================================================
 // DETALLE DE SALA (isSalaDetalle de Main.dc.html, líneas 634-880)
@@ -167,7 +168,7 @@ export default function SalaDetallePage() {
         <div style={S.pageFrame}>
           <DraftersHeader />
           <div style={{ padding: '40px 20px' }}>
-            <p style={{ fontSize: 14, color: S.MUTED }}>Cargando...</p>
+            <Cargando />
           </div>
         </div>
       </main>

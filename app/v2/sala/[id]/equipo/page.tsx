@@ -1,5 +1,6 @@
 'use client';
 
+import Cargando from '@/components/Cargando';
 import { Suspense } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import CrearEquipo from '@/components/equipo/CrearEquipo';
@@ -19,7 +20,7 @@ function EquipoAmistoso() {
 
 export default function V2Equipo() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<Cargando />}>
       <EquipoAmistoso />
     </Suspense>
   );

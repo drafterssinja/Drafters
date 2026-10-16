@@ -10,6 +10,7 @@ import InstalarApp from '@/components/InstalarApp';
 import ResumenClasificacionMesa from '@/components/ResumenClasificacionMesa';
 import * as S from '@/lib/mockupStyles';
 import { formatEuros } from '@/lib/salaShared';
+import Cargando from '@/components/Cargando';
 
 const ACCENT = '#3DDC84';
 const PORRAS_COLOR = '#FF7A45';
@@ -129,7 +130,7 @@ export default function InicioPage() {
         <div style={S.pageFrame}>
           <DraftersHeader />
           <div style={{ padding: '40px 20px' }}>
-            <p style={{ fontSize: 14, color: S.MUTED }}>Cargando...</p>
+            <Cargando />
           </div>
         </div>
       </main>

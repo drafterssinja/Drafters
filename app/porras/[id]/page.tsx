@@ -12,6 +12,7 @@ import { GRUPO_PORRA_LABELS, GrupoPorra, ORDEN_GRUPOS, COLOR_GRUPO } from '@/lib
 import { formatEuros, posicionLabel, closesAtLabel, parteParaPremios, parteComision } from '@/lib/salaShared';
 import { PorraFormato, PORRA_FORMATO_LABELS, PORRA_FORMATO_COLOR, PORRA_FORMATO_DESCRIPCION_LARGA } from '@/lib/porraFormato';
 import EscudoEquipoFutbol from '@/components/EscudoEquipoFutbol';
+import Cargando from '@/components/Cargando';
 
 // ============================================================================
 // DETALLE DE PORRA CLÁSICA
@@ -199,7 +200,7 @@ export default function PorraDetallePage() {
         <div style={S.pageFrame}>
           <DraftersHeader />
           <div style={{ padding: '40px 20px' }}>
-            <p style={{ fontSize: 14, color: S.MUTED }}>Cargando...</p>
+            <Cargando />
           </div>
         </div>
       </main>

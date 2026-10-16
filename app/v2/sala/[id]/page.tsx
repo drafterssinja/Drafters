@@ -1,5 +1,6 @@
 'use client';
 
+import InvitarAmigos from '@/components/v2/InvitarAmigos';
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
@@ -18,6 +19,7 @@ import { avisarCambioCreditos } from '@/components/v2/creditos';
 import ClasificacionAmistoso from '@/components/v2/ClasificacionAmistoso';
 import EditorPremio, { PREMIO_VACIO } from '@/components/v2/EditorPremio';
 import { MODALIDAD_DESC, MODALIDAD_LABEL, cadaXSegundos, fechaCorta, mensajeError, premioValido,  type Amistoso, type AmistosoJornada, type Mensaje, type Premio, type Resumen } from '@/lib/v2';
+import Cargando from '@/components/Cargando';
 
 // ============================================================================
 // DRAFTERS V2 — PANTALLA DE UNA SALA (15/10)
@@ -216,7 +218,7 @@ export default function V2Sala() {
   return (
     <MarcoV2 perfil={perfil} estado={estado} deporte={amistoso?.deporte ?? 'futbol'} volverA={`/v2/${amistoso?.deporte ?? 'futbol'}?modo=amistosos`}>
       {cargando ? (
-        <p style={{ fontSize: 14, color: S.MUTED }}>Cargando sala...</p>
+        <Cargando />
       ) : (
         <>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -498,6 +500,8 @@ export default function V2Sala() {
                         <button type="button" onClick={compartir} style={{ ...S.primaryButton, background: V2_COLOR, marginTop: 0 }}>
                           {copiado ? '¡Copiado!' : 'Invitar amigos'}
                         </button>
+                        {/* 16/10 (Iñi): invitar directamente a tus amigos de Drafters. */}
+                        <InvitarAmigos amistosoId={id} dentro={resumen.participantes.map((p) => p.usuario_id)} />
                       </div>
                     )}
                   </Panel>

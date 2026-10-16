@@ -1,5 +1,6 @@
 'use client';
 
+import Cargando from '@/components/Cargando';
 import { Suspense, useState, FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
@@ -140,7 +141,7 @@ function VerificarForm() {
 
 export default function VerificarPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<Cargando />}>
       <VerificarForm />
     </Suspense>
   );

@@ -1,5 +1,6 @@
 'use client';
 
+import Cargando from '@/components/Cargando';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -250,7 +251,7 @@ export default function AdminPage() {
         <div style={S.pageFrame}>
           <DraftersHeader />
           <div style={S.accountSection}>
-            <p style={{ fontSize: 14, color: S.MUTED }}>Comprobando acceso...</p>
+            <Cargando />
           </div>
         </div>
       </main>

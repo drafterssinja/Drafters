@@ -9,6 +9,7 @@ import * as S from '@/lib/mockupStyles';
 import { conTiempoMaximo } from '@/lib/conTiempoMaximo';
 import { normalizarNombre } from '@/lib/nombreMatch';
 import { sigueCompitiendo } from '@/lib/golfScoring';
+import Cargando from '@/components/Cargando';
 
 // ============================================================================
 // RESULTADOS DE GOLF EN VIVO — panel de admin (nuevo, 28/09)
@@ -760,7 +761,7 @@ export default function AdminResultadosGolfPage() {
         <div style={S.pageFrame}>
           <DraftersHeader />
           <div style={S.accountSection}>
-            <p style={{ fontSize: 14, color: S.MUTED_2 }}>Comprobando acceso...</p>
+            <Cargando />
           </div>
         </div>
       </main>
@@ -926,7 +927,7 @@ export default function AdminResultadosGolfPage() {
                           return (
                             <div key={nombreOrigen} style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                               <span style={{ fontSize: 11, color: S.TEXT, flexShrink: 0, minWidth: 140 }}>{nombreOrigen}</span>
-                              {jugadoresComp === 'cargando' && <span style={{ fontSize: 10.5, color: S.MUTED_3 }}>Cargando jugadores...</span>}
+                              {jugadoresComp === 'cargando' && <Cargando compacto />}
                               {/* 03/10 (pedido de Iñi): una vez guardado, se ve claramente
                                   como guardado — ya no un botón pulsable sin más — hasta
                                   la próxima sincronización. */}
@@ -1065,7 +1066,7 @@ export default function AdminResultadosGolfPage() {
                     </button>
                   )}
 
-                  {camposPorTorneo[t.id] === 'cargando' && <p style={{ fontSize: 11.5, color: S.MUTED_3, margin: 0 }}>Cargando campos...</p>}
+                  {camposPorTorneo[t.id] === 'cargando' && <Cargando compacto />}
 
                   {Array.isArray(camposPorTorneo[t.id]) && (camposPorTorneo[t.id] as CampoDetectado[]).length === 0 && (
                     <p style={{ fontSize: 11.5, color: S.MUTED_3, margin: 0 }}>
@@ -1222,7 +1223,7 @@ export default function AdminResultadosGolfPage() {
 
             {errorBiblioteca && <p style={S.errorText}>{errorBiblioteca}</p>}
 
-            {biblioteca === 'cargando' && <p style={{ fontSize: 12, color: S.MUTED_3, margin: 0 }}>Cargando...</p>}
+            {biblioteca === 'cargando' && <Cargando compacto />}
 
             {Array.isArray(biblioteca) && biblioteca.length === 0 && !formBiblioteca && (
               <p style={{ fontSize: 12, color: S.MUTED_3, margin: 0 }}>Todavía no hay ningún campo cargado.</p>
@@ -1356,7 +1357,7 @@ export default function AdminResultadosGolfPage() {
 
             {errorAlias && <p style={S.errorText}>{errorAlias}</p>}
 
-            {alias === 'cargando' && <p style={{ fontSize: 12, color: S.MUTED_3, margin: 0 }}>Cargando...</p>}
+            {alias === 'cargando' && <Cargando compacto />}
 
             {Array.isArray(alias) && alias.length === 0 && <p style={{ fontSize: 12, color: S.MUTED_3, margin: 0 }}>Todavía no hay ningún alias guardado.</p>}
 

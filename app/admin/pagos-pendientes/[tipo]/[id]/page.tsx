@@ -10,6 +10,7 @@ import { formatEuros, parteParaPremios } from '@/lib/salaShared';
 import { calcularTramosPorInscritos, calcularReparto, repartirPremiosConEmpates, ClasificacionEntrada, ReparteEuros, TipoSala } from '@/lib/repartoPremios';
 import { formatGolfScore, calcularBonosPodio } from '@/lib/golfScoring';
 import { PorraFormato, PORRA_FORMATO_LABELS } from '@/lib/porraFormato';
+import Cargando from '@/components/Cargando';
 
 // ============================================================================
 // FICHA DE LIQUIDACIÓN de una sala o porra concreta (nuevo, 29/09)
@@ -290,7 +291,7 @@ export default function AdminLiquidarPage() {
         <div style={S.pageFrame}>
           <DraftersHeader sinVolver />
           <div style={{ padding: '40px 20px' }}>
-            <p style={{ fontSize: 14, color: S.MUTED }}>Cargando...</p>
+            <Cargando />
           </div>
         </div>
       </main>

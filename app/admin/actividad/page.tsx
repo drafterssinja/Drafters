@@ -6,6 +6,7 @@ import { supabase, Perfil } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
 import { conTiempoMaximo } from '@/lib/conTiempoMaximo';
+import Cargando from '@/components/Cargando';
 
 // ============================================================================
 // REGISTRO DE ACTIVIDAD (nuevo, 28/09 — pedido de Iñi)
@@ -43,8 +44,8 @@ type EventoActividad = {
   nombre: string | null;
   apellido: string | null;
   email: string | null;
-  tipo: 'login' | 'inscripcion' | 'recarga' | 'clasificacion' | 'amistoso' | 'liga';
-  detalle: { modo?: 'sala' | 'porra'; nombre?: string; v2?: boolean; accion?: 'crear' | 'unirse' | 'apuntarse'; temporada?: number; division?: string | null; grupo?: number; sistema?: boolean; deporte?: string; modalidad?: string; privada?: boolean; num_jugadores?: number; competicion?: string; tipo_recarga?: 'gratuita' | 'video'; via?: 'sesion_guardada' | 'usuario_y_contrasena'; desde?: 'app' | 'navegador'; plataforma?: 'ios' | 'android' | 'otro' } | null;
+  tipo: 'login' | 'inscripcion' | 'recarga' | 'clasificacion' | 'amistoso' | 'liga' | 'amigos';
+  detalle: { modo?: 'sala' | 'porra'; nombre?: string; v2?: boolean; accion?: 'crear' | 'unirse' | 'apuntarse' | 'solicitar' | 'aceptar'; temporada?: number; division?: string | null; grupo?: number; sistema?: boolean; deporte?: string; modalidad?: string; privada?: boolean; num_jugadores?: number; competicion?: string; tipo_recarga?: 'gratuita' | 'video'; via?: 'sesion_guardada' | 'usuario_y_contrasena'; desde?: 'app' | 'navegador'; plataforma?: 'ios' | 'android' | 'otro' } | null;
   creado_en: string;
 };
 
@@ -207,7 +208,7 @@ export default function AdminActividadPage() {
         <div style={S.pageFrame}>
           <DraftersHeader sinVolver />
           <div style={S.accountSection}>
-            <p style={{ fontSize: 14, color: S.MUTED_2 }}>Comprobando acceso...</p>
+            <Cargando />
           </div>
         </div>
       </main>
@@ -242,6 +243,9 @@ export default function AdminActividadPage() {
       const extra = ` (${dep} · ${mod}${e.detalle?.privada ? ' · privada' : ''}${e.detalle?.accion === 'crear' && e.detalle?.num_jugadores ? ` · ${e.detalle.num_jugadores} jugadores` : ''})`;
       return e.detalle?.accion === 'crear' ? `Ha creado el amistoso "${nombreObjetivo}"${extra}` : `Se ha unido al amistoso "${nombreObjetivo}"${e.detalle?.sistema ? ' (sala de Drafters)' : ''}${extra}`;
     }
+    if (e.tipo === 'amigos') {
+      return e.detalle?.accion === 'aceptar' ? `Ahora es amigo de @${nombreObjetivo}` : `Ha pedido amistad a @${nombreObjetivo}`;
+    }
     if (e.tipo === 'liga') {
       const dep = e.detalle?.deporte === 'golf' ? 'golf' : e.detalle?.deporte === 'tenis' ? 'tenis' : 'fútbol';
       return `Se ha apuntado a "${nombreObjetivo}" · Temporada ${e.detalle?.temporada ?? '?'} (${dep}${e.detalle?.division ? ` · ${e.detalle.division}` : ''}${e.detalle?.grupo && e.detalle.grupo > 1 ? ` · grupo ${e.detalle.grupo}` : ''})`;
@@ -267,6 +271,7 @@ export default function AdminActividadPage() {
     if (e.tipo === 'login') return { texto: 'Login', color: S.MUTED, fondo: 'rgba(148,163,184,0.14)' };
     if (e.tipo === 'recarga') return { texto: 'Recarga', color: '#F0B94D', fondo: 'rgba(240,185,77,0.14)' };
     if (e.tipo === 'clasificacion') return { texto: 'Clasificación', color: '#7AA7FF', fondo: 'rgba(122,167,255,0.14)' };
+    if (e.tipo === 'amigos') return { texto: 'Amigos', color: '#7AA7FF', fondo: 'rgba(122,167,255,0.16)' };
     if (e.tipo === 'liga') return { texto: 'V2 · Se apunta a la liga', color: '#F0B94D', fondo: 'rgba(240,185,77,0.16)' };
     if (e.tipo === 'amistoso') return { texto: e.detalle?.accion === 'crear' ? 'V2 · Crea amistoso' : 'V2 · Entra amistoso', color: '#A78BFA', fondo: 'rgba(167,139,250,0.16)' };
     if (e.tipo === 'inscripcion' && e.detalle?.v2) return { texto: 'V2 · Inscripción', color: '#A78BFA', fondo: 'rgba(167,139,250,0.16)' };
@@ -316,6 +321,7 @@ export default function AdminActividadPage() {
               <option value="clasificacion">Clasificación</option>
               <option value="amistoso">Amistosos (V2)</option>
               <option value="liga">Ligas (V2)</option>
+              <option value="amigos">Amigos</option>
             </select>
           </div>
 
@@ -340,7 +346,7 @@ export default function AdminActividadPage() {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {cargandoEventos && <p style={{ fontSize: 12.5, color: S.MUTED_3, margin: 0 }}>Cargando...</p>}
+            {cargandoEventos && <Cargando compacto />}
             {!cargandoEventos && eventos.length === 0 && (
               <p style={{ fontSize: 12.5, color: S.MUTED_3, margin: 0 }}>Todavía no hay actividad registrada.</p>
             )}

@@ -1,5 +1,7 @@
 'use client';
 
+import { useAmigosIds } from '@/lib/amigos';
+import MarcaAmigo from '@/components/MarcaAmigo';
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
@@ -19,8 +21,10 @@ import { etiquetasPosicion } from '@/lib/posicionesEmpate';
 // clasificación en draftis (solo apuntados). Reglas: diseño de ligas del 07/10.
 
 import PanelLiga, { type Fila, type Info } from '@/components/v2/PanelLiga';
+import Cargando from '@/components/Cargando';
 
 export default function V2Liga() {
+  const amigos = useAmigosIds();
   const params = useParams<{ deporte: string }>();
   const deporte: DeporteV2 = esDeporteV2(params.deporte) ? params.deporte : 'futbol';
   const { perfil, estado } = useSesionV2();
@@ -55,7 +59,7 @@ export default function V2Liga() {
         {info && <span style={{ fontSize: 13, fontWeight: 700, color: '#F0B94D' }}>Temporada {info.numero}</span>}
       </div>
 
-      {info === undefined && <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>Cargando...</p>}
+      {info === undefined && <Cargando compacto />}
 
       {info === null && (
         <div style={{ background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 16, padding: 18, display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -82,7 +86,9 @@ export default function V2Liga() {
               {filas.map((f, i) => (
                 <div key={f.usuario_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', borderBottom: `1px solid ${S.CARD_BORDER}`, background: f.soy_yo ? 'rgba(61,220,132,0.08)' : 'transparent' }}>
                   <span style={{ width: 34, fontWeight: 800, fontSize: 13.5, color: etiquetas[i].replace('T', '') === '1' ? '#F0B94D' : S.MUTED }}>{etiquetas[i]}</span>
-                  <span style={{ flex: 1, minWidth: 0, fontWeight: f.soy_yo ? 800 : 600, fontSize: 13.5, color: S.TEXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>@{f.nombre}</span>
+                  <span style={{ flex: 1, minWidth: 0, fontWeight: f.soy_yo ? 800 : 600, fontSize: 13.5, color: S.TEXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>@{f.nombre}
+                    {amigos.has(f.usuario_id) && <MarcaAmigo compacta />}
+                  </span>
                   <span style={{ width: 52, textAlign: 'center', fontSize: 12, color: S.MUTED_2 }}>
                     {f.ganadas}/{f.mesas}
                   </span>

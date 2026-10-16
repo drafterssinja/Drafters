@@ -12,6 +12,7 @@ import { useSesionV2 } from '@/components/v2/useSesionV2';
 import CosteCredito from '@/components/v2/CosteCredito';
 import { avisarCambioCreditos } from '@/components/v2/creditos';
 import { MODALIDAD_DESC, MODALIDAD_LABEL, fechaCorta, mensajeError, premioValido, type Modalidad, type Premio } from '@/lib/v2';
+import Cargando from '@/components/Cargando';
 
 // ============================================================================
 // DRAFTERS V2 — CREAR UNA SALA (15/10)
@@ -43,7 +44,7 @@ function numeroJornada(competicion: string): number {
 
 export default function V2Crear() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<Cargando />}>
       <V2CrearInner />
     </Suspense>
   );
@@ -221,7 +222,7 @@ function V2CrearInner() {
 
       {bloque('Nombre', <input value={nombre} maxLength={40} onChange={(e) => setNombre(e.target.value)} placeholder="Ej. La liga de los jueves" style={S.input} />)}
 
-      {comps === null && <p style={{ fontSize: 13, color: S.MUTED_2 }}>Cargando jornadas y torneos...</p>}
+      {comps === null && <Cargando compacto />}
 
       {comps !== null && deporte === 'futbol' &&
         bloque(

@@ -12,6 +12,7 @@ import { formatEuros } from '@/lib/salaShared';
 import { claveEquipoFutbol } from '@/lib/futbolLaLiga';
 import { sugerirParejas, type SugerenciaAlias } from '@/lib/sugerirAlias';
 import type { ResultadoCompeticionFutbol } from '@/lib/server/sincronizarFutbolEspn';
+import Cargando from '@/components/Cargando';
 
 // ============================================================================
 // RESULTADOS DE FÚTBOL EN VIVO — panel de admin (06/10)
@@ -208,7 +209,7 @@ export default function AdminResultadosFutbolPage() {
         <div style={S.pageFrame}>
           <DraftersHeader />
           <div style={{ padding: '40px 20px' }}>
-            <p style={{ fontSize: 14, color: S.MUTED }}>Cargando...</p>
+            <Cargando />
           </div>
         </div>
       </main>

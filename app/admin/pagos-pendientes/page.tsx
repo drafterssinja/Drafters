@@ -9,6 +9,7 @@ import * as S from '@/lib/mockupStyles';
 import { TIPO_SALA_LABELS, DEPORTE_LABELS, Deporte } from '@/lib/salaShared';
 import { TipoSala } from '@/lib/repartoPremios';
 import { PorraFormato, PORRA_FORMATO_LABELS } from '@/lib/porraFormato';
+import Cargando from '@/components/Cargando';
 
 // ============================================================================
 // PAGOS PENDIENTES — liquidación de salas y porras (nuevo, 29/09)
@@ -222,7 +223,7 @@ export default function AdminPagosPendientesPage() {
         <div style={S.pageFrame}>
           <DraftersHeader sinVolver />
           <div style={{ padding: '40px 20px' }}>
-            <p style={{ fontSize: 14, color: S.MUTED }}>Cargando...</p>
+            <Cargando />
           </div>
         </div>
       </main>

@@ -1,5 +1,6 @@
 'use client';
 
+import Cargando from '@/components/Cargando';
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -237,7 +238,7 @@ export default function AdminLigasPage() {
       <main style={S.mainReset}>
         <div style={S.pageFrame}>
           <DraftersHeader />
-          <p style={{ padding: 20, color: S.MUTED }}>Comprobando acceso...</p>
+          <Cargando />
         </div>
       </main>
     );

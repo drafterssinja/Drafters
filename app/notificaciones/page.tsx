@@ -7,6 +7,7 @@ import { supabase, Perfil } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
 import { formatEuros } from '@/lib/salaShared';
+import Cargando from '@/components/Cargando';
 
 // ============================================================================
 // NOTIFICACIONES (pedido de Iñi, 23/09)
@@ -35,6 +36,8 @@ const ICONO_TIPO: Record<string, string> = {
   resultado: '🏆',
   nuevo_usuario: '👤',
   borrador_golf: '⛳',
+  amistad: '👥',
+  invitacion: '✉️',
 };
 
 export default function NotificacionesPage() {
@@ -97,7 +100,7 @@ export default function NotificacionesPage() {
         <div style={S.pageFrame}>
           <DraftersHeader />
           <div style={{ padding: '40px 20px' }}>
-            <p style={{ fontSize: 14, color: S.MUTED }}>Cargando...</p>
+            <Cargando />
           </div>
         </div>
       </main>

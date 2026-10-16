@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { supabase, Perfil } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
+import Cargando from '@/components/Cargando';
 
 // ============================================================================
 // GESTIONAR PARTIDOS DE UNA JORNADA — admin (nuevo, 29/09)
@@ -178,7 +179,7 @@ export default function AdminGestionarPartidosPage() {
         <div style={S.pageFrame}>
           <DraftersHeader sinVolver />
           <div style={{ padding: '40px 20px' }}>
-            <p style={{ fontSize: 14, color: S.MUTED }}>Cargando...</p>
+            <Cargando />
           </div>
         </div>
       </main>

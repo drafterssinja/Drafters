@@ -18,6 +18,7 @@ import {
   capacidadLabel,
 } from '@/lib/salaShared';
 import type { TipoSala } from '@/lib/repartoPremios';
+import Cargando from '@/components/Cargando';
 
 // ============================================================================
 // MESAS DRAFTERS (27/09, undécima vuelta) — antes "Grandes torneos"
@@ -149,7 +150,7 @@ function MesasPageInner() {
         <div style={S.pageFrame}>
           <DraftersHeader />
           <div style={{ padding: '40px 20px' }}>
-            <p style={{ fontSize: 14, color: S.MUTED }}>Cargando...</p>
+            <Cargando />
           </div>
         </div>
       </main>
@@ -545,7 +546,7 @@ function pillStyle(active: boolean) {
 
 export default function MesasPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<Cargando />}>
       <MesasPageInner />
     </Suspense>
   );

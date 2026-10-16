@@ -8,6 +8,7 @@ import { supabase, Perfil, Movimiento } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
 import InstalarApp from '@/components/InstalarApp';
 import * as S from '@/lib/mockupStyles';
+import Cargando from '@/components/Cargando';
 
 // Mismo criterio que en el registro (app/registro/page.tsx): solo letras,
 // números, guion bajo y punto, sin espacios, 3-20 caracteres.
@@ -38,6 +39,13 @@ export default function CuentaPage() {
   const [historial, setHistorial] = useState<FilaHistorial[]>([]);
   const [movimientos, setMovimientos] = useState<Movimiento[]>([]);
   const [cargando, setCargando] = useState(true);
+  // 16/10: solicitudes de amistad pendientes (para el aviso en la tarjeta de Amigos).
+  const [solicitudesAmigos, setSolicitudesAmigos] = useState(0);
+  useEffect(() => {
+    supabase.rpc('amigos_lista').then(({ data }) => {
+      setSolicitudesAmigos(((data as { estado: string; recibida: boolean }[]) ?? []).filter((f) => f.estado === 'pendiente' && f.recibida).length);
+    });
+  }, []);
   const [error, setError] = useState<string | null>(null);
 
   // Formulario de datos de la cuenta
@@ -214,7 +222,7 @@ export default function CuentaPage() {
         <div style={S.pageFrame}>
           <DraftersHeader />
           <div style={S.accountSection}>
-            <p style={{ fontSize: 14, color: S.MUTED }}>Cargando tu cuenta...</p>
+            <Cargando />
           </div>
         </div>
       </main>
@@ -283,6 +291,21 @@ export default function CuentaPage() {
             >
               Recargar
             </span>
+          </Link>
+
+          {/* 16/10 (Iñi): gestor de amigos en "Mi perfil". */}
+          <Link href="/amigos" style={S.card}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_2, fontWeight: 700 }}>👥 Amigos</span>
+              <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 15, color: S.TEXT }}>
+                {solicitudesAmigos > 0 ? `Tienes ${solicitudesAmigos} solicitud${solicitudesAmigos === 1 ? '' : 'es'} de amistad` : 'Mis amigos y qué ven de mí'}
+              </span>
+            </div>
+            {solicitudesAmigos > 0 ? (
+              <span style={{ flexShrink: 0, minWidth: 24, height: 24, borderRadius: 999, background: '#FF5C5C', color: '#FFF', fontSize: 12, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 6px' }}>{solicitudesAmigos}</span>
+            ) : (
+              <span style={{ flexShrink: 0, color: S.FAINT, fontSize: 18 }}>›</span>
+            )}
           </Link>
 
           {perfil.rol === 'admin' && (

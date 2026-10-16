@@ -20,6 +20,7 @@ import ClasificacionMesaFutbol from '@/components/ClasificacionMesaFutbol';
 import { formatPuntos } from '@/lib/futbolLaLiga';
 import type { LineaDesglose } from '@/lib/futbolPuntuacion';
 import TablaHoyoAHoyo, { type CasillaHoyo, type FilaRondaTabla } from '@/components/TablaHoyoAHoyo';
+import Cargando from '@/components/Cargando';
 
 // ============================================================================
 // CLASIFICACIÓN EN DIRECTO DE UNA MESA DRAFTERS (nuevo, 30/09)
@@ -393,7 +394,7 @@ export default function SalaClasificacionPage() {
         <div style={S.pageFrame}>
           <DraftersHeader />
           <div style={{ padding: '40px 20px' }}>
-            <p style={{ fontSize: 14, color: S.MUTED }}>Cargando...</p>
+            <Cargando />
           </div>
         </div>
       </main>
@@ -533,7 +534,7 @@ export default function SalaClasificacionPage() {
   // conocida, llenos o vacíos.
   function tablaResultadosJugador(jugador: JugadorRow) {
     if (hoyosFoco === 'cargando') {
-      return <p style={{ fontSize: 12.5, color: S.MUTED_3, margin: 0 }}>Cargando el hoyo a hoyo...</p>;
+      return <Cargando compacto />;
     }
     if (!Array.isArray(hoyosFoco)) return null;
     const hoyos: HoyoRow[] = hoyosFoco;
@@ -955,7 +956,7 @@ export default function SalaClasificacionPage() {
                 Lo último que ha pasado con tus jugadores favoritos de esta mesa — los 5 de tu propio equipo ya vienen marcados de serie.
               </p>
               {eventos === null || eventos === 'cargando' ? (
-                <p style={{ fontSize: 13, color: S.MUTED_2 }}>Cargando...</p>
+                <Cargando compacto />
               ) : eventos.length === 0 ? (
                 <p style={{ fontSize: 13, color: S.MUTED_2 }}>
                   Todavía no hay ningún evento que mostrar — o no tienes ningún jugador marcado como favorito en esta mesa.
