@@ -57,7 +57,7 @@ import Cargando from '@/components/Cargando';
 // lib/favoritosEquipo.ts y app/porras/[id]/clasificacion/page.tsx (misma
 // función, reutilizada igual).
 
-type SalaRow = { id: string; nombre: string; competicion: string; deporte: string; tipo: string; estado: string; fecha_limite_inscripcion: string | null; buy_in: number; aforo: number | null };
+type SalaRow = { id: string; nombre: string; competicion: string; deporte: string; tipo: string; estado: string; fecha_limite_inscripcion: string | null; buy_in: number; aforo: number | null; version?: number | null };
 type JugadorRow = {
   id: string;
   nombre: string;
@@ -172,7 +172,7 @@ export default function SalaClasificacionPage() {
 
       const [{ data: perfilData }, { data: salaData }, favoritosSet, favoritosJugadorSet] = await Promise.all([
         supabase.from('perfiles').select('*').eq('id', session.user.id).single(),
-        supabase.from('salas').select('id,nombre,competicion,deporte,tipo,estado,fecha_limite_inscripcion,buy_in,aforo').eq('id', salaId).single(),
+        supabase.from('salas').select('id,nombre,competicion,deporte,tipo,estado,fecha_limite_inscripcion,buy_in,aforo,version').eq('id', salaId).single(),
         cargarFavoritos(session.user.id),
         cargarFavoritosJugador(session.user.id),
       ]);
