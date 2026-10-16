@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase, Perfil } from '@/lib/supabaseClient';
@@ -25,6 +25,13 @@ import {
   type LineaFutbol,
 } from '@/lib/salaShared';
 import Cargando from '@/components/Cargando';
+import MarcoV2 from '@/components/v2/MarcoV2';
+import { IconoCredito, esDeporteV2 } from '@/components/v2/IconosV2';
+import { TiraDraftis, PremiosDraftis, EntradaCredito } from '@/components/v2/DraftisMesa';
+import { RecargaVideo, avisarCambioCreditos } from '@/components/v2/creditos';
+import type { Info as InfoLiga } from '@/components/v2/PanelLiga';
+import { competicionBonita, nombreMesaV2 } from '@/lib/draftisMesa';
+import { mensajeError } from '@/lib/v2';
 
 // ============================================================================
 // DETALLE DE SALA (isSalaDetalle de Main.dc.html, líneas 634-880)
@@ -44,6 +51,8 @@ type SalaRow = {
   buy_in: number;
   estado: string;
   fecha_limite_inscripcion: string | null;
+  // 1 = V1 (€), 2 = mesa de la liga V2 (créditos y draftis)
+  version?: number | null;
 };
 
 type EquipoMio = {
@@ -82,6 +91,11 @@ export default function SalaDetallePage() {
   const [tab, setTab] = useState<Tab>('info');
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Mesas de la liga V2 (16/10): liga/temporada a la que cuentan y entrada con crédito.
+  const [liga, setLiga] = useState<InfoLiga | null>(null);
+  const [entrando, setEntrando] = useState(false);
+  const [avisoEntrada, setAvisoEntrada] = useState<string | null>(null);
+  const [recargar, setRecargar] = useState(false);
 
   useEffect(() => {
     let activo = true;
@@ -97,7 +111,7 @@ export default function SalaDetallePage() {
 
       const [{ data: perfilData }, { data: salaData }] = await Promise.all([
         supabase.from('perfiles').select('*').eq('id', session.user.id).single(),
-        supabase.from('salas').select('id,nombre,competicion,deporte,tipo,aforo,buy_in,estado,fecha_limite_inscripcion').eq('id', salaId).single(),
+        supabase.from('salas').select('id,nombre,competicion,deporte,tipo,aforo,buy_in,estado,fecha_limite_inscripcion,version').eq('id', salaId).single(),
       ]);
 
       if (!activo) return;
@@ -110,6 +124,11 @@ export default function SalaDetallePage() {
         return;
       }
       setSala(salaData as SalaRow);
+      if ((salaData as SalaRow).version === 2) {
+        void supabase.rpc('v2_liga_info', { p_deporte: (salaData as SalaRow).deporte }).then(({ data }) => {
+          if (activo) setLiga((data as InfoLiga | null) ?? null);
+        });
+      }
 
       // participantes_sala() es una función de base de datos (RPC), no una
       // select directa: equipos/inscripciones tienen RLS que solo deja ver
@@ -191,6 +210,41 @@ export default function SalaDetallePage() {
     );
   }
 
+  // Mesa de la liga V2 (16/10, Iñi): misma ficha pero con el marco de V2,
+  // entrada en créditos Drafters, formato verde/rojo y premios en draftis.
+  const esV2 = sala.version === 2;
+  const deporteV2 = esDeporteV2(sala.deporte) ? sala.deporte : 'futbol';
+  const nombreLiga = liga ? `${liga.liga} · Temporada ${liga.numero}` : 'Liga Drafters';
+  const marco = (contenido: ReactNode) =>
+    esV2 ? (
+      <MarcoV2 perfil={perfil} estado="ok" deporte={deporteV2} volverA={`/v2/${sala.deporte}?modo=liga`}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20, paddingBottom: 40, position: 'relative' }}>{contenido}</div>
+      </MarcoV2>
+    ) : (
+      <main style={S.mainReset}>
+        <div style={S.pageFrame}>
+          <DraftersHeader saldoLabel={saldoLabel} accountInitials={initials} volverA={`/salas?deporte=${sala.deporte}`} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20, padding: '28px 20px 100px', position: 'relative' }}>{contenido}</div>
+        </div>
+      </main>
+    );
+
+  // Entrar en una mesa de la liga: las mismas comprobaciones que en la lista
+  // de mesas (apuntado a la liga, máximo de mesas y crédito disponible).
+  async function entrarV2() {
+    if (!sala) return;
+    setAvisoEntrada(null);
+    setEntrando(true);
+    const { data, error: e } = await supabase.rpc('v2_info_entrada', { p_sala: sala.id });
+    setEntrando(false);
+    if (e) return setAvisoEntrada(mensajeError(e));
+    const info = data as { saldo: number; mesas: number; maximo: number; apuntado?: boolean };
+    if (info.apuntado === false) return setAvisoEntrada('Las mesas de la liga son solo para los apuntados a la liga. Apúntate primero (es gratis).');
+    if (info.mesas >= info.maximo) return setAvisoEntrada(`Ya tienes ${info.maximo} mesas ${sala.deporte === 'futbol' ? 'en esta jornada' : 'esta semana'}: es el máximo.`);
+    if (info.saldo < 1) return setRecargar(true);
+    router.push(`/salas/${sala.id}/crear-equipo?v2=1`);
+  }
+
   const estadoInfo = estadoSalaInfo(sala.estado, sala.aforo, signedUp);
   const tipoLabel = TIPO_SALA_LABELS[sala.tipo as TipoSala] ?? sala.tipo;
   // Bote real = lo que aporta cada inscripción a premios (90% del buy-in,
@@ -255,17 +309,24 @@ export default function SalaDetallePage() {
       ? 'Inscripción cerrada'
       : hasEquipo && isMaraton
         ? `Crear otro equipo · ${formatEuros(sala.buy_in)}`
-        : `Unirse · ${formatEuros(sala.buy_in)}`;
+        : esV2
+          ? 'Entrar · 1'
+          : `Unirse · ${formatEuros(sala.buy_in)}`;
   const joinDisabled = isFull || salaEmpezada;
 
-  return (
-    <main style={S.mainReset}>
-      <div style={S.pageFrame}>
-        <DraftersHeader saldoLabel={saldoLabel} accountInitials={initials} volverA={`/salas?deporte=${sala.deporte}`} />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20, padding: '28px 20px 100px', position: 'relative' }}>
+  return marco(
+    <>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#F0B94D' }}>{sala.competicion}</span>
-            <h1 style={{ fontSize: 24, fontWeight: 800, color: S.TEXT, lineHeight: 1.15 }}>{sala.nombre}</h1>
+            <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#F0B94D' }}>{esV2 ? competicionBonita(sala.competicion) : sala.competicion}</span>
+            <h1 style={{ fontSize: 24, fontWeight: 800, color: S.TEXT, lineHeight: 1.15 }}>{esV2 ? nombreMesaV2(sala.nombre) : sala.nombre}</h1>
+            {esV2 && (
+              <Link
+                href={`/v2/${sala.deporte}/clasificacion`}
+                style={{ alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 6, textDecoration: 'none', fontSize: 12, fontWeight: 800, color: '#F0B94D', border: '1px solid rgba(240,185,77,0.45)', background: 'linear-gradient(135deg, #2A2210 0%, #3A2E12 100%)', borderRadius: 999, padding: '5px 11px' }}
+              >
+                🏆 Mesa de la {nombreLiga} ›
+              </Link>
+            )}
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: estadoInfo.color, flexShrink: 0 }} />
               <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 12.5, color: estadoInfo.color }}>{estadoInfo.label}</span>
@@ -355,6 +416,7 @@ export default function SalaDetallePage() {
                   salaId={sala.id}
                   puedeEditar={puedeEditarEquipo}
                   buyIn={sala.buy_in}
+                  esV2={esV2}
                 />
               ))}
             </div>
@@ -369,20 +431,47 @@ export default function SalaDetallePage() {
                   total es 10, ni que... el 1 euro es de comisión... ya se
                   entiende". Ahora solo el desglose en sí (9 € + 1 €; 4,50 €
                   + 0,50 € en la de 5 €), sin el total delante ni la etiqueta. */}
-              <InfoRow
-                label="Buy-in"
-                value={`${formatEuros(parteParaPremios(sala.buy_in))} + ${formatEuros(parteComision(sala.buy_in))}`}
-                accent
-              />
-              <InfoRow label="Tipo de sala" value={tipoLabel} />
-              <InfoRow label="Formato" value={tipoLabel} />
-              <InfoRow label="Competición" value={sala.competicion} />
+              {esV2 ? (
+                <>
+                  <InfoRow label="Entrada" value={<EntradaCredito />} />
+                  <InfoRow label="Tipo de sala" value={tipoLabel} />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '13px 14px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                      <span style={{ fontSize: 13, color: S.MUTED_2 }}>Formato</span>
+                      <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 14, color: S.TEXT }}>{sala.aforo} jugadores</span>
+                    </div>
+                    <TiraDraftis tipo={sala.tipo} aforo={sala.aforo} />
+                  </div>
+                  <InfoRow
+                    label="Competición"
+                    value={
+                      <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                        <span>{competicionBonita(sala.competicion)}</span>
+                        <span style={{ fontSize: 11.5, fontWeight: 700, color: '#F0B94D' }}>🏆 {nombreLiga}</span>
+                      </span>
+                    }
+                  />
+                </>
+              ) : (
+                <>
+                  <InfoRow
+                    label="Buy-in"
+                    value={`${formatEuros(parteParaPremios(sala.buy_in))} + ${formatEuros(parteComision(sala.buy_in))}`}
+                    accent
+                  />
+                  <InfoRow label="Tipo de sala" value={tipoLabel} />
+                  <InfoRow label="Formato" value={tipoLabel} />
+                  <InfoRow label="Competición" value={sala.competicion} />
+                </>
+              )}
               <InfoRow label="Jugadores inscritos" value={`${signedUp}/${capacidadLabel(sala.aforo)}`} />
               {!isFinalizada && <InfoRow label="Se cierra el" value={cierraEn ?? 'Sin fecha fijada'} />}
             </div>
           )}
 
-          {tab === 'premios' && (
+          {tab === 'premios' && esV2 && <PremiosDraftis tipo={sala.tipo} aforo={sala.aforo} liga={nombreLiga} />}
+
+          {tab === 'premios' && !esV2 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '20px 14px', background: 'rgba(240,185,77,0.1)', border: '1px solid rgba(240,185,77,0.35)', borderRadius: 12 }}>
                 <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#C9A257' }}>Bote total</span>
@@ -429,7 +518,45 @@ export default function SalaDetallePage() {
             </div>
           )}
 
-          {showJoinCta && (
+          {showJoinCta && esV2 && (
+            <div style={{ position: 'sticky', bottom: 16, marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {avisoEntrada && <p style={{ ...S.errorText, fontSize: 12.5, margin: 0, background: '#0B0F0E', padding: '6px 8px', borderRadius: 8 }}>{avisoEntrada}</p>}
+              <button
+                type="button"
+                disabled={joinDisabled || entrando}
+                onClick={() => void entrarV2()}
+                style={{
+                  width: '100%',
+                  fontFamily: "'Barlow Condensed', sans-serif",
+                  fontWeight: 800,
+                  fontSize: 17,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.03em',
+                  color: joinDisabled ? S.MUTED_3 : '#04140B',
+                  background: joinDisabled ? S.PANEL : '#3DDC84',
+                  border: 'none',
+                  padding: '14px 26px',
+                  borderRadius: 10,
+                  minHeight: 46,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  cursor: joinDisabled ? 'default' : 'pointer',
+                  opacity: entrando ? 0.6 : 1,
+                }}
+              >
+                {joinLabel}
+                {!joinDisabled && (
+                  <>
+                    <IconoCredito size={16} oscuro /> crédito
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+
+          {showJoinCta && !esV2 && (
             <Link
               href={joinDisabled ? '#' : `/salas/${sala.id}/crear-equipo`}
               aria-disabled={joinDisabled}
@@ -458,9 +585,19 @@ export default function SalaDetallePage() {
               {joinLabel}
             </Link>
           )}
-        </div>
-      </div>
-    </main>
+
+          {recargar && (
+            <RecargaVideo
+              deporte={deporteV2}
+              salaId={sala.id}
+              onCerrar={() => setRecargar(false)}
+              onRecargado={() => {
+                avisarCambioCreditos();
+                setRecargar(false);
+              }}
+            />
+          )}
+    </>
   );
 }
 
@@ -480,6 +617,7 @@ function EquipoPanel({
   salaId,
   puedeEditar,
   buyIn,
+  esV2 = false,
 }: {
   equipo: EquipoMio;
   jugadores: JugadorRow[];
@@ -488,6 +626,7 @@ function EquipoPanel({
   salaId: string;
   puedeEditar: boolean;
   buyIn: number;
+  esV2?: boolean;
 }) {
   // 06/10 (Iñi): "Borrar equipo" (desapuntarse de la sala) junto a "Modificar
   // equipo", con la misma regla (solo mientras la sala no haya empezado).
@@ -508,7 +647,9 @@ function EquipoPanel({
       return;
     }
     const importe = typeof data === 'number' ? data : Number(data ?? buyIn);
-    setBorrado(`Te has desapuntado. Te hemos devuelto ${formatEuros(importe)}.`);
+    // 16/10 (Iñi): en las mesas de la liga lo que se devuelve es el crédito.
+    if (esV2) avisarCambioCreditos();
+    setBorrado(esV2 ? 'Te has desapuntado. Te hemos devuelto tu crédito Drafters.' : `Te has desapuntado. Te hemos devuelto ${formatEuros(importe)}.`);
     setBorrando(false);
     window.setTimeout(() => window.location.reload(), 1800);
   }
@@ -646,7 +787,7 @@ function EquipoPanel({
       </div>
       {puedeEditar ? (
         <Link
-          href={`/salas/${salaId}/crear-equipo?equipo=${equipo.id}`}
+          href={`/salas/${salaId}/crear-equipo?equipo=${equipo.id}${esV2 ? '&v2=1' : ''}`}
           style={{
             marginTop: 4,
             fontFamily: "'Barlow Condensed', sans-serif",
@@ -697,7 +838,13 @@ function EquipoPanel({
         confirmandoBorrado ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '12px 14px', background: 'rgba(255,92,92,0.08)', border: '1px solid rgba(255,92,92,0.35)', borderRadius: 10 }}>
             <span style={{ fontSize: 13, color: S.TEXT, lineHeight: 1.4 }}>
-              ¿Seguro que quieres borrar este equipo y desapuntarte de la sala? Te devolvemos tu inscripción íntegra ({formatEuros(buyIn)}).
+              {esV2 ? (
+                <>
+                  ¿Seguro que quieres borrar este equipo y desapuntarte de la mesa? Te devolvemos tu <strong style={{ color: '#3DDC84' }}>crédito Drafters</strong> (1 <IconoCredito size={13} />) para que lo uses en otra mesa.
+                </>
+              ) : (
+                <>¿Seguro que quieres borrar este equipo y desapuntarte de la sala? Te devolvemos tu inscripción íntegra ({formatEuros(buyIn)}).</>
+              )}
             </span>
             {errorBorrado && <span style={{ fontSize: 12, color: '#FF5C5C', fontWeight: 600 }}>{errorBorrado}</span>}
             <div style={{ display: 'flex', gap: 8 }}>
@@ -755,7 +902,7 @@ function EquipoPanel({
   );
 }
 
-function InfoRow({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+function InfoRow({ label, value, accent }: { label: string; value: ReactNode; accent?: boolean }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '13px 14px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
       <span style={{ fontSize: 13, color: S.MUTED_2, flexShrink: 0 }}>{label}</span>

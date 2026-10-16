@@ -11,6 +11,7 @@ import ResumenClasificacionMesa from '@/components/ResumenClasificacionMesa';
 import * as S from '@/lib/mockupStyles';
 import { formatEuros } from '@/lib/salaShared';
 import Cargando from '@/components/Cargando';
+import ResultadoJornadaV2 from '@/components/v2/ResultadoJornadaV2';
 
 const ACCENT = '#3DDC84';
 const PORRAS_COLOR = '#FF7A45';
@@ -160,6 +161,8 @@ export default function InicioPage() {
         <DraftersHeader saldoLabel={saldoLabel} accountInitials={initials} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20, padding: '40px 20px 56px' }}>
           <InstalarApp variante="popup" />
+          {/* 16/10: resultado de tu jornada de la liga V2 (draftis y puesto) */}
+          {(perfil.acceso_v2 || perfil.rol === 'admin') && <ResultadoJornadaV2 />}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <h1 style={{ fontSize: 28, fontWeight: 800, color: S.TEXT }}>¡Bienvenido, {perfil.nombre}!</h1>
             <p style={{ fontSize: 14, color: S.MUTED }}>
