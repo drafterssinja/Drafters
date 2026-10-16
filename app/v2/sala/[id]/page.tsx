@@ -12,6 +12,7 @@ import ChatAmistoso from '@/components/v2/ChatAmistoso';
 import EditorPartidos from '@/components/v2/EditorPartidos';
 import TiraPuestos from '@/components/v2/TiraPuestos';
 import EditorSala from '@/components/v2/EditorSala';
+import CajaContrasena from '@/components/v2/CajaContrasena';
 import ClasificacionAmistoso from '@/components/v2/ClasificacionAmistoso';
 import EditorPremio, { PREMIO_VACIO } from '@/components/v2/EditorPremio';
 import { MODALIDAD_DESC, MODALIDAD_LABEL, cadaXSegundos, fechaCorta, mensajeError, premioValido,  type Amistoso, type AmistosoJornada, type Mensaje, type Premio, type Resumen } from '@/lib/v2';
@@ -105,8 +106,11 @@ export default function V2Sala() {
 
   async function unirse() {
     setError(null);
-    const { error: e } = await supabase.rpc('amistoso_unirse', { p_amistoso: id, p_contrasena: contrasena || null });
-    if (e) return setError(mensajeError(e));
+    const { error: e } = await supabase.rpc('amistoso_unirse', { p_amistoso: id, p_contrasena: contrasena.trim() || null });
+    if (e) {
+      const m = mensajeError(e);
+      return setError(/contraseña incorrecta/i.test(m) ? `❌ Esa contraseña no es la buena. Revísala (mayúsculas, espacios...) o pídesela otra vez a @${resumen?.nombres[amistoso?.creador_id ?? ''] ?? 'quien creó la sala'}.` : m);
+    }
     await cargarSala();
   }
 
@@ -236,9 +240,25 @@ export default function V2Sala() {
                 <span style={{ fontSize: 13, color: S.MUTED_3 }}>La sala está completa.</span>
               ) : (
                 <>
-                  {amistoso.privada && <input value={contrasena} onChange={(e) => setContrasena(e.target.value)} placeholder="Contraseña de la sala" style={S.input} autoComplete="off" />}
-                  <button type="button" onClick={unirse} style={{ ...S.primaryButton, background: V2_COLOR }}>
-                    Unirme a la sala
+                  {/* 16/10 (Iñi): la caja de la contraseña tiene que estar "para tontos": bien grande y explicada. */}
+                  {amistoso.privada && (
+                    <CajaContrasena
+                      valor={contrasena}
+                      onChange={(v) => {
+                        setContrasena(v);
+                        setError(null);
+                      }}
+                      onEnter={() => void unirse()}
+                      creador={resumen.nombres[amistoso.creador_id] ?? null}
+                    />
+                  )}
+                  <button
+                    type="button"
+                    onClick={unirse}
+                    disabled={amistoso.privada && !contrasena.trim()}
+                    style={{ ...S.primaryButton, background: V2_COLOR, fontSize: 16, minHeight: 52, opacity: amistoso.privada && !contrasena.trim() ? 0.5 : 1 }}
+                  >
+                    {amistoso.privada ? (contrasena.trim() ? '🔓 Entrar con esta contraseña' : 'Escribe la contraseña para entrar') : 'Unirme a la sala'}
                   </button>
                 </>
               )}

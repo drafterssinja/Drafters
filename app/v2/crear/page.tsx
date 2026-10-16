@@ -159,6 +159,8 @@ function V2CrearInner() {
       [p.local, p.visitante].forEach((e) => Object.entries(jugadoresPorEquipo.get(e) ?? {}).forEach(([pos, n]) => (c[pos] = (c[pos] ?? 0) + n)));
     });
     const n = numJugadores;
+    // 16/10 (Iñi): en el draft solo 2 jugadores por equipo → hacen falta 6 equipos (3 partidos).
+    if (partidosOn.size < 3) return 'En el draft solo se pueden coger 2 jugadores de cada equipo: elige al menos 3 partidos (o todos).';
     if ((c.portero ?? 0) < n) return `Con esos partidos solo hay ${c.portero ?? 0} porteros y sois ${n}: en el draft cada uno necesita uno. Añade más partidos.`;
     if ((c.defensa ?? 0) < 3 * n || (c.centrocampista ?? 0) < 3 * n || (c.delantero ?? 0) < n) return 'Con esos partidos no hay jugadores suficientes para que todos completéis el equipo en el draft. Añade más partidos.';
     return null;

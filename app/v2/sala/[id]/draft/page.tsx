@@ -10,6 +10,7 @@ import * as S from '@/lib/mockupStyles';
 import MarcoV2, { EtiquetaBeta, Panel, Titulo, V2_COLOR } from '@/components/v2/MarcoV2';
 import { useSesionV2 } from '@/components/v2/useSesionV2';
 import SorteoDraft from '@/components/v2/SorteoDraft';
+import SelectorDraft, { MAX_POR_EQUIPO_DRAFT, type PartidoDraft } from '@/components/v2/SelectorDraft';
 import { lineaDePosicion, type LineaFutbol } from '@/lib/salaShared';
 import { reproducirSonidoAviso } from '@/lib/sonidoAviso';
 import { TAMANO_EQUIPO_V2, alineacionPosible, cadaXSegundos, fechaCorta, mensajeError, ordenDeRonda, turnoDraft, type Amistoso, type AmistosoJornada, type Resumen } from '@/lib/v2';
@@ -21,17 +22,14 @@ import { TAMANO_EQUIPO_V2, alineacionPosible, cadaXSegundos, fechaCorta, mensaje
 // todos, sorteo animado del orden y se elige un jugador por turno, sin
 // repetir. En cada ronda el orden rota (el 1º pasa al último y los demás
 // suben uno) hasta completar los equipos (11 en fútbol, 5 en golf).
+// 16/10 (Iñi): partidos a la izquierda y jugadores a la derecha (SelectorDraft),
+// máximo 2 jugadores del mismo equipo, el turno fijo arriba al desplazarte y un
+// aviso "@fulano ha cogido a X" cada vez que alguien elige.
 
 type Draft = { listos: string[]; orden: string[] | null; iniciado_en: string | null; terminado_en: string | null };
 type Pick = { numero: number; usuario_id: string; jugador_id: string };
 type Jug = { id: string; nombre: string; posicion: string | null; precio: number; equipo_real: string | null; lesionado: boolean };
 
-const LINEAS: LineaFutbol[] = ['POR', 'DEF', 'MED', 'DEL'];
-const LINEA_LABEL: Record<LineaFutbol, string> = { POR: 'Porteros', DEF: 'Defensas', MED: 'Medios', DEL: 'Delanteros' };
-
-function normalizar(t: string) {
-  return t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
-}
 
 export default function V2Draft() {
   const { id } = useParams<{ id: string }>();
@@ -44,8 +42,7 @@ export default function V2Draft() {
   const [picks, setPicks] = useState<Pick[]>([]);
   const [jugadores, setJugadores] = useState<Jug[]>([]);
   const [verSorteo, setVerSorteo] = useState(false);
-  const [busqueda, setBusqueda] = useState('');
-  const [linea, setLinea] = useState<LineaFutbol | 'TODOS'>('TODOS');
+  const [partidos, setPartidos] = useState<PartidoDraft[]>([]);
   const [candidato, setCandidato] = useState<Jug | null>(null);
   const [equipoVisto, setEquipoVisto] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
@@ -82,6 +79,14 @@ export default function V2Draft() {
       );
       const permitidos = jo.equipos_permitidos ? new Set(jo.equipos_permitidos) : null;
       setJugadores(js.filter((x) => !x.baja && (!permitidos || (x.equipo_real && permitidos.has(x.equipo_real)))));
+      if (am.deporte === 'futbol') {
+        const { data: cs } = await supabase.from('cuotas_partido_futbol').select('equipo_local,equipo_visitante').eq('competicion', competicion);
+        setPartidos(
+          ((cs as { equipo_local: string; equipo_visitante: string }[]) ?? [])
+            .filter((c) => !permitidos || (permitidos.has(c.equipo_local) && permitidos.has(c.equipo_visitante)))
+            .map((c) => ({ local: c.equipo_local, visitante: c.equipo_visitante }))
+        );
+      }
       setAmistoso(am);
       setJornada(jo);
     })();
@@ -146,14 +151,55 @@ export default function V2Draft() {
   // ¿Puedo coger a alguien de esta línea sin quedarme sin alineación posible?
   const lineaPosible = (l: LineaFutbol) => !futbol || alineacionPosible({ ...miConteo, [l]: miConteo[l] + 1 }, false) !== null;
 
-  const lista = useMemo(() => {
-    const q = normalizar(busqueda);
-    return jugadores.filter((j) => {
-      if (q && !normalizar(j.nombre).includes(q)) return false;
-      if (futbol && linea !== 'TODOS' && lineaDePosicion(j.posicion) !== linea) return false;
-      return true;
-    });
-  }, [jugadores, busqueda, linea, futbol]);
+  // Cuántos llevo de cada equipo real (máximo 2 en fútbol).
+  const miPorEquipo = useMemo(() => {
+    const m = new Map<string, number>();
+    misPicks.forEach((j) => j.equipo_real && m.set(j.equipo_real, (m.get(j.equipo_real) ?? 0) + 1));
+    return m;
+  }, [misPicks]);
+  const puedoCoger = (j: Jug) => !elegidoPor.has(j.id) && (!futbol || (lineaPosible(lineaDePosicion(j.posicion)) && (!j.equipo_real || (miPorEquipo.get(j.equipo_real) ?? 0) < MAX_POR_EQUIPO_DRAFT)));
+  const sinOpciones = esMiTurno && jugadores.length > 0 && !jugadores.some(puedoCoger);
+
+  // ---- Turno fijo arriba al desplazarte (16/10) ----
+  const tarjetaTurnoRef = useRef<HTMLDivElement | null>(null);
+  const [turnoFijo, setTurnoFijo] = useState(false);
+  useEffect(() => {
+    const comprobar = () => {
+      const el = tarjetaTurnoRef.current;
+      setTurnoFijo(!!el && el.getBoundingClientRect().bottom < 0);
+    };
+    comprobar();
+    window.addEventListener('scroll', comprobar, { passive: true });
+    window.addEventListener('resize', comprobar);
+    return () => {
+      window.removeEventListener('scroll', comprobar);
+      window.removeEventListener('resize', comprobar);
+    };
+  }, [enMarcha]);
+
+  // ---- Aviso "@fulano ha cogido a X" cada vez que alguien elige (16/10) ----
+  const vistosPicks = useRef<number | null>(null);
+  const [anuncios, setAnuncios] = useState<Pick[]>([]);
+  useEffect(() => {
+    if (!draft) return;
+    if (vistosPicks.current === null) {
+      vistosPicks.current = picks.length; // al entrar no se repiten las elecciones de antes
+      return;
+    }
+    if (picks.length > vistosPicks.current) {
+      const nuevos = picks.slice(vistosPicks.current);
+      vistosPicks.current = picks.length;
+      setAnuncios((a) => [...a, ...nuevos].slice(-4));
+    } else if (picks.length < vistosPicks.current) {
+      vistosPicks.current = picks.length;
+    }
+  }, [picks, draft]);
+  const anuncio = anuncios[0] ?? null;
+  useEffect(() => {
+    if (!anuncio) return;
+    const t = window.setTimeout(() => setAnuncios((a) => a.slice(1)), anuncios.length > 1 ? 1800 : 3200);
+    return () => window.clearTimeout(t);
+  }, [anuncio, anuncios.length]);
 
   async function elegir() {
     if (!candidato) return;
@@ -181,6 +227,42 @@ export default function V2Draft() {
   return (
     <MarcoV2 perfil={perfil} estado={estado} deporte={amistoso?.deporte ?? 'futbol'} volverA={`/v2/sala/${id}`}>
       {verSorteo && draft?.orden && <SorteoDraft orden={draft.orden} nombres={nombres} miId={miId} onTerminar={cerrarSorteo} />}
+
+      {/* Turno fijo arriba mientras te desplazas por la lista (16/10, Iñi) */}
+      {enMarcha && turnoFijo && turno && (
+        <div style={{ position: 'fixed', top: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 'var(--page-max-width)', zIndex: 60, boxSizing: 'border-box', padding: '8px 16px', background: esMiTurno ? 'linear-gradient(135deg, #0F3320, #12452A)' : 'linear-gradient(135deg, #1E1838, #2A1F4D)', borderBottom: `2px solid ${esMiTurno ? S.ACCENT : V2_COLOR}`, boxShadow: '0 8px 20px rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', gap: 10, minHeight: 52 }}>
+          <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.08em', color: S.MUTED_2, whiteSpace: 'nowrap' }}>
+            R{ronda + 1} · {numero + 1}/{totalPicks}
+          </span>
+          <span style={{ flex: 1, minWidth: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontStyle: 'italic', fontSize: 22, color: esMiTurno ? S.ACCENT : S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {esMiTurno ? '¡TE TOCA ELEGIR!' : `Turno de @${nombres[turno] ?? '?'}`}
+          </span>
+        </div>
+      )}
+
+      {/* "@fulano ha cogido a X" (16/10, Iñi) */}
+      <AnimatePresence>
+        {anuncio && (
+          <motion.div
+            key={anuncio.numero}
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -10 }}
+            style={{ position: 'fixed', top: 64, left: '50%', x: '-50%', zIndex: 70, width: 'calc(100% - 32px)', maxWidth: 420, pointerEvents: 'none', background: S.PANEL, border: `1.5px solid ${anuncio.usuario_id === miId ? S.ACCENT : '#F0B94D'}`, borderRadius: 14, padding: '12px 14px', boxShadow: '0 12px 30px rgba(0,0,0,0.55)', display: 'flex', flexDirection: 'column', gap: 2 }}
+          >
+            <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.06em', color: anuncio.usuario_id === miId ? S.ACCENT : '#F0B94D' }}>ELECCIÓN {anuncio.numero + 1}</span>
+            <span style={{ fontSize: 15, color: S.TEXT, lineHeight: 1.35 }}>
+              {anuncio.usuario_id === miId ? 'Has cogido a ' : <><b>@{nombres[anuncio.usuario_id] ?? '?'}</b> ha cogido a </>}
+              <b style={{ color: anuncio.usuario_id === miId ? S.ACCENT : '#F0B94D' }}>{porId.get(anuncio.jugador_id)?.nombre ?? 'un jugador'}</b>
+            </span>
+            {futbol && porId.get(anuncio.jugador_id) && (
+              <span style={{ fontSize: 12, color: S.MUTED_2 }}>
+                {lineaDePosicion(porId.get(anuncio.jugador_id)?.posicion ?? null)} · {porId.get(anuncio.jugador_id)?.equipo_real}
+              </span>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
       {cargando ? (
         <p style={{ fontSize: 14, color: error ? S.ERROR : S.MUTED }}>{error ?? 'Cargando draft...'}</p>
       ) : (
@@ -231,7 +313,7 @@ export default function V2Draft() {
               <Panel>
                 <span style={S.sectionLabel}>Cómo funciona</span>
                 <span style={{ fontSize: 12.5, color: S.MUTED, lineHeight: 1.6 }}>
-                  Cada uno elige un jugador en su turno y nadie puede repetir. En cada ronda el orden rota: el que eligió primero pasa al último y los demás suben un puesto. Se sigue hasta completar los equipos ({tamano} jugadores
+                  Cada uno elige un jugador en su turno y nadie puede repetir.{futbol ? ` Como mucho ${MAX_POR_EQUIPO_DRAFT} jugadores del mismo equipo.` : ''} En cada ronda el orden rota: el que eligió primero pasa al último y los demás suben un puesto. Se sigue hasta completar los equipos ({tamano} jugadores
                   {futbol ? ' en una alineación válida: 4-3-3, 4-4-2, 4-5-1, 5-4-1 o 3-4-3' : ''}).
                 </span>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: S.MUTED_2 }}>
@@ -250,6 +332,7 @@ export default function V2Draft() {
             <>
               {!draft.terminado_en ? (
                 <motion.div
+                  ref={tarjetaTurnoRef}
                   key={numero}
                   initial={{ scale: 0.96, opacity: 0.6 }}
                   animate={{ scale: 1, opacity: 1 }}
@@ -344,48 +427,27 @@ export default function V2Draft() {
                 </span>
               )}
 
-              {/* Jugadores disponibles */}
+              {/* Jugadores disponibles: partidos a la izquierda, jugadores a la derecha (16/10) */}
               {!draft.terminado_en && (
                 <>
-                  <input value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="Buscar jugador..." style={S.input} />
-                  {futbol && (
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                      <button type="button" style={S.pill(linea === 'TODOS')} onClick={() => setLinea('TODOS')}>
-                        Todos
-                      </button>
-                      {LINEAS.map((l) => (
-                        <button key={l} type="button" style={{ ...S.pill(linea === l), opacity: lineaPosible(l) ? 1 : 0.45 }} onClick={() => setLinea(l)}>
-                          {LINEA_LABEL[l]} ({miConteo[l]})
-                        </button>
-                      ))}
-                    </div>
+                  {sinOpciones && (
+                    <p style={{ ...S.errorText, fontSize: 12.5 }}>
+                      No te queda ningún jugador que encaje (línea llena o ya tienes {MAX_POR_EQUIPO_DRAFT} de cada equipo que queda). Avisa al administrador de la sala.
+                    </p>
                   )}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {lista.slice(0, 120).map((j) => {
-                      const de = elegidoPor.get(j.id);
-                      const bloqueadoPos = !lineaPosible(lineaDePosicion(j.posicion));
-                      const deshabilitado = !!de || !esMiTurno || bloqueadoPos;
-                      return (
-                        <button
-                          key={j.id}
-                          type="button"
-                          disabled={deshabilitado}
-                          onClick={() => setCandidato(j)}
-                          style={{ display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: '10px 12px', cursor: deshabilitado ? 'default' : 'pointer', opacity: de ? 0.38 : bloqueadoPos ? 0.55 : 1 }}
-                        >
-                          {futbol && <span style={{ width: 30, fontSize: 10.5, fontWeight: 700, color: S.MUTED_2 }}>{lineaDePosicion(j.posicion)}</span>}
-                          <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                            <span style={{ fontWeight: 700, fontSize: 13.5, color: S.TEXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: de ? 'line-through' : 'none' }}>
-                              {j.nombre} {j.lesionado ? '🚑' : ''}
-                            </span>
-                            {futbol && <span style={{ fontSize: 11, color: S.MUTED_3 }}>{j.equipo_real}</span>}
-                          </span>
-                          {de ? <span style={{ fontSize: 11, color: V2_COLOR, fontWeight: 700 }}>@{nombres[de] ?? '?'}</span> : esMiTurno && !bloqueadoPos ? <span style={{ fontSize: 12, fontWeight: 800, color: S.ACCENT }}>Elegir</span> : null}
-                        </button>
-                      );
-                    })}
-                    {lista.length > 120 && <span style={{ fontSize: 12, color: S.MUTED_3 }}>Usa el buscador para ver más jugadores.</span>}
-                  </div>
+                  <SelectorDraft
+                    jugadores={jugadores}
+                    partidos={partidos}
+                    futbol={futbol}
+                    elegidoPor={elegidoPor}
+                    nombres={nombres}
+                    esMiTurno={esMiTurno}
+                    miConteo={miConteo}
+                    miPorEquipo={miPorEquipo}
+                    lineaPosible={lineaPosible}
+                    topOffset={64}
+                    onElegir={(j) => setCandidato(porId.get(j.id) ?? null)}
+                  />
                 </>
               )}
             </>
