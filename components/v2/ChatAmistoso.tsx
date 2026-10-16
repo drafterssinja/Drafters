@@ -6,7 +6,7 @@ import * as S from '@/lib/mockupStyles';
 import EditorPremio, { PREMIO_VACIO } from '@/components/v2/EditorPremio';
 import { V2_COLOR } from '@/components/v2/MarcoV2';
 import TiraPuestos from '@/components/v2/TiraPuestos';
-import { mensajeError, premioValido, resumenPremio, type Mensaje, type Premio } from '@/lib/v2';
+import { mensajeError, premioValido, repartoEquitativoGP, resumenPremio, type Mensaje, type Premio } from '@/lib/v2';
 
 type Voto = { mensaje_id: number; usuario_id: string; acepta: boolean };
 
@@ -20,6 +20,7 @@ export default function ChatAmistoso({
   mensajes,
   votos,
   onCambio,
+  abrirPropuesta = false,
 }: {
   amistosoId: string;
   miId: string;
@@ -28,10 +29,17 @@ export default function ChatAmistoso({
   mensajes: Mensaje[];
   votos: Voto[];
   onCambio: () => void;
+  // 16/10: abrir directamente el menú de "proponer lo que nos jugamos".
+  abrirPropuesta?: boolean;
 }) {
   const [texto, setTexto] = useState('');
-  const [proponiendo, setProponiendo] = useState(false);
-  const [propuesta, setPropuesta] = useState<Premio>({ ...PREMIO_VACIO, tipo: 'otro' });
+  const [proponiendo, setProponiendo] = useState(abrirPropuesta);
+  // 16/10 (Iñi): el que propone elige en el menú si es dinero, una cena u otra
+  // cosa, quiénes ganan y quiénes pierden; los demás aceptan o no.
+  const [propuesta, setPropuesta] = useState<Premio>({ ...PREMIO_VACIO, tipo: 'dinero', ganan: 1, pagan: 1, aportacion: 5, ...repartoEquitativoGP(1, 1, 5) });
+  useEffect(() => {
+    if (abrirPropuesta) setProponiendo(true);
+  }, [abrirPropuesta]);
   const [error, setError] = useState<string | null>(null);
   const finRef = useRef<HTMLDivElement | null>(null);
   const ultimo = mensajes[mensajes.length - 1]?.id;
@@ -93,7 +101,11 @@ export default function ChatAmistoso({
                 <span style={{ fontSize: 11.5, color: S.MUTED_2 }}>
                   {m.estado === 'pendiente' && `Aceptan ${si.length} de ${participantes}: ${si.join(', ')}`}
                   {m.estado === 'aceptada' && '✅ Aceptada por todos: es lo que se juega la sala.'}
-                  {m.estado === 'rechazada' && '❌ Rechazada.'}
+                  {m.estado === 'rechazada' &&
+                    (() => {
+                      const no = vs.filter((v) => !v.acepta).map((v) => '@' + (nombres[v.usuario_id] ?? '?'));
+                      return no.length ? `❌ ${no.join(', ')} ha dicho que no. Hablad en el chat cómo queréis jugároslo y que alguien haga otra propuesta.` : '❌ Ya no vale (se aceptó otra propuesta).';
+                    })()}
                 </span>
                 {m.estado === 'pendiente' && !(miVoto && miVoto.acepta) && (
                   <div style={{ display: 'flex', gap: 8 }}>
@@ -125,7 +137,8 @@ export default function ChatAmistoso({
 
       {proponiendo ? (
         <div style={{ border: `1px solid ${S.BORDER}`, borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <span style={S.sectionLabel}>¿Qué os jugáis?</span>
+          <span style={S.sectionLabel}>Propón lo que os jugáis</span>
+          <span style={{ fontSize: 12, color: S.MUTED_2, marginTop: -4 }}>Elige si es dinero, una cena u otra cosa, y quiénes ganan y quiénes pierden. Todos los de la sala tienen que aceptarlo.</span>
           <EditorPremio premio={propuesta} onChange={setPropuesta} participantes={participantes} />
           <div style={{ display: 'flex', gap: 8 }}>
             <button type="button" onClick={proponer} style={{ ...S.primaryButton, background: V2_COLOR, marginTop: 0 }}>
@@ -155,7 +168,7 @@ export default function ChatAmistoso({
             </button>
           </div>
           <button type="button" onClick={() => setProponiendo(true)} style={{ ...S.secondaryLinkButton, borderColor: V2_COLOR, color: V2_COLOR }}>
-            🤝 Proponer jugarnos algo
+            🤝 Proponer lo que nos jugamos
           </button>
         </>
       )}

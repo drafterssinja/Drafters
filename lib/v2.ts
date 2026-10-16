@@ -32,6 +32,15 @@ export type Premio = {
   // 15/10 (Iñi): y opcionalmente cuántos ganan (los primeros). Entre medias,
   // "tierra de nadie": ni ganan ni pagan.
   ganan?: number;
+  // 16/10 (Iñi): dinero "ganan / pierden". Los `ganan` primeros cobran y los
+  // `pagan` últimos pagan; entre medias, ni cobran ni pagan. cobros[i] = € que
+  // cobra el puesto i+1; pagos[k] = € que paga el k-ésimo de los que pierden
+  // (de mejor a peor: el último es pagos[pagan-1]). Lo que se cobra = lo que se
+  // paga. Por defecto, reparto a partes iguales (aportacion = lo que paga cada
+  // uno de los que pierden). Las salas antiguas (sin cobros/pagos) siguen con
+  // el modelo de bote y porcentajes.
+  cobros?: number[];
+  pagos?: number[];
 };
 
 export type GrupoOtro = 'gana' | 'nada' | 'paga';
@@ -133,8 +142,59 @@ export function repartoPorDefecto(ganadores: number): number[] {
   return r;
 }
 
+// ---------------------------------------------------------------------------
+// Dinero "ganan / pierden" (16/10)
+// ---------------------------------------------------------------------------
+export function esDineroGP(p: Premio | null | undefined): p is Premio & { cobros: number[]; pagos: number[] } {
+  return !!p && p.tipo === 'dinero' && Array.isArray(p.cobros) && Array.isArray(p.pagos);
+}
+
+const centimos = (x: number) => Math.round(x * 100) / 100;
+
+// Reparto a partes iguales: cada uno de los que pierden paga `cadaUno` y el
+// total se reparte igual entre los que ganan (los céntimos que sobren, a los primeros).
+export function repartoEquitativoGP(ganan: number, pagan: number, cadaUno: number): { cobros: number[]; pagos: number[] } {
+  const g = Math.max(1, ganan);
+  const pg = Math.max(1, pagan);
+  const pagos = Array(pg).fill(centimos(cadaUno));
+  const totalCent = Math.round(cadaUno * 100) * pg;
+  const base = Math.floor(totalCent / g);
+  const resto = totalCent - base * g;
+  const cobros = Array.from({ length: g }, (_, i) => (base + (i < resto ? 1 : 0)) / 100);
+  return { cobros, pagos };
+}
+
+export function esRepartoEquitativoGP(p: Premio): boolean {
+  if (!esDineroGP(p)) return true;
+  const eq = repartoEquitativoGP(p.cobros.length, p.pagos.length, p.aportacion ?? 0);
+  return eq.cobros.every((c, i) => Math.abs(c - (p.cobros[i] ?? 0)) < 0.005) && eq.pagos.every((c, i) => Math.abs(c - (p.pagos[i] ?? 0)) < 0.005);
+}
+
+// € netos de cada puesto (positivo = cobra, negativo = paga).
+export function netoPorPuesto(p: Premio, participantes: number): number[] {
+  const n = Math.max(2, participantes);
+  if (esDineroGP(p)) {
+    const ganan = p.cobros.length;
+    const pagan = p.pagos.length;
+    return Array.from({ length: n }, (_, i) => (i < ganan ? p.cobros[i] ?? 0 : 0) - (i >= n - pagan ? p.pagos[i - (n - pagan)] ?? 0 : 0));
+  }
+  if (p.tipo === 'dinero') return Array.from({ length: n }, (_, i) => ((p.aportacion ?? 0) * n * (p.reparto[i] ?? 0)) / 100);
+  return Array(n).fill(0);
+}
+
+export function textoDineroGP(p: Premio): string {
+  if (!esDineroGP(p)) return '';
+  const ganan = p.cobros.length;
+  const pagan = p.pagos.length;
+  const total = centimos(p.pagos.reduce((a, b) => a + b, 0));
+  const pierden = pagan === 1 ? `El último paga ${formatoEuros(total)}` : esRepartoEquitativoGP(p) ? `Los ${pagan} últimos pagan ${formatoEuros(p.aportacion ?? 0)} cada uno` : `Los ${pagan} últimos pagan ${formatoEuros(total)} en total`;
+  const cobran = ganan === 1 ? `el 1º se lo lleva todo` : `los ${ganan} primeros se reparten ${formatoEuros(total)}`;
+  return `${pierden} · ${cobran}`;
+}
+
 export function textoBote(premio: Premio | null, participantes: number): string | null {
   if (!premio || premio.tipo === 'nada') return null;
+  if (esDineroGP(premio)) return textoDineroGP(premio);
   if (premio.tipo === 'dinero') {
     const bote = (premio.aportacion ?? 0) * participantes;
     return `Cada uno pone ${formatoEuros(premio.aportacion ?? 0)} · bote de ${formatoEuros(bote)}`;
@@ -184,6 +244,19 @@ export function repartirPremio(filas: { usuarioId: string; total: number }[], pr
     while (j + 1 < filas.length && filas[j + 1].total === filas[i].total) j++;
     const empatados = j - i + 1;
     const puesto = `${empatados > 1 ? 'T' : ''}${i + 1}º`;
+    // Dinero "ganan / pierden": los empatados se reparten (o pagan) a partes
+    // iguales lo de los puestos que ocupan.
+    if (premio && esDineroGP(premio)) {
+      const neto = netoPorPuesto(premio, participantes);
+      let suma = 0;
+      for (let k = i; k <= j; k++) suma += neto[k] ?? 0;
+      const cada = Math.round((suma / empatados) * 100) / 100;
+      for (let k = i; k <= j; k++) {
+        res.push({ usuarioId: filas[k].usuarioId, total: filas[k].total, puesto, premioTexto: cada > 0 ? formatoEuros(cada) : null, paga: cada < 0 ? formatoEuros(-cada) : null, grupo: cada < 0 ? 'paga' : cada > 0 ? null : 'nada' });
+      }
+      i = j + 1;
+      continue;
+    }
     let pctGrupo = 0;
     if (premio?.tipo === 'dinero') for (let k = i; k <= j; k++) pctGrupo += premio.reparto[k] ?? 0;
     const pctCada = pctGrupo / empatados;
@@ -208,6 +281,19 @@ export function premioValido(p: Premio, participantes?: number): string | null {
     if (participantes && (p.pagan ?? 1) + (p.ganan ?? 0) > participantes) return 'Entre los que ganan y los que pagan no puede haber más gente que en la sala.';
     return null;
   }
+  if (esDineroGP(p)) {
+    const ganan = p.cobros.length;
+    const pagan = p.pagos.length;
+    if (ganan < 1) return 'Tiene que ganar al menos uno.';
+    if (pagan < 1) return 'Tiene que perder al menos uno.';
+    if (participantes && ganan + pagan > participantes) return `Entre los que ganan (${ganan}) y los que pierden (${pagan}) no puede haber más gente que en la sala (${participantes}).`;
+    if ([...p.cobros, ...p.pagos].some((x) => !(x >= 0))) return 'Las cantidades no pueden ser negativas.';
+    const cobran = centimos(p.cobros.reduce((a, b) => a + b, 0));
+    const pagan$ = centimos(p.pagos.reduce((a, b) => a + b, 0));
+    if (pagan$ <= 0) return 'Indica cuánto pagan los que pierden.';
+    if (Math.abs(cobran - pagan$) > 0.009) return `No cuadra: los que ganan cobrarían ${formatoEuros(cobran)} y los que pierden pagarían ${formatoEuros(pagan$)}. Tiene que ser lo mismo.`;
+    return null;
+  }
   if (!p.aportacion || p.aportacion <= 0) return 'Indica cuánto pone cada uno.';
   if (p.ganadores < 1) return 'Tiene que haber al menos un ganador.';
   if (p.reparto.length !== p.ganadores) return 'El reparto no cuadra con el número de ganadores.';
@@ -219,6 +305,7 @@ export function premioValido(p: Premio, participantes?: number): string | null {
 export function resumenPremio(p: Premio | null): string {
   if (!p || p.tipo === 'nada') return 'Solo por la gloria';
   if (p.tipo === 'otro') return textoPagan(p);
+  if (esDineroGP(p)) return textoDineroGP(p);
   const rep = p.ganadores === 1 ? 'el ganador se lo lleva todo' : `${p.ganadores} ganadores (${p.reparto.map((x) => `${x} %`).join(' / ')})`;
   return `${formatoEuros(p.aportacion ?? 0)} cada uno · ${rep}`;
 }

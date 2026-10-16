@@ -1,7 +1,7 @@
 'use client';
 
 import * as S from '@/lib/mockupStyles';
-import { formatoEuros, type Premio } from '@/lib/v2';
+import { esDineroGP, formatoEuros, netoPorPuesto, textoDineroGP, type Premio } from '@/lib/v2';
 
 // ============================================================================
 // TIRA DE PUESTOS (15/10, Iñi): lo que se juega una sala, puesto a puesto
@@ -16,6 +16,11 @@ export type ZonaPuesto = 'gana' | 'nada' | 'paga';
 export function zonasPremio(premio: Premio | null, participantes: number): ZonaPuesto[] {
   const n = Math.max(2, participantes);
   if (!premio || premio.tipo === 'nada') return Array(n).fill('nada');
+  if (esDineroGP(premio)) {
+    const ganan = premio.cobros.length;
+    const pagan = premio.pagos.length;
+    return Array.from({ length: n }, (_, i) => (i >= n - pagan ? 'paga' : i < ganan ? 'gana' : 'nada'));
+  }
   if (premio.tipo === 'dinero') return Array.from({ length: n }, (_, i) => (i < premio.ganadores && (premio.reparto[i] ?? 0) > 0 ? 'gana' : 'nada'));
   const pagan = Math.min(Math.max(1, premio.pagan ?? 1), n - 1);
   const ganan = Math.min(Math.max(0, premio.ganan ?? 0), n - pagan);
@@ -32,20 +37,22 @@ export default function TiraPuestos({ premio, participantes, compacta = false, s
   const zonas = zonasPremio(premio, participantes);
   const n = zonas.length;
   const dinero = premio?.tipo === 'dinero';
-  const importe = (i: number) => (dinero && premio ? formatoEuros(Math.round((((premio.aportacion ?? 0) * n * (premio.reparto[i] ?? 0)) / 100) * 100) / 100) : null);
+  const gp = esDineroGP(premio);
+  const netos = dinero && premio ? netoPorPuesto(premio, n) : [];
+  const importe = (i: number) => (dinero ? formatoEuros(Math.round(Math.abs(netos[i] ?? 0) * 100) / 100) : null);
   const hay = (z: ZonaPuesto) => zonas.includes(z);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: compacta ? 5 : 8 }}>
       {premio && premio.tipo !== 'nada' && !sinTitulo && (
         <span style={{ fontSize: compacta ? 12 : 13, fontWeight: 700, color: S.TEXT }}>
-          {premio.tipo === 'dinero' ? `${formatoEuros(premio.aportacion ?? 0)} cada uno · bote de ${formatoEuros((premio.aportacion ?? 0) * n)}` : `En juego: ${premio.descripcion || 'algo'}`}
+          {gp ? textoDineroGP(premio) : premio.tipo === 'dinero' ? `${formatoEuros(premio.aportacion ?? 0)} cada uno · bote de ${formatoEuros((premio.aportacion ?? 0) * n)}` : `En juego: ${premio.descripcion || 'algo'}`}
         </span>
       )}
       <div style={{ display: 'flex', gap: compacta ? 3 : 4, flexWrap: 'wrap' }}>
         {zonas.map((z, i) => {
           const c = COLORES[z];
-          const cobra = z === 'gana' ? importe(i) : null;
+          const cobra = z === 'gana' || (gp && z === 'paga') ? `${z === 'paga' ? '−' : gp ? '+' : ''}${importe(i)}` : null;
           return (
             <span
               key={i}
@@ -79,7 +86,7 @@ export default function TiraPuestos({ premio, participantes, compacta = false, s
           )}
           {hay('nada') && (
             <span>
-              <span style={{ color: S.MUTED_3 }}>■</span> {dinero ? 'No cobran' : 'Ni ganan ni pagan'}
+              <span style={{ color: S.MUTED_3 }}>■</span> {dinero && !gp ? 'No cobran' : 'Ni ganan ni pagan'}
             </span>
           )}
           {hay('paga') && (

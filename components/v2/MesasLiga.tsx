@@ -55,7 +55,6 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
   const [inscritos, setInscritos] = useState<Map<string, number>>(new Map());
   const [misEquipos, setMisEquipos] = useState<MiEquipo[]>([]);
   const [comp, setComp] = useState<string | null>(null);
-  const [verMias, setVerMias] = useState<'en_juego' | 'finalizadas'>('en_juego');
   const [aviso, setAviso] = useState<string | null>(null);
   const [recargarPara, setRecargarPara] = useState<string | null>(null);
   const [entrando, setEntrando] = useState<string | null>(null);
@@ -176,9 +175,6 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
     router.push(`/salas/${s.id}/crear-equipo?v2=1`);
   }
 
-  const enJuego = misEquipos.filter((e) => e.salas && e.salas.estado !== 'finalizada');
-  const finalizadas = misEquipos.filter((e) => e.salas && e.salas.estado === 'finalizada');
-  const listaMias = verMias === 'en_juego' ? enJuego : finalizadas;
 
   if (temporada === undefined) return <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>Cargando...</p>;
   if (temporada === null)
@@ -211,34 +207,7 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
         <span style={{ fontSize: 18, color: '#F0B94D' }}>›</span>
       </Link>
 
-      {misEquipos.length > 0 && (
-        <Panel>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button type="button" style={S.pill(verMias === 'en_juego')} onClick={() => setVerMias('en_juego')}>
-              Mis mesas en juego ({enJuego.length})
-            </button>
-            <button type="button" style={S.pill(verMias === 'finalizadas')} onClick={() => setVerMias('finalizadas')}>
-              Finalizadas ({finalizadas.length})
-            </button>
-          </div>
-          {listaMias.length === 0 && <span style={{ fontSize: 12.5, color: S.MUTED_3 }}>Nada por aquí.</span>}
-          {listaMias.slice(0, 8).map((e) => {
-            const s = e.salas as Sala;
-            const empezada = !!s.fecha_limite_inscripcion && new Date(s.fecha_limite_inscripcion).getTime() <= ahora;
-            return (
-              <Link key={e.id} href={empezada ? `/salas/${s.id}/clasificacion` : `/salas/${s.id}`} style={{ display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none', padding: '8px 0', borderTop: `1px solid ${S.CARD_BORDER}` }}>
-                <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <span style={{ fontSize: 10.5, fontWeight: 700, color: '#F0B94D', textTransform: 'uppercase' }}>{etiquetaComp(deporte, s.competicion)}</span>
-                  <span style={{ fontSize: 13.5, fontWeight: 700, color: S.TEXT }}>
-                    {TIPO_SALA_LABELS[s.tipo]} · {s.aforo} jugadores
-                  </span>
-                </span>
-                <span style={{ fontSize: 11.5, fontWeight: 700, color: s.estado === 'finalizada' ? S.MUTED_3 : empezada ? '#FF5C5C' : S.ACCENT }}>{s.estado === 'finalizada' ? 'Ver resultado' : empezada ? '● En directo' : 'Esperando'}</span>
-              </Link>
-            );
-          })}
-        </Panel>
-      )}
+      {/* 16/10: "mis mesas" se ve ahora arriba, en el recuadro de mis equipos (MisEquiposV2). */}
 
       {salas === null && <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>Cargando mesas...</p>}
       {salas !== null && competiciones.length === 0 && <p style={{ fontSize: 13, color: S.MUTED_3, margin: 0 }}>Ahora mismo no hay mesas abiertas. En cuanto se abra la próxima {deporte === 'futbol' ? 'jornada' : 'semana de torneos'}, aparecerán aquí.</p>}
