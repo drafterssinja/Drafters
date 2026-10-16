@@ -9,6 +9,8 @@ import MarcoV2, { EtiquetaBeta, Panel, Titulo, V2_COLOR } from '@/components/v2/
 import EditorPremio, { PREMIO_VACIO } from '@/components/v2/EditorPremio';
 import SelectorJugadores from '@/components/v2/SelectorJugadores';
 import { useSesionV2 } from '@/components/v2/useSesionV2';
+import CosteCredito from '@/components/v2/CosteCredito';
+import { avisarCambioCreditos } from '@/components/v2/creditos';
 import { MODALIDAD_DESC, MODALIDAD_LABEL, fechaCorta, mensajeError, premioValido, type Modalidad, type Premio } from '@/lib/v2';
 
 // ============================================================================
@@ -26,6 +28,10 @@ type Comp = { deporte: string; competicion: string; cierre: string | null };
 // aunque todavía no tenga horarios; se va completando sola al publicarse.
 const JORNADAS_POR_LIGA: Record<string, number> = { 'La Liga': 38, 'Premier League': 38, 'Champions League': 8 };
 type Partido = { local: string; visitante: string; kickoff: string | null };
+
+// 16/10 (Iñi): al crear un amistoso de fútbol hay que elegir de qué competición es.
+const COMPETICIONES_FUTBOL = ['La Liga', 'Champions League'];
+const NOMBRE_COMPETICION: Record<string, string> = { 'La Liga': 'LaLiga', 'Champions League': 'Champions League' };
 
 function ligaDe(competicion: string): string {
   return competicion.replace(/\s*-\s*Jornada\s*\d+\s*$/i, '');
@@ -88,7 +94,9 @@ function V2CrearInner() {
 
   // Valores por defecto al cargar / cambiar de liga.
   useEffect(() => {
-    if (!liga && ligas.length) setLiga(ligas[0]);
+    // 16/10 (Iñi): la competición (LaLiga o Champions) la elige siempre el usuario;
+    // solo se marca sola si no hay más que una con jornada abierta.
+    if (!liga && ligas.length === 1 && COMPETICIONES_FUTBOL.length <= 1) setLiga(ligas[0]);
   }, [ligas, liga]);
   useEffect(() => {
     if (publicadasLiga.length) {
@@ -169,6 +177,7 @@ function V2CrearInner() {
   async function crear() {
     setError(null);
     if (!nombre.trim()) return setError('Ponle un nombre a la sala.');
+    if (deporte === 'futbol' && !liga) return setError('Elige si la sala es de LaLiga o de la Champions.');
     if (seleccion.length === 0) return setError(deporte === 'golf' ? 'Elige un torneo.' : 'Elige la jornada (o la primera y la última).');
     if (privada && contrasena.trim().length < 3) return setError('Pon una contraseña de al menos 3 caracteres.');
     if (unaJornadaFutbol && partidos.length > 0 && partidosOn.size === 0) return setError('Elige al menos un partido.');
@@ -191,6 +200,7 @@ function V2CrearInner() {
     });
     setEnviando(false);
     if (e) return setError(mensajeError(e));
+    avisarCambioCreditos();
     router.replace(`/v2/sala/${data as string}`);
   }
 
@@ -215,18 +225,33 @@ function V2CrearInner() {
 
       {comps !== null && deporte === 'futbol' &&
         bloque(
-          'Jornadas',
+          'Competición y jornadas',
           futbol.length === 0 ? (
             <span style={{ fontSize: 13, color: S.MUTED_3 }}>Ahora mismo no hay ninguna jornada por empezar.</span>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {ligas.map((l) => (
-                  <button key={l} type="button" style={S.pill(liga === l)} onClick={() => setLiga(l)}>
-                    {l}
-                  </button>
-                ))}
+              <span style={S.label}>¿De qué competición?</span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {Array.from(new Set([...COMPETICIONES_FUTBOL, ...ligas])).map((l) => {
+                  const hay = ligas.includes(l);
+                  const on = liga === l;
+                  return (
+                    <button
+                      key={l}
+                      type="button"
+                      disabled={!hay}
+                      onClick={() => setLiga(l)}
+                      style={{ flex: 1, textAlign: 'center', padding: '12px 8px', borderRadius: 12, cursor: hay ? 'pointer' : 'default', border: `1.5px solid ${on ? V2_COLOR : S.BORDER}`, background: on ? 'rgba(167,139,250,0.14)' : 'transparent', opacity: hay ? 1 : 0.45, display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'center' }}
+                    >
+                      <span style={{ fontWeight: 800, fontSize: 15, color: on ? V2_COLOR : S.TEXT }}>{NOMBRE_COMPETICION[l] ?? l}</span>
+                      <span style={{ fontSize: 11, color: S.MUTED_2 }}>{hay ? `Próxima: J${numeroJornada(futbol.filter((c) => ligaDe(c.competicion) === l).sort((x, y) => numeroJornada(x.competicion) - numeroJornada(y.competicion))[0]?.competicion ?? '')}` : 'Sin jornada abierta'}</span>
+                    </button>
+                  );
+                })}
               </div>
+              {!liga && <span style={{ fontSize: 12.5, color: '#F0B94D' }}>👆 Elige primero si la sala es de LaLiga o de la Champions.</span>}
+              {liga && (
+              <>
               <div style={{ display: 'flex', gap: 8 }}>
                 <label style={{ ...S.field, flex: 1 }}>
                   <span style={S.label}>Desde</span>
@@ -263,6 +288,8 @@ function V2CrearInner() {
                 {publicadasLiga.find((c) => c.competicion === desde) ? `Empieza ${fechaCorta(publicadasLiga.find((c) => c.competicion === desde)?.cierre ?? null)}. ` : ''}
                 {varias ? `${seleccion.length} jornadas seguidas: gana quien más puntos sume entre todas. Las que todavía no tienen horarios se completan solas cuando se publiquen.` : ''}
               </span>
+              </>
+              )}
               {varias && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
                   <span style={S.label}>Equipo</span>
@@ -411,9 +438,11 @@ function V2CrearInner() {
 
       <p style={{ fontSize: 11.5, color: S.MUTED_3, lineHeight: 1.5, margin: 0 }}>Drafters no cobra ni paga nada en los amistosos: solo calcula la clasificación y cuánto le toca a cada uno.</p>
 
+      {/* 16/10 (Iñi): crear la sala (y entrar en ella) cuesta 1 crédito Drafters (SQL 45). */}
+      <CosteCredito deporte={deporte} accion="Crear la sala (y entrar en ella)" />
       {error && <p style={S.errorText}>{error}</p>}
       <button type="button" onClick={crear} disabled={enviando} style={{ ...S.primaryButton, background: V2_COLOR, opacity: enviando ? 0.6 : 1 }}>
-        {enviando ? 'Creando...' : 'Crear sala'}
+        {enviando ? 'Creando...' : 'Crear sala · 1 crédito'}
       </button>
     </MarcoV2>
   );

@@ -10,6 +10,7 @@ import { BolaTenis, DEPORTE_NOMBRE, esDeporteV2, type DeporteV2 } from '@/compon
 import MesasLiga from '@/components/v2/MesasLiga';
 import ListaAmistosos from '@/components/v2/ListaAmistosos';
 import PorrasGolf from '@/components/v2/PorrasGolf';
+import MisEquiposV2 from '@/components/v2/MisEquiposV2';
 
 // ============================================================================
 // DRAFTERS V2 — PÁGINA DE CADA DEPORTE (15/10)
@@ -81,6 +82,8 @@ export default function V2Deporte() {
         </div>
       ) : (
         <>
+          {/* 16/10 (Iñi): "mis equipos" como en la V1, encima de Amistosos / Liga. */}
+          {perfil && <MisEquiposV2 deporte={deporte} miId={perfil.id} />}
           <div style={{ display: 'flex', background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 4, gap: 4 }}>
             {modos.map((m) => {
               const activo = m.id === modo;

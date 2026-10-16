@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import * as S from '@/lib/mockupStyles';
 import MarcoV2, { EtiquetaBeta, Panel, Titulo, V2_COLOR } from '@/components/v2/MarcoV2';
@@ -13,6 +13,8 @@ import EditorPartidos from '@/components/v2/EditorPartidos';
 import TiraPuestos from '@/components/v2/TiraPuestos';
 import EditorSala from '@/components/v2/EditorSala';
 import CajaContrasena from '@/components/v2/CajaContrasena';
+import CosteCredito from '@/components/v2/CosteCredito';
+import { avisarCambioCreditos } from '@/components/v2/creditos';
 import ClasificacionAmistoso from '@/components/v2/ClasificacionAmistoso';
 import EditorPremio, { PREMIO_VACIO } from '@/components/v2/EditorPremio';
 import { MODALIDAD_DESC, MODALIDAD_LABEL, cadaXSegundos, fechaCorta, mensajeError, premioValido,  type Amistoso, type AmistosoJornada, type Mensaje, type Premio, type Resumen } from '@/lib/v2';
@@ -37,7 +39,8 @@ export default function V2Sala() {
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [mensajes, setMensajes] = useState<Mensaje[]>([]);
   const [votos, setVotos] = useState<Voto[]>([]);
-  const [pestana, setPestana] = useState<'sala' | 'chat' | 'clasificacion'>('sala');
+  const tabInicial = useSearchParams().get('tab');
+  const [pestana, setPestana] = useState<'sala' | 'chat' | 'clasificacion'>(tabInicial === 'clasificacion' ? 'clasificacion' : tabInicial === 'chat' ? 'chat' : 'sala');
   const [vistosHasta, setVistosHasta] = useState(0);
   const [contrasena, setContrasena] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -47,6 +50,10 @@ export default function V2Sala() {
   const [editandoSala, setEditandoSala] = useState(false);
   const [codigoCopiado, setCodigoCopiado] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
+  const [abrirPropuesta, setAbrirPropuesta] = useState(false);
+  useEffect(() => {
+    if (pestana !== 'chat') setAbrirPropuesta(false);
+  }, [pestana]);
 
   const miId = perfil?.id ?? '';
   const soyParticipante = !!resumen?.participantes.some((p) => p.usuario_id === miId);
@@ -109,22 +116,26 @@ export default function V2Sala() {
     const { error: e } = await supabase.rpc('amistoso_unirse', { p_amistoso: id, p_contrasena: contrasena.trim() || null });
     if (e) {
       const m = mensajeError(e);
+      avisarCambioCreditos();
       return setError(/contraseña incorrecta/i.test(m) ? `❌ Esa contraseña no es la buena. Revísala (mayúsculas, espacios...) o pídesela otra vez a @${resumen?.nombres[amistoso?.creador_id ?? ''] ?? 'quien creó la sala'}.` : m);
     }
+    avisarCambioCreditos();
     await cargarSala();
   }
 
   async function salir() {
-    if (!window.confirm('¿Seguro que quieres salir de la sala?')) return;
+    if (!window.confirm('¿Seguro que quieres salir de la sala? Se te devuelve el crédito.')) return;
     const { error: e } = await supabase.rpc('amistoso_salir', { p_amistoso: id });
     if (e) return setError(mensajeError(e));
+    avisarCambioCreditos();
     router.replace(`/v2/${amistoso?.deporte ?? 'futbol'}?modo=amistosos`);
   }
 
   async function borrar() {
-    if (!window.confirm('¿Borrar la sala para todos? No se puede deshacer.')) return;
+    if (!window.confirm('¿Borrar la sala para todos? No se puede deshacer (a todos se les devuelve el crédito).')) return;
     const { error: e } = await supabase.rpc('amistoso_borrar', { p_amistoso: id });
     if (e) return setError(mensajeError(e));
+    avisarCambioCreditos();
     router.replace(`/v2/${amistoso?.deporte ?? 'futbol'}?modo=amistosos`);
   }
 
@@ -252,13 +263,15 @@ export default function V2Sala() {
                       creador={resumen.nombres[amistoso.creador_id] ?? null}
                     />
                   )}
+                  {/* 16/10 (Iñi): entrar en un amistoso cuesta 1 crédito Drafters (SQL 45). */}
+                  {amistoso.deporte !== 'tenis' && <CosteCredito deporte={amistoso.deporte} />}
                   <button
                     type="button"
                     onClick={unirse}
                     disabled={amistoso.privada && !contrasena.trim()}
                     style={{ ...S.primaryButton, background: V2_COLOR, fontSize: 16, minHeight: 52, opacity: amistoso.privada && !contrasena.trim() ? 0.5 : 1 }}
                   >
-                    {amistoso.privada ? (contrasena.trim() ? '🔓 Entrar con esta contraseña' : 'Escribe la contraseña para entrar') : 'Unirme a la sala'}
+                    {amistoso.privada ? (contrasena.trim() ? '🔓 Entrar con esta contraseña · 1 crédito' : 'Escribe la contraseña para entrar') : 'Unirme a la sala · 1 crédito'}
                   </button>
                 </>
               )}
@@ -281,7 +294,7 @@ export default function V2Sala() {
               </div>
               {error && <p style={S.errorText}>{error}</p>}
 
-              {pestana === 'chat' && <ChatAmistoso amistosoId={id} miId={miId} nombres={resumen.nombres} participantes={n} mensajes={mensajes} votos={votos} onCambio={cargarChat} />}
+              {pestana === 'chat' && <ChatAmistoso amistosoId={id} miId={miId} nombres={resumen.nombres} participantes={n} mensajes={mensajes} votos={votos} onCambio={cargarChat} abrirPropuesta={abrirPropuesta} />}
 
               {pestana === 'clasificacion' && <ClasificacionAmistoso amistoso={amistoso} jornadas={jornadas} resumen={resumen} miId={miId} />}
 
@@ -431,8 +444,15 @@ export default function V2Sala() {
                           <span style={{ fontSize: 13.5, color: S.TEXT, fontWeight: 600 }}>Solo por la gloria</span>
                         )}
                         {!amistoso.privada && (
-                          <button type="button" onClick={() => setPestana('chat')} style={{ ...S.secondaryLinkButton, borderColor: V2_COLOR, color: V2_COLOR }}>
-                            🤝 Proponer jugarnos algo (en el chat)
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAbrirPropuesta(true);
+                              setPestana('chat');
+                            }}
+                            style={{ ...S.secondaryLinkButton, borderColor: V2_COLOR, color: V2_COLOR }}
+                          >
+                            🤝 Proponer lo que nos jugamos
                           </button>
                         )}
                         <span style={{ fontSize: 11, color: S.MUTED_3 }}>Drafters no cobra ni paga nada en los amistosos: solo calcula cuánto le toca a cada uno.</span>
