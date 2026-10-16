@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 import * as S from '@/lib/mockupStyles';
 import { fechaCorta } from '@/lib/v2';
+import Cargando from '@/components/Cargando';
 
 // Porras clásicas de golf dentro de la página de golf de V2 (15/10). De
 // momento se juegan exactamente igual que en la V1 (mismo flujo).
@@ -49,7 +50,7 @@ export default function PorrasGolf() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <p style={{ fontSize: 13, color: S.MUTED, margin: 0, lineHeight: 1.5 }}>La porra de toda la vida: un jugador de cada grupo de color y a sumar.</p>
-      {porras === null && <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>Cargando porras...</p>}
+      {porras === null && <Cargando compacto />}
       {porras !== null && activas.length === 0 && <p style={{ fontSize: 13, color: S.MUTED_3, margin: 0 }}>No hay ninguna porra abierta ahora mismo.</p>}
       {activas.map(fila)}
       {finalizadas.length > 0 && (

@@ -15,6 +15,7 @@ import { claveEquipoLaLiga, escudoLaLiga, formatPuntos } from '@/lib/futbolLaLig
 import type { LineaDesglose } from '@/lib/futbolPuntuacion';
 import { reproducirSonidoAviso, leerPreferenciaSonido, guardarPreferenciaSonido } from '@/lib/sonidoAviso';
 import { TIPOS_AVISO_FUTBOL, TIPOS_AVISO_POR_DEFECTO, INFO_TIPO_AVISO, textoAvisoFutbol, type EventoFutbol, type TipoAvisoFutbol } from '@/lib/futbolAvisos';
+import Cargando from '@/components/Cargando';
 
 // ============================================================================
 // CLASIFICACIÓN EN DIRECTO DE UNA MESA DRAFTERS DE FÚTBOL (06/10)
@@ -502,7 +503,7 @@ export default function ClasificacionMesaFutbol({ sala, saldoLabel, initials }: 
         <div style={S.pageFrame}>
           {encabezado}
           <div style={{ padding: '40px 20px' }}>
-            <p style={{ fontSize: 14, color: S.MUTED }}>Cargando...</p>
+            <Cargando />
           </div>
         </div>
       </main>
@@ -807,7 +808,7 @@ export default function ClasificacionMesaFutbol({ sala, saldoLabel, initials }: 
                 {misIds.length === 0 ? (
                   <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>No tienes ningún equipo en esta mesa, así que no hay eventos que mostrar.</p>
                 ) : eventos === null ? (
-                  <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>Cargando...</p>
+                  <Cargando compacto />
                 ) : (
                   (() => {
                     const visibles = eventos.filter((e) => tiposActivos.has(e.tipo));

@@ -17,6 +17,7 @@ import EscudoEquipo from '@/components/EscudoEquipo';
 import CabeceraV2 from '@/components/v2/CabeceraV2';
 import { avisarCambioCreditos } from '@/components/v2/creditos';
 import type { DeporteV2 } from '@/components/v2/IconosV2';
+import Cargando from '@/components/Cargando';
 
 // ============================================================================
 // CREAR EQUIPO EN UNA SALA (isCrearEquipo + isConfirmarEquipo de Main.dc.html,
@@ -843,7 +844,7 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
         <div style={S.pageFrame}>
           <DraftersHeader />
           <div style={{ padding: '40px 20px' }}>
-            <p style={{ fontSize: 14, color: S.MUTED }}>Cargando...</p>
+            <Cargando />
           </div>
         </div>
       </main>

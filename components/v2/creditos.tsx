@@ -1,5 +1,6 @@
 'use client';
 
+import Cargando from '@/components/Cargando';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import * as S from '@/lib/mockupStyles';
@@ -74,7 +75,7 @@ export function RecargaVideo({ deporte, salaId, onCerrar, onRecargado }: { depor
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.94)', zIndex: 300, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 16, gap: 14 }}>
       <span style={{ position: 'absolute', top: 16, left: 16, fontSize: 11, fontWeight: 700, color: S.MUTED_2, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Publicidad</span>
-      {video === 'cargando' && <p style={{ color: S.MUTED }}>Buscando vídeo...</p>}
+      {video === 'cargando' && <Cargando texto="Buscando vídeo" />}
       {video === null && (
         <>
           <p style={{ color: S.MUTED, textAlign: 'center' }}>Ahora mismo no hay ningún vídeo disponible. Prueba un poco más tarde.</p>

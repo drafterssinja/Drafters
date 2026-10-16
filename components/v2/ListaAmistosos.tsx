@@ -8,6 +8,7 @@ import { V2_COLOR } from '@/components/v2/MarcoV2';
 import TiraPuestos from '@/components/v2/TiraPuestos';
 import { IconoCandado, type DeporteV2 } from '@/components/v2/IconosV2';
 import { MODALIDAD_LABEL, cadaXSegundos, fechaCorta, mensajeError, type Modalidad, type Premio } from '@/lib/v2';
+import Cargando from '@/components/Cargando';
 
 // Amistosos de un deporte: mis salas, las abiertas y crear.
 // 16/10 (Iñi): se quita la caja "¿Te han pasado un código?" para ganar espacio
@@ -40,6 +41,9 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
   const [busqueda, setBusqueda] = useState('');
   // 16/10 (Iñi): casilla (de primeras sin marcar) para ver también las salas completas.
   const [verCompletas, setVerCompletas] = useState(false);
+  // 16/10 (Iñi): las privadas, de momento, siempre arriba; con una casilla
+  // pequeñita encima de la lista para ocultarlas.
+  const [ocultarPrivadas, setOcultarPrivadas] = useState(false);
 
   const cargar = useCallback(async () => {
     const { data } = await supabase.rpc('amistosos_v2_lista');
@@ -77,11 +81,11 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
   const abiertaDeVerdad = (a: FilaLista) => !a.empezada && a.estado !== 'finalizado';
   const completa = (a: FilaLista) => a.estado === 'completo' || a.inscritos >= a.num_jugadores;
   const publicas = (lista ?? [])
-    .filter((l) => abiertaDeVerdad(l) && (verCompletas || !completa(l)) && coincide(l))
-    .sort((a, b) => Number(completa(a)) - Number(completa(b)) || b.inscritos / b.num_jugadores - a.inscritos / a.num_jugadores);
+    .filter((l) => abiertaDeVerdad(l) && (verCompletas || !completa(l)) && (!ocultarPrivadas || !l.privada) && coincide(l))
+    .sort((a, b) => Number(b.privada) - Number(a.privada) || Number(completa(a)) - Number(completa(b)) || b.inscritos / b.num_jugadores - a.inscritos / a.num_jugadores);
   const numCompletas = (lista ?? []).filter((l) => abiertaDeVerdad(l) && completa(l) && coincide(l)).length;
   const vista = pestana;
-  const mostradas = vista === 'mias' ? mias : publicas;
+  const mostradas = vista === 'mias' ? [...mias].sort((a, b) => Number(b.privada) - Number(a.privada)).filter((l) => !ocultarPrivadas || !l.privada) : publicas;
 
 
   return (
@@ -101,14 +105,20 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
         </button>
       </div>
 
-      {vista === 'publicas' && (
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: S.MUTED_2, cursor: 'pointer' }}>
-          <input type="checkbox" checked={verCompletas} onChange={(e) => setVerCompletas(e.target.checked)} style={{ width: 18, height: 18, accentColor: V2_COLOR }} />
-          Ver también las salas completas{numCompletas > 0 ? ` (${numCompletas})` : ''}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px', marginTop: -4 }}>
+        {vista === 'publicas' && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: S.MUTED_3, cursor: 'pointer' }}>
+            <input type="checkbox" checked={verCompletas} onChange={(e) => setVerCompletas(e.target.checked)} style={{ width: 14, height: 14, accentColor: V2_COLOR }} />
+            Ver también las completas{numCompletas > 0 ? ` (${numCompletas})` : ''}
+          </label>
+        )}
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: S.MUTED_3, cursor: 'pointer' }}>
+          <input type="checkbox" checked={ocultarPrivadas} onChange={(e) => setOcultarPrivadas(e.target.checked)} style={{ width: 14, height: 14, accentColor: V2_COLOR }} />
+          Ocultar mesas privadas
         </label>
-      )}
+      </div>
 
-      {lista === null && <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>Cargando...</p>}
+      {lista === null && <Cargando compacto />}
       {lista !== null && mostradas.length === 0 && (
         <p style={{ fontSize: 13, color: S.MUTED_3, margin: 0 }}>{q ? 'Ninguna sala coincide con la búsqueda.' : vista === 'mias' ? 'Todavía no estás en ningún amistoso. Crea uno o únete a uno abierto.' : numCompletas > 0 && !verCompletas ? `No hay salas con hueco ahora mismo. Marca «Ver también las salas completas» para ver las ${numCompletas} completas.` : 'No hay amistosos abiertos ahora mismo. ¡Crea el primero!'}</p>
       )}
@@ -119,10 +129,11 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
             <Link key={a.id} href={`/v2/sala/${a.id}`} style={{ ...S.card, flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                  {a.privada && <IconoCandado size={14} />}
-                  <span style={{ fontWeight: 700, fontSize: 14.5, color: S.TEXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.nombre}</span>
+                  {a.privada && <IconoCandado size={18} />}
+                  {/* 16/10 (Iñi): el nombre de la mesa bien grande. */}
+                  <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 22, lineHeight: 1.1, color: S.TEXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.nombre}</span>
                 </span>
-                <span style={{ flexShrink: 0, fontSize: 12, fontWeight: 700, color: llena ? '#F0B94D' : S.ACCENT }}>
+                <span style={{ flexShrink: 0, alignSelf: 'center', fontSize: 13, fontWeight: 800, color: llena ? '#F0B94D' : S.ACCENT }}>
                   {a.inscritos}/{a.num_jugadores}
                 </span>
               </div>

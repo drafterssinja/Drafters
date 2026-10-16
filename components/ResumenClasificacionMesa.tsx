@@ -18,7 +18,8 @@ import * as S from '@/lib/mockupStyles';
 
 type Fila = { equipoId: string; nombre: string; total: number };
 
-export default function ResumenClasificacionMesa({ salaId, competicion, deporte, miEquipoId, finalizada = false }: { salaId: string; competicion: string; deporte: string; miEquipoId: string; finalizada?: boolean }) {
+// 16/10: `tercera` = se habla de otro (perfil de un amigo): "Va 2º de 6".
+export default function ResumenClasificacionMesa({ salaId, competicion, deporte, miEquipoId, finalizada = false, tercera = false }: { salaId: string; competicion: string; deporte: string; miEquipoId: string; finalizada?: boolean; tercera?: boolean }) {
   const [filas, setFilas] = useState<Fila[] | null>(null);
   const [abierto, setAbierto] = useState(false);
 
@@ -86,7 +87,7 @@ export default function ResumenClasificacionMesa({ salaId, competicion, deporte,
         style={{ alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(61,220,132,0.08)', border: '1px solid rgba(61,220,132,0.3)', borderRadius: 8, padding: '4px 9px', cursor: 'pointer' }}
       >
         <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 13, color: S.ACCENT }}>
-          {finalizada ? 'Quedaste' : 'Vas'} {etiquetas[i].startsWith('T') ? etiquetas[i] : `${etiquetas[i]}º`} de {filas.length}
+          {finalizada ? (tercera ? 'Quedó' : 'Quedaste') : tercera ? 'Va' : 'Vas'} {etiquetas[i].startsWith('T') ? etiquetas[i] : `${etiquetas[i]}º`} de {filas.length}
         </span>
         <span style={{ fontSize: 11.5, color: S.MUTED_2, fontWeight: 600 }}>· {formatPuntos(filas[i].total)} pts</span>
         <span aria-hidden style={{ fontSize: 10, color: S.MUTED_2, transform: abierto ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}>▾</span>

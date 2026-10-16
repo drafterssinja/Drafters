@@ -1,5 +1,6 @@
 'use client';
 
+import Cargando from '@/components/Cargando';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import * as S from '@/lib/mockupStyles';
@@ -69,7 +70,7 @@ export default function EditorPartidos({ amistosoId, competicion, actuales, onGu
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, border: `1px solid ${S.BORDER}`, borderRadius: 12, padding: 12 }}>
       <span style={{ fontSize: 12, color: S.MUTED_2 }}>Solo se podrán elegir jugadores de los partidos marcados. Puedes cambiarlo hasta que alguien haga su equipo.</span>
-      {partidos === null && <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>Cargando partidos...</span>}
+      {partidos === null && <Cargando compacto />}
       {partidos !== null && partidos.length === 0 && <span style={{ fontSize: 12.5, color: S.MUTED_3 }}>Todavía no hay partidos cargados para esta jornada.</span>}
       {partidos !== null && partidos.length > 0 && (
         <>

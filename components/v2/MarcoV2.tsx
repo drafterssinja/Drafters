@@ -7,6 +7,7 @@ import AvisosV2 from '@/components/v2/AvisosV2';
 import type { DeporteV2 } from '@/components/v2/IconosV2';
 import type { Perfil } from '@/lib/supabaseClient';
 import * as S from '@/lib/mockupStyles';
+import Cargando from '@/components/Cargando';
 
 export const V2_COLOR = '#A78BFA';
 
@@ -17,7 +18,7 @@ export default function MarcoV2({ perfil, estado, volverA, deporte = 'futbol', c
       <div style={S.pageFrame}>
         <CabeceraV2 perfil={estado === 'ok' ? perfil : null} deporte={deporte} volverA={volverA} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18, padding: '20px 20px 64px' }}>
-          {estado === 'cargando' && <p style={{ fontSize: 14, color: S.MUTED }}>Cargando...</p>}
+          {estado === 'cargando' && <Cargando />}
           {estado === 'sin_acceso' && (
             <div style={{ ...S.card, flexDirection: 'column', alignItems: 'flex-start' }}>
               <span style={{ fontWeight: 700, color: S.TEXT }}>Drafters V2 está en pruebas</span>

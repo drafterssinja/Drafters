@@ -14,6 +14,7 @@ import { RecargaVideo, avisarCambioCreditos } from '@/components/v2/creditos';
 import { Panel } from '@/components/v2/MarcoV2';
 import PanelLiga, { type Info as InfoLiga } from '@/components/v2/PanelLiga';
 import { fechaCorta, mensajeError } from '@/lib/v2';
+import Cargando from '@/components/Cargando';
 
 // ============================================================================
 // MESAS DE LIGA DE UN DEPORTE (V2, 15/10)
@@ -176,7 +177,7 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
   }
 
 
-  if (temporada === undefined) return <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>Cargando...</p>;
+  if (temporada === undefined) return <Cargando compacto />;
   if (temporada === null)
     return (
       <div style={{ background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 16, padding: 18, display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -209,7 +210,7 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
 
       {/* 16/10: "mis mesas" se ve ahora arriba, en el recuadro de mis equipos (MisEquiposV2). */}
 
-      {salas === null && <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>Cargando mesas...</p>}
+      {salas === null && <Cargando compacto />}
       {salas !== null && competiciones.length === 0 && <p style={{ fontSize: 13, color: S.MUTED_3, margin: 0 }}>Ahora mismo no hay mesas abiertas. En cuanto se abra la próxima {deporte === 'futbol' ? 'jornada' : 'semana de torneos'}, aparecerán aquí.</p>}
 
       {competiciones.length > 0 && (

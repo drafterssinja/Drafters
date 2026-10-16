@@ -1,5 +1,7 @@
 'use client';
 
+import { useAmigosIds } from '@/lib/amigos';
+import MarcaAmigo from '@/components/MarcaAmigo';
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { supabase } from '@/lib/supabaseClient';
@@ -60,6 +62,7 @@ function reglas(info: Info) {
 
 
 export default function PanelLiga({ info, deporte, onApuntado, conLista = true }: { info: Info; deporte: DeporteV2; onApuntado: () => void; conLista?: boolean }) {
+  const amigos = useAmigosIds();
   const [apuntando, setApuntando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [recienApuntado, setRecienApuntado] = useState(false);
@@ -194,6 +197,8 @@ export default function PanelLiga({ info, deporte, onApuntado, conLista = true }
                     <span style={{ flex: 1, fontSize: 13.5, fontWeight: p.soy_yo ? 800 : 600, color: S.TEXT }}>
                       @{p.nombre}
                       {p.soy_yo ? ' (tú)' : ''}
+                      {/* 16/10 (Iñi): tus amigos llevan un identificativo en la liga. */}
+                      {amigos.has(p.usuario_id) && <MarcaAmigo compacta />}
                     </span>
                     {!r.unica && (
                       <span style={{ fontSize: 11, fontWeight: 700, color: COLOR_NIVEL[p.nivel] ?? S.MUTED }}>
