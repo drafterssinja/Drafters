@@ -6,6 +6,8 @@ import { supabase } from '@/lib/supabaseClient';
 import * as S from '@/lib/mockupStyles';
 import { formatPuntos } from '@/lib/futbolLaLiga';
 import { V2_COLOR } from '@/components/v2/MarcoV2';
+import Cargando from '@/components/Cargando';
+import ClasificacionMesaFutbol, { type EquipoExterno } from '@/components/ClasificacionMesaFutbol';
 import { cadaXSegundos, repartirPremio, textoBote, type Amistoso, type AmistosoJornada, type Resumen } from '@/lib/v2';
 
 type Equipo = { competicion: string; usuario_id: string; jugadores: string[]; alineacion: string | null };
@@ -16,11 +18,88 @@ const ABREV_POS: Record<string, string> = { portero: 'POR', defensa: 'DEF', cent
 
 // Clasificación de la sala (suma de todas sus jornadas) con lo que le toca a
 // cada uno según lo que se juega. Empates con T.
-export default function ClasificacionAmistoso({ amistoso, jornadas, resumen, miId }: { amistoso: Amistoso; jornadas: AmistosoJornada[]; resumen: Resumen; miId: string }) {
+type Props = { amistoso: Amistoso; jornadas: AmistosoJornada[]; resumen: Resumen; miId: string };
+
+// 16/10 (Iñi): en fútbol, la clasificación de un amistoso es EXACTAMENTE la de
+// las mesas de siempre (ClasificacionMesaFutbol): equipos a la izquierda,
+// jugadores con sus colores a la derecha, desglose de puntos y marcador al
+// pulsar, eventos y premios. Con varias jornadas, una pestaña por jornada y
+// "Total" con la suma. Golf sigue con la lista.
+export default function ClasificacionAmistoso(props: Props) {
+  if (props.amistoso.deporte === 'futbol') return <ClasificacionAmistosoFutbol {...props} />;
+  return <ListaClasificacionAmistoso {...props} />;
+}
+
+function ClasificacionAmistosoFutbol(props: Props) {
+  const { amistoso, jornadas, resumen, miId } = props;
+  const [equipos, setEquipos] = useState<Equipo[] | null>(null);
+  const empezadas = resumen.jornadas.filter((j) => j.empezada).map((j) => j.competicion);
+  const porDefecto = empezadas[empezadas.length - 1] ?? jornadas[0]?.competicion ?? 'total';
+  const [vista, setVista] = useState<string>(porDefecto);
+
+  useEffect(() => {
+    let activo = true;
+    async function cargar() {
+      const { data } = await supabase.rpc('amistoso_equipos_clasificacion', { p_amistoso: amistoso.id });
+      if (activo) setEquipos((data as Equipo[]) ?? []);
+    }
+    void cargar();
+    const parar = cadaXSegundos(cargar, 60);
+    return () => {
+      activo = false;
+      parar();
+    };
+  }, [amistoso.id]);
+
+  if (empezadas.length === 0 && amistoso.modalidad !== 'draft') {
+    return <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>La clasificación aparece cuando empiece la primera jornada. Hasta entonces nadie ve el equipo de los demás.</p>;
+  }
+
+  const unido = new Map(resumen.participantes.map((p) => [p.usuario_id, p.unido_en]));
+  const deJornada = (comp: string): EquipoExterno[] =>
+    (equipos ?? [])
+      .filter((e) => e.competicion === comp)
+      .map((e) => ({ equipoId: e.usuario_id, nombre: `@${resumen.nombres[e.usuario_id] ?? 'Alguien'}`, jugadores: e.jugadores, createdAt: unido.get(e.usuario_id) ?? '' }));
+  const terminada = (comp: string) => resumen.jornadas.find((j) => j.competicion === comp)?.terminada ?? false;
+  const premios = <ListaClasificacionAmistoso {...props} vistaInicial="total" sinPestanas />;
+  const equiposVista = vista === 'total' ? [] : deJornada(vista);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {jornadas.length > 1 && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {jornadas.map((j) => (
+            <button key={j.competicion} type="button" style={S.pill(vista === j.competicion)} onClick={() => setVista(j.competicion)}>
+              {j.competicion.replace(/^.* - /, '')}
+            </button>
+          ))}
+          <button type="button" style={S.pill(vista === 'total')} onClick={() => setVista('total')}>
+            Total
+          </button>
+        </div>
+      )}
+      {vista === 'total' ? (
+        <ListaClasificacionAmistoso {...props} vistaInicial="total" sinPestanas />
+      ) : equipos === null ? (
+        <Cargando compacto />
+      ) : (
+        <ClasificacionMesaFutbol
+          key={vista}
+          embebido
+          sala={{ id: amistoso.id, nombre: amistoso.nombre, competicion: vista, tipo: 'amistoso', estado: terminada(vista) ? 'finalizada' : 'abierta', buy_in: 0, aforo: amistoso.num_jugadores, fecha_limite_inscripcion: null }}
+          externo={{ equipos: equiposVista, misJugadores: equiposVista.find((e) => e.equipoId === miId)?.jugadores ?? [] }}
+          premios={premios}
+        />
+      )}
+    </div>
+  );
+}
+
+function ListaClasificacionAmistoso({ amistoso, jornadas, resumen, miId, vistaInicial = 'total', sinPestanas = false }: Props & { vistaInicial?: string; sinPestanas?: boolean }) {
   const [equipos, setEquipos] = useState<Equipo[]>([]);
   const [jugs, setJugs] = useState<Map<string, Jug>>(new Map());
   const [puntos, setPuntos] = useState<Map<string, number>>(new Map()); // `${competicion}|${jugador}`
-  const [vista, setVista] = useState<string>('total');
+  const [vista, setVista] = useState<string>(vistaInicial);
   const [abierto, setAbierto] = useState<string | null>(null);
 
   const empezadas = resumen.jornadas.filter((j) => j.empezada).map((j) => j.competicion);
@@ -92,7 +171,7 @@ export default function ClasificacionAmistoso({ amistoso, jornadas, resumen, miI
         <span style={{ fontWeight: 800, fontSize: 16, color: S.TEXT, fontFamily: "'Barlow Condensed', sans-serif" }}>{todasTerminadas ? 'Clasificación final' : 'Clasificación en directo'}</span>
         {hayAlgoEnJuego && <span style={{ fontSize: 10.5, fontWeight: 800, color: '#FF5C5C' }}>● EN DIRECTO</span>}
       </div>
-      {jornadas.length > 1 && (
+      {jornadas.length > 1 && !sinPestanas && (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           <button type="button" style={S.pill(vista === 'total')} onClick={() => setVista('total')}>
             Total

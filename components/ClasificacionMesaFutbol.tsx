@@ -1,7 +1,7 @@
 'use client';
 
 import { todasLasFilas } from '@/lib/paginar';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
@@ -16,6 +16,9 @@ import type { LineaDesglose } from '@/lib/futbolPuntuacion';
 import { reproducirSonidoAviso, leerPreferenciaSonido, guardarPreferenciaSonido } from '@/lib/sonidoAviso';
 import { TIPOS_AVISO_FUTBOL, TIPOS_AVISO_POR_DEFECTO, INFO_TIPO_AVISO, textoAvisoFutbol, type EventoFutbol, type TipoAvisoFutbol } from '@/lib/futbolAvisos';
 import Cargando from '@/components/Cargando';
+import { PremiosDraftis } from '@/components/v2/DraftisMesa';
+import { IconoGema } from '@/components/v2/IconosV2';
+import { textoDraftis } from '@/lib/draftisMesa';
 
 // ============================================================================
 // CLASIFICACIÓN EN DIRECTO DE UNA MESA DRAFTERS DE FÚTBOL (06/10)
@@ -47,6 +50,8 @@ type SalaMin = {
   buy_in: number;
   aforo: number | null;
   fecha_limite_inscripcion: string | null;
+  // 2 = mesa de la liga V2: los premios son draftis (16/10).
+  version?: number | null;
 };
 
 type JugadorF = { id: string; nombre: string; equipo_real: string | null; posicion: string | null };
@@ -296,7 +301,27 @@ function vistaPillStyle(active: boolean) {
   } as const;
 }
 
-export default function ClasificacionMesaFutbol({ sala, saldoLabel, initials }: { sala: SalaMin; saldoLabel: string; initials: string }) {
+// 16/10 (Iñi): los amistosos de V2 usan EXACTAMENTE esta misma pantalla
+// (clasificación a la izquierda, jugadores con colores a la derecha, desglose
+// y marcador al pulsar). Con `externo` los equipos vienen ya dados (no de una
+// mesa), con `embebido` se pinta sin cabecera ni marco, y `premios` sustituye
+// la pestaña de premios por la del amistoso.
+export type EquipoExterno = { equipoId: string; nombre: string; jugadores: string[]; createdAt: string };
+export default function ClasificacionMesaFutbol({
+  sala,
+  saldoLabel = '',
+  initials = '',
+  embebido = false,
+  externo,
+  premios,
+}: {
+  sala: SalaMin;
+  saldoLabel?: string;
+  initials?: string;
+  embebido?: boolean;
+  externo?: { equipos: EquipoExterno[]; misJugadores: string[] };
+  premios?: ReactNode;
+}) {
   const [cargando, setCargando] = useState(true);
   const [jugadores, setJugadores] = useState<JugadorF[]>([]);
   const [equipos, setEquipos] = useState<EquipoF[]>([]);
@@ -325,6 +350,22 @@ export default function ClasificacionMesaFutbol({ sala, saldoLabel, initials }: 
   const eventosVistosRef = useRef<Set<string> | null>(null);
   const [equipoSeleccionadoId, setEquipoSeleccionadoId] = useState<string | null>(null);
   const [jugadorFocoId, setJugadorFocoId] = useState<string | null>(null);
+  const claveExterno = externo ? externo.equipos.map((e) => `${e.equipoId}:${e.jugadores.join('.')}`).join('|') + '#' + externo.misJugadores.join('.') : '';
+  // Marco: página completa (mesas) o solo el contenido (dentro de un amistoso).
+  const marco = (contenido: ReactNode) =>
+    embebido ? (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <style>{`@keyframes drafters-parpadeo { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } } .drafters-parpadeo { animation: drafters-parpadeo 1.8s ease-in-out infinite; }`}</style>
+        {contenido}
+      </div>
+    ) : (
+      <main style={S.mainReset}>
+        <div style={S.pageFrame}>
+          {encabezado}
+          {contenido}
+        </div>
+      </main>
+    );
 
   // Carga inicial: plantilla de jugadores y equipos de la mesa.
   useEffect(() => {
@@ -334,7 +375,9 @@ export default function ClasificacionMesaFutbol({ sala, saldoLabel, initials }: 
         // 13/10: paginado (más de 1.000 jugadores en Champions: faltaban jugadores en los equipos).
         todasLasFilas<JugadorF>((d, h) => supabase.from('jugadores').select('id,nombre,equipo_real,posicion').eq('deporte', 'futbol').eq('competicion', sala.competicion).order('id').range(d, h)),
         // Solo devuelve filas cuando la inscripción ya se ha cerrado.
-        supabase.rpc('equipos_sala_clasificacion', { p_sala_id: sala.id }),
+        externo
+          ? Promise.resolve({ data: externo.equipos.map((e) => ({ equipo_id: e.equipoId, nombre: e.nombre, jugadores: e.jugadores, created_at: e.createdAt })) })
+          : supabase.rpc('equipos_sala_clasificacion', { p_sala_id: sala.id }),
         supabase.from('futbol_escudos').select('clave,logo'),
       ]);
       if (!activo) return;
@@ -345,7 +388,7 @@ export default function ClasificacionMesaFutbol({ sala, saldoLabel, initials }: 
       if (session && activo) {
         setUsuarioId(session.user.id);
         const [{ data: misEquipos }, { data: pref }] = await Promise.all([
-          supabase.from('equipos').select('jugadores').eq('sala_id', sala.id).eq('usuario_id', session.user.id),
+          externo ? Promise.resolve({ data: [{ jugadores: externo.misJugadores }] }) : supabase.from('equipos').select('jugadores').eq('sala_id', sala.id).eq('usuario_id', session.user.id),
           supabase.from('preferencias_avisos_futbol').select('tipos').eq('usuario_id', session.user.id).maybeSingle(),
         ]);
         if (!activo) return;
@@ -361,14 +404,15 @@ export default function ClasificacionMesaFutbol({ sala, saldoLabel, initials }: 
         .map((f) => ({ equipoId: f.equipo_id, nombre: f.nombre, jugadores: f.jugadores ?? [], createdAt: f.created_at }))
         .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
       setEquipos(lista);
-      if (lista.length > 0) setEquipoSeleccionadoId(lista[0].equipoId);
+      setEquipoSeleccionadoId((prev) => (prev && lista.some((e) => e.equipoId === prev) ? prev : lista[0]?.equipoId ?? null));
       setCargando(false);
     }
     cargar();
     return () => {
       activo = false;
     };
-  }, [sala.id, sala.competicion]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sala.id, sala.competicion, claveExterno]);
 
   // Puntos y marcadores: se refrescan solos cada 20 segundos.
   useEffect(() => {
@@ -498,37 +542,29 @@ export default function ClasificacionMesaFutbol({ sala, saldoLabel, initials }: 
   );
 
   if (cargando) {
-    return (
-      <main style={S.mainReset}>
-        <div style={S.pageFrame}>
-          {encabezado}
-          <div style={{ padding: '40px 20px' }}>
-            <Cargando />
-          </div>
-        </div>
-      </main>
+    return marco(
+      <div style={{ padding: embebido ? '20px 0' : '40px 20px' }}>
+        <Cargando />
+      </div>
     );
   }
 
   if (equipos.length === 0) {
-    return (
-      <main style={S.mainReset}>
-        <div style={S.pageFrame}>
-          {encabezado}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '48px 24px', alignItems: 'center', textAlign: 'center' }}>
+    return marco(
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: embebido ? '16px 0' : '48px 24px', alignItems: 'center', textAlign: 'center' }}>
             <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT, fontFamily: "'Barlow Condensed', sans-serif" }}>Clasificación en directo</h1>
             <p style={{ fontSize: 14, color: S.MUTED_2, lineHeight: 1.6 }}>
               Esta mesa todavía no ha empezado, o todavía no hay equipos inscritos. En cuanto se cierre la inscripción podrás ver aquí la clasificación de todos los participantes.
             </p>
-            <Link href={`/salas/${sala.id}`} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '12px 24px', textDecoration: 'none', display: 'inline-flex' }}>
-              Volver a la mesa
-            </Link>
+            {!embebido && (
+              <Link href={`/salas/${sala.id}`} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '12px 24px', textDecoration: 'none', display: 'inline-flex' }}>
+                Volver a la mesa
+              </Link>
+            )}
             <div style={{ width: '100%', maxWidth: 420 }}>
               <AnuncioVideoInline ubicacion="clasificacion" />
             </div>
           </div>
-        </div>
-      </main>
     );
   }
 
@@ -537,11 +573,8 @@ export default function ClasificacionMesaFutbol({ sala, saldoLabel, initials }: 
   const equipoSeleccionado = equiposPorPuntuacion.find((e) => e.equipoId === equipoSeleccionadoId) ?? equiposPorPuntuacion[0];
   const jugadoresDelEquipo = equipoSeleccionado.jugadores.map((id) => jugadoresPorId.get(id)).filter((j): j is JugadorF => !!j);
 
-  return (
-    <main style={S.mainReset}>
-      <div style={S.pageFrame}>
-        {encabezado}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '24px 20px 40px' }}>
+  return marco(
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: embebido ? 0 : '24px 20px 40px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#3DDC84' }}>{sala.nombre}</span>
             <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT }}>{mesaFinalizada ? 'Clasificación final' : 'Clasificación en directo'}</h1>
@@ -828,7 +861,44 @@ export default function ClasificacionMesaFutbol({ sala, saldoLabel, initials }: 
             </div>
           )}
 
-          {vista === 'premios' &&
+          {vista === 'premios' && premios}
+
+          {/* Mesas de la liga V2 (16/10): premios en draftis. */}
+          {vista === 'premios' && !premios && sala.version === 2 &&
+            (() => {
+              if (!mesaFinalizada) return <PremiosDraftis tipo={sala.tipo} aforo={sala.aforo} />;
+              const tramos = calcularReparto(sala.tipo as TipoSala, sala.aforo, equipos.length);
+              const ordenados = equipos
+                .map((e) => ({ e, total: Math.round(totalEquipo(e.jugadores) * 100) / 100 }))
+                .sort((a, b) => b.total - a.total);
+              const reparto = repartirPremiosConEmpates(
+                ordenados.map((o) => ({ equipoId: o.e.equipoId, valor: o.total })),
+                tramos,
+                100 * equipos.length,
+                'desc'
+              );
+              const importe = new Map(reparto.map((r) => [r.equipoId, r.importe]));
+              const etiquetas = etiquetasPosicion(ordenados, (o) => o.total);
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {ordenados.map((o, i) => {
+                    const neto = (importe.get(o.e.equipoId) ?? 0) > 0 ? Math.round(importe.get(o.e.equipoId) ?? 0) - 100 : -100;
+                    return (
+                      <div key={o.e.equipoId} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: S.PANEL, border: `1px solid ${neto > 0 ? 'rgba(61,220,132,0.35)' : 'rgba(255,92,92,0.3)'}`, borderRadius: 10 }}>
+                        <span style={{ flexShrink: 0, width: 32, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, color: '#F0B94D' }}>{etiquetas[i]}</span>
+                        <span style={{ flex: 1, minWidth: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 13, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.e.nombre}</span>
+                        <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14, color: S.MUTED_2 }}>{formatPuntos(o.total)} pts</span>
+                        <span style={{ flexShrink: 0, width: 74, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 4, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 16, color: neto > 0 ? '#3DDC84' : '#FF8A8A' }}>
+                          {textoDraftis(neto)} <IconoGema size={13} />
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+
+          {vista === 'premios' && !premios && sala.version !== 2 &&
             (() => {
               const bote = parteParaPremios(sala.buy_in) * (sala.aforo ?? equipos.length);
               const tramos = calcularReparto(sala.tipo as TipoSala, sala.aforo, equipos.length);
@@ -874,14 +944,14 @@ export default function ClasificacionMesaFutbol({ sala, saldoLabel, initials }: 
               );
             })()}
 
-          <Link href={`/salas/${sala.id}`} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '12px 24px', textDecoration: 'none', display: 'inline-flex', alignSelf: 'center' }}>
-            Volver a la mesa
-          </Link>
+          {!embebido && (
+            <Link href={`/salas/${sala.id}`} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '12px 24px', textDecoration: 'none', display: 'inline-flex', alignSelf: 'center' }}>
+              Volver a la mesa
+            </Link>
+          )}
           <div style={{ width: '100%', maxWidth: 420, alignSelf: 'center' }}>
             <AnuncioVideoInline ubicacion="clasificacion" />
           </div>
         </div>
-      </div>
-    </main>
   );
 }
