@@ -97,7 +97,8 @@ function normalizarBusqueda(texto: string): string {
 // guardados (v2_equipos_guardados) y los hechos en mesas de la V1.
 export type AmistosoEquipo = { id: string; competicion: string };
 
-type AmistosoInfo = { modalidad: 'presupuesto' | 'libre' | 'draft'; equipo_fijo: boolean; equipos_permitidos: string[] | null; tieneEquipo: boolean };
+// soyParticipante = false → todavía no estás en la sala: entras al guardar el equipo (SQL 47).
+type AmistosoInfo = { modalidad: 'presupuesto' | 'libre' | 'draft'; equipo_fijo: boolean; equipos_permitidos: string[] | null; tieneEquipo: boolean; soyParticipante: boolean; deporte: string };
 
 export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } = {}) {
   const router = useRouter();
@@ -327,11 +328,12 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
     async function cargarAmistoso(uid: string, am: AmistosoEquipo) {
       type FilaAm = { id: string; nombre: string; deporte: string; modalidad: AmistosoInfo['modalidad']; num_jugadores: number; estado: string; equipo_fijo: boolean | null };
       type FilaJo = { competicion: string; orden: number; equipos_permitidos: string[] | null; cierre: string | null };
-      const [{ data: perfilData }, { data: aData }, { data: jData }, { data: mioData }] = await Promise.all([
+      const [{ data: perfilData }, { data: aData }, { data: jData }, { data: mioData }, { data: dentroData }] = await Promise.all([
         supabase.from('perfiles').select('*').eq('id', uid).single(),
         supabase.from('amistosos').select('id,nombre,deporte,modalidad,num_jugadores,estado,equipo_fijo').eq('id', am.id).maybeSingle(),
         supabase.from('amistoso_jornadas').select('competicion,orden,equipos_permitidos,cierre').eq('amistoso_id', am.id).eq('competicion', am.competicion).maybeSingle(),
         supabase.from('amistoso_equipos').select('jugadores,alineacion').eq('amistoso_id', am.id).eq('competicion', am.competicion).eq('usuario_id', uid).maybeSingle(),
+        supabase.from('amistoso_participantes').select('usuario_id').eq('amistoso_id', am.id).eq('usuario_id', uid).maybeSingle(),
       ]);
       if (!activo) return;
       if (perfilData) setPerfil(perfilData as Perfil);
@@ -343,7 +345,7 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
         return;
       }
       // Draft, jornada que no toca (equipo fijo), sin publicar o ya empezada: a la sala.
-      if (a.modalidad === 'draft' || (a.equipo_fijo && jo.orden !== 1) || !jo.cierre || new Date(jo.cierre).getTime() <= Date.now()) {
+      if (a.modalidad === 'draft' || (a.equipo_fijo && jo.orden !== 1) || !jo.cierre || new Date(jo.cierre).getTime() <= Date.now() || (!dentroData && a.estado !== 'abierto')) {
         router.replace(`/v2/sala/${am.id}`);
         return;
       }
@@ -406,7 +408,7 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
         if (mio.alineacion) setAlineacion(mio.alineacion);
         setStep('draft');
       }
-      setInfoAmistoso({ modalidad: a.modalidad, equipo_fijo: !!a.equipo_fijo, equipos_permitidos: jo.equipos_permitidos, tieneEquipo: !!mio });
+      setInfoAmistoso({ modalidad: a.modalidad, equipo_fijo: !!a.equipo_fijo, equipos_permitidos: jo.equipos_permitidos, tieneEquipo: !!mio, soyParticipante: !!dentroData, deporte: a.deporte });
       setEquiposHechos(hechos);
       setSala(salaRow);
       setJugadores(disponibles);
@@ -787,11 +789,25 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
     setEnviando(true);
     setErrorEnvio(null);
     if (esAmistoso && sala) {
-      const { error: errAm } = await supabase.rpc('amistoso_guardar_equipo', { p_amistoso: salaId, p_competicion: sala.competicion, p_jugadores: selected, p_alineacion: isFutbol ? alineacion : null });
+      const comun = { p_amistoso: salaId, p_competicion: sala.competicion, p_jugadores: selected, p_alineacion: isFutbol ? alineacion : null };
+      let clave: string | null = null;
+      try {
+        clave = sessionStorage.getItem(`v2_clave_${salaId}`);
+      } catch {}
+      // 16/10 (Iñi): si todavía no estás en la sala, entras al guardar el equipo.
+      const { error: errAm } = infoAmistoso?.soyParticipante
+        ? await supabase.rpc('amistoso_guardar_equipo', comun)
+        : await supabase.rpc('amistoso_unirse_con_equipo', { ...comun, p_contrasena: clave });
       if (errAm) {
         setErrorEnvio(traducirError(errAm.message));
         setEnviando(false);
         return;
+      }
+      if (!infoAmistoso?.soyParticipante) {
+        try {
+          sessionStorage.removeItem(`v2_clave_${salaId}`);
+        } catch {}
+        avisarCambioCreditos();
       }
       router.replace(`/v2/sala/${salaId}`);
       return;
@@ -1279,13 +1295,13 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
             </button>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#F0B94D' }}>{sala.competicion}</span>
-              <h1 style={{ fontSize: 24, fontWeight: 800, color: S.TEXT }}>{esAmistoso ? 'Confirma tu equipo' : modoEdicion ? 'Confirma los cambios' : 'Confirma tu inscripción'}</h1>
+              <h1 style={{ fontSize: 24, fontWeight: 800, color: S.TEXT }}>{esAmistoso ? (infoAmistoso?.soyParticipante ? 'Confirma tu equipo' : 'Confirma tu equipo y entra') : modoEdicion ? 'Confirma los cambios' : 'Confirma tu inscripción'}</h1>
               <p style={{ fontSize: 13, color: S.MUTED_2 }}>
                 {/* Sin mención al buy-in al editar (27/09, décima vuelta) — ya
                     se pagó al inscribirse la primera vez; modificar el
                     equipo nunca vuelve a cobrar (ver editar_equipo_sala() en
                     drafters-schema.sql). */}
-                {esAmistoso ? `${sala.nombre} · Amistoso ${libre ? 'libre' : 'con presupuesto'}` : modoEdicion ? sala.nombre : v2 ? `${sala.nombre.replace(/\s*·\s*\d+\s*€\s*$/, '')} · Entrada: 1 crédito` : `${sala.nombre} · Buy-in ${formatEuros(sala.buy_in)}`}
+                {esAmistoso ? `${sala.nombre} · Amistoso ${libre ? 'libre' : 'con presupuesto'}${infoAmistoso?.soyParticipante ? '' : ' · al guardar entras en la sala y se usa 1 crédito'}` : modoEdicion ? sala.nombre : v2 ? `${sala.nombre.replace(/\s*·\s*\d+\s*€\s*$/, '')} · Entrada: 1 crédito` : `${sala.nombre} · Buy-in ${formatEuros(sala.buy_in)}`}
               </p>
             </div>
 
@@ -1356,7 +1372,7 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
               >
                 {errorEnvio && <p style={{ ...S.errorText, margin: 0 }}>{errorEnvio}</p>}
                 <button type="button" disabled={enviando} onClick={confirmarInscripcion} style={{ ...submitButtonStyle(true), opacity: enviando ? 0.7 : 1 }}>
-                  {enviando ? (modoEdicion || esAmistoso ? 'Guardando...' : 'Inscribiendo...') : esAmistoso ? 'Guardar mi equipo' : modoEdicion ? 'Guardar cambios' : 'Confirmar inscripción'}
+                  {enviando ? (modoEdicion || esAmistoso ? 'Guardando...' : 'Inscribiendo...') : esAmistoso ? (infoAmistoso?.soyParticipante ? 'Guardar mi equipo' : 'Unirme a la sala · 1 crédito') : modoEdicion ? 'Guardar cambios' : 'Confirmar inscripción'}
                 </button>
               </div>
             ) : (
