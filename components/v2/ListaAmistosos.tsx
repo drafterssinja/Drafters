@@ -25,6 +25,8 @@ type FilaLista = {
   competiciones: string[];
   cierre: string | null;
   premio: Premio | null;
+  // 16/10 (SQL 43): la sala ya ha empezado (primera jornada cerrada o draft en marcha).
+  empezada?: boolean;
 };
 
 export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
@@ -35,6 +37,8 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
   const [codigo, setCodigo] = useState('');
   // 16/10 (Iñi): se ven también las privadas (con candado) y hay un buscador arriba.
   const [busqueda, setBusqueda] = useState('');
+  // 16/10 (Iñi): casilla (de primeras sin marcar) para ver también las salas completas.
+  const [verCompletas, setVerCompletas] = useState(false);
   const [errorCodigo, setErrorCodigo] = useState<string | null>(null);
 
   const cargar = useCallback(async () => {
@@ -60,7 +64,14 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
       .toLowerCase()
       .includes(q);
   const mias = (lista ?? []).filter((l) => l.soy_participante && coincide(l));
-  const publicas = (lista ?? []).filter((l) => !l.soy_participante && coincide(l)).sort((a, b) => b.inscritos / b.num_jugadores - a.inscritos / a.num_jugadores);
+  // 16/10 (Iñi): en "Abiertos" salen TODAS las salas que no han empezado, también
+  // aquellas en las que ya estás; las completas solo con la casilla marcada.
+  const abiertaDeVerdad = (a: FilaLista) => !a.empezada && a.estado !== 'finalizado';
+  const completa = (a: FilaLista) => a.estado === 'completo' || a.inscritos >= a.num_jugadores;
+  const publicas = (lista ?? [])
+    .filter((l) => abiertaDeVerdad(l) && (verCompletas || !completa(l)) && coincide(l))
+    .sort((a, b) => Number(completa(a)) - Number(completa(b)) || b.inscritos / b.num_jugadores - a.inscritos / a.num_jugadores);
+  const numCompletas = (lista ?? []).filter((l) => abiertaDeVerdad(l) && completa(l) && coincide(l)).length;
   const vista = pestana;
   const mostradas = vista === 'mias' ? mias : publicas;
 
@@ -101,9 +112,16 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
         </button>
       </div>
 
+      {vista === 'publicas' && (
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: S.MUTED_2, cursor: 'pointer' }}>
+          <input type="checkbox" checked={verCompletas} onChange={(e) => setVerCompletas(e.target.checked)} style={{ width: 18, height: 18, accentColor: V2_COLOR }} />
+          Ver también las salas completas{numCompletas > 0 ? ` (${numCompletas})` : ''}
+        </label>
+      )}
+
       {lista === null && <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>Cargando...</p>}
       {lista !== null && mostradas.length === 0 && (
-        <p style={{ fontSize: 13, color: S.MUTED_3, margin: 0 }}>{q ? 'Ninguna sala coincide con la búsqueda.' : vista === 'mias' ? 'Todavía no estás en ningún amistoso. Crea uno o únete a uno abierto.' : 'No hay amistosos abiertos ahora mismo. ¡Crea el primero!'}</p>
+        <p style={{ fontSize: 13, color: S.MUTED_3, margin: 0 }}>{q ? 'Ninguna sala coincide con la búsqueda.' : vista === 'mias' ? 'Todavía no estás en ningún amistoso. Crea uno o únete a uno abierto.' : numCompletas > 0 && !verCompletas ? `No hay salas con hueco ahora mismo. Marca «Ver también las salas completas» para ver las ${numCompletas} completas.` : 'No hay amistosos abiertos ahora mismo. ¡Crea el primero!'}</p>
       )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {mostradas.map((a) => {
@@ -126,6 +144,8 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
                 <span style={{ color: V2_COLOR, fontWeight: 700 }}>{MODALIDAD_LABEL[a.modalidad]}</span>
                 {/* 15/10 (Iñi): el creador solo se enseña en las privadas (con el candado). */}
                 {a.privada && <span>· creada por @{a.creador}</span>}
+                {vista === 'publicas' && a.soy_participante && <span style={{ color: S.ACCENT, fontWeight: 700 }}>· ✓ Estás dentro</span>}
+                {vista === 'publicas' && completa(a) && <span style={{ color: '#F0B94D', fontWeight: 700 }}>· Completa</span>}
                 {a.cierre && <span>· empieza {fechaCorta(a.cierre)}</span>}
               </div>
               {a.premio && a.premio.tipo !== 'nada' ? (

@@ -140,8 +140,9 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
   // Un nombre de filial ("Celta Fortuna") nunca debe salir en una jornada de primera:
   // se busca el escudo del primer equipo (07/10).
   const claveEscudo = (nombre: string): string => claveEquipoFutbol(esEquipoFilial(nombre) ? nombrePrimerEquipo(nombre) : nombre);
-  const escudoDe = (nombre: string): string | null => escudosBD.get(claveEscudo(nombre)) ?? escudoLaLiga(esEquipoFilial(nombre) ? nombrePrimerEquipo(nombre) : nombre);
-  const escudoAlternativo = (nombre: string): string | null => escudoLaLiga(esEquipoFilial(nombre) ? nombrePrimerEquipo(nombre) : nombre);
+  // 16/10: para LaLiga primero el escudo fijo de ESPN (el guardado del Barça no se veía).
+  const escudoDe = (nombre: string): string | null => escudoLaLiga(esEquipoFilial(nombre) ? nombrePrimerEquipo(nombre) : nombre) ?? escudosBD.get(claveEscudo(nombre)) ?? null;
+  const escudoAlternativo = (nombre: string): string | null => escudosBD.get(claveEscudo(nombre)) ?? null;
   const [selected, setSelected] = useState<string[]>([]);
   const [alineacion, setAlineacion] = useState<string>('4-3-3');
   // Equipos ya hechos por el usuario en OTRAS mesas de esta misma jornada /
@@ -813,8 +814,9 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
     }
     // Registro de actividad (28/09, pedido de Iñi): solo la inscripción
     // nueva, no al editar un equipo ya inscrito.
-    if (!modoEdicion && sala) {
-      await supabase.rpc('registrar_evento_actividad', { p_tipo: 'inscripcion', p_detalle: v2 ? { modo: 'sala', nombre: sala.nombre, v2: true } : { modo: 'sala', nombre: sala.nombre } });
+    // Las entradas en mesas de la liga V2 las apunta la base de datos (SQL 43).
+    if (!modoEdicion && sala && !v2) {
+      await supabase.rpc('registrar_evento_actividad', { p_tipo: 'inscripcion', p_detalle: { modo: 'sala', nombre: sala.nombre } });
     }
     // Favoritos por defecto (04/10, pedido de Iñi, mismo criterio que
     // app/porras/[id]/crear-equipo — ver el comentario largo en

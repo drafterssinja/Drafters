@@ -22,7 +22,9 @@ export function useEscudos() {
     };
   }, []);
   const primero = (nombre: string) => (esEquipoFilial(nombre) ? nombrePrimerEquipo(nombre) : nombre);
-  const escudoDe = (nombre: string): string | null => escudosBD.get(claveEquipoFutbol(primero(nombre))) ?? escudoLaLiga(primero(nombre));
-  const escudoAlternativo = (nombre: string): string | null => escudoLaLiga(primero(nombre));
+  // 16/10 (Iñi: "no se carga el escudo del Barça"): para los equipos de LaLiga
+  // primero el escudo fijo de ESPN, que siempre carga; el guardado, para el resto.
+  const escudoDe = (nombre: string): string | null => escudoLaLiga(primero(nombre)) ?? escudosBD.get(claveEquipoFutbol(primero(nombre))) ?? null;
+  const escudoAlternativo = (nombre: string): string | null => escudosBD.get(claveEquipoFutbol(primero(nombre))) ?? null;
   return { escudoDe, escudoAlternativo };
 }

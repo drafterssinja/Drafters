@@ -63,7 +63,7 @@ export default function CampoAlineacion({ jugadores, titulo }: { jugadores: JugC
                       {inicialesJugador(j.nombre)}
                     </span>
                     {j.equipo_real && (
-                      <span style={{ position: 'absolute', right: -6, bottom: -4, background: '#0B0F0E', borderRadius: '50%', padding: 1, display: 'flex' }}>
+                      <span style={{ position: 'absolute', right: -6, bottom: -4, background: '#F5F7F5', borderRadius: '50%', padding: 1.5, display: 'flex', boxShadow: '0 1px 3px rgba(0,0,0,0.5)' }}>
                         <EscudoEquipo url={escudoDe(j.equipo_real)} alternativa={escudoAlternativo(j.equipo_real)} nombre={j.equipo_real} tam={16} />
                       </span>
                     )}
