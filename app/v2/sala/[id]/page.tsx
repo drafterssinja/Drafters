@@ -283,6 +283,7 @@ export default function V2Sala() {
                           amistoso={amistoso}
                           dentro={n}
                           empezada={empezada || draftEmpezado}
+                          conEquipo={new Set(resumen.equipos_hechos.map((e) => e.usuario_id)).size}
                           onCancelar={() => {
                             setEditandoSala(false);
                             setAviso(null);

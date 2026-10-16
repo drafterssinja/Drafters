@@ -9,13 +9,15 @@ import MarcoV2, { EtiquetaBeta, Panel, Titulo, V2_COLOR } from '@/components/v2/
 import { useSesionV2 } from '@/components/v2/useSesionV2';
 import { EQUIPO_PRESUPUESTO, FORMACIONES_FUTBOL, colorPresupuesto } from '@/lib/draftConfig';
 import { formatEuros, huecosPorLinea, lineaDePosicion, type LineaFutbol } from '@/lib/salaShared';
-import { TAMANO_EQUIPO_V2, fechaCorta, mensajeError, type Amistoso, type AmistosoJornada } from '@/lib/v2';
+import { TAMANO_EQUIPO_V2, fechaCorta, mensajeError, type Amistoso, type AmistosoJornada, type EquipoGuardado } from '@/lib/v2';
 
 // ============================================================================
 // DRAFTERS V2 — HACER EL EQUIPO (modalidades "presupuesto" y "libre") (15/10)
 // ============================================================================
 // Presupuesto: 100.000 €, como en las mesas de siempre. Libre: sin precios ni
 // presupuesto. Solo salen los jugadores de los partidos que entran en la sala.
+// 16/10: "Usar un equipo guardado" carga un equipo que guardaste de otra sala
+// (p.ej. cuando el admin cambió la modalidad y te quitó el equipo).
 
 type Jug = { id: string; nombre: string; posicion: string | null; precio: number; equipo_real: string | null; lesionado: boolean };
 
@@ -43,6 +45,9 @@ export default function V2Equipo() {
   const [error, setError] = useState<string | null>(null);
   const [cargando, setCargando] = useState(true);
   const [guardando, setGuardando] = useState(false);
+  const [guardados, setGuardados] = useState<EquipoGuardado[]>([]);
+  const [verGuardados, setVerGuardados] = useState(false);
+  const [info, setInfo] = useState<string | null>(null);
 
   useEffect(() => {
     if (estado !== 'ok' || !perfil) return;
@@ -66,6 +71,8 @@ export default function V2Equipo() {
       setJugadores(js.filter((x) => !x.baja && (!permitidos || (x.equipo_real && permitidos.has(x.equipo_real)))));
       setAmistoso(am);
       setJornada(jo);
+      const { data: gs } = await supabase.from('v2_equipos_guardados').select('*').eq('deporte', am.deporte).order('created_at', { ascending: false });
+      setGuardados((gs as EquipoGuardado[]) ?? []);
       const m = mio as { jugadores: string[]; alineacion: string | null } | null;
       if (m) {
         setSeleccion(m.jugadores);
@@ -125,6 +132,44 @@ export default function V2Equipo() {
     setAlineacion(a);
   }
 
+  async function usarGuardado(g: EquipoGuardado) {
+    setError(null);
+    setInfo(null);
+    const { data, error: e } = await supabase.rpc('v2_mapear_jugadores', { p_jugadores: g.jugadores, p_competicion: competicion });
+    if (e) return setError(mensajeError(e));
+    const ids = ((data as string[]) ?? []).filter((x, i, arr) => porId.has(x) && arr.indexOf(x) === i);
+    let nueva = ids.slice(0, tamano);
+    let ali = alineacion;
+    if (futbol) {
+      ali = g.alineacion && FORMACIONES_FUTBOL.some((f) => f.alineacion === g.alineacion) ? g.alineacion : alineacion;
+      const h = huecosPorLinea(ali);
+      const cuenta: Record<LineaFutbol, number> = { POR: 0, DEF: 0, MED: 0, DEL: 0 };
+      nueva = ids.filter((x) => {
+        const l = lineaDePosicion(porId.get(x)?.posicion ?? null);
+        if (cuenta[l] >= h[l]) return false;
+        cuenta[l]++;
+        return true;
+      });
+      setAlineacion(ali);
+    }
+    setSeleccion(nueva);
+    setVerGuardados(false);
+    const faltan = tamano - nueva.length;
+    const coste = nueva.reduce((a, x) => a + Number(porId.get(x)?.precio ?? 0), 0);
+    setInfo(
+      `Cargado «${g.nombre}»: ${nueva.length} de ${tamano} jugadores.` +
+        (faltan > 0 ? ` Te faltan ${faltan} (no juegan en esta jornada o no entran en los partidos de la sala).` : '') +
+        (conPrecios && coste > EQUIPO_PRESUPUESTO ? ` Te pasas del presupuesto en ${formatEuros(coste - EQUIPO_PRESUPUESTO)}: cambia a alguno.` : '')
+    );
+  }
+
+  async function borrarGuardado(g: EquipoGuardado) {
+    if (!window.confirm(`¿Borrar el equipo guardado «${g.nombre}»?`)) return;
+    const { error: e } = await supabase.rpc('v2_borrar_equipo_guardado', { p_id: g.id });
+    if (e) return setError(mensajeError(e));
+    setGuardados((prev) => prev.filter((x) => x.id !== g.id));
+  }
+
   async function guardar() {
     setError(null);
     if (seleccion.length !== tamano) return setError(`Te faltan ${tamano - seleccion.length} jugadores.`);
@@ -155,6 +200,32 @@ export default function V2Equipo() {
           </div>
           {cerrada && <p style={S.errorText}>La jornada ya ha empezado: no se puede cambiar el equipo.</p>}
 
+          {!cerrada && guardados.length > 0 && (
+            <Panel>
+              <button type="button" onClick={() => setVerGuardados(!verGuardados)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'none', border: 'none', color: V2_COLOR, fontWeight: 800, fontSize: 14, cursor: 'pointer', textAlign: 'left' }}>
+                <span>📂 Usar un equipo guardado ({guardados.length})</span>
+                <span>{verGuardados ? '▲' : '▼'}</span>
+              </button>
+              {verGuardados &&
+                guardados.map((g) => (
+                  <div key={g.id} style={{ display: 'flex', alignItems: 'center', gap: 8, borderTop: `1px solid ${S.CARD_BORDER}`, paddingTop: 8 }}>
+                    <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <span style={{ fontWeight: 700, fontSize: 13, color: S.TEXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.nombre}</span>
+                      <span style={{ fontSize: 11, color: S.MUTED_3 }}>
+                        {g.alineacion ? `${g.alineacion} · ` : ''}guardado {fechaCorta(g.created_at)}
+                      </span>
+                    </span>
+                    <button type="button" onClick={() => void usarGuardado(g)} style={{ border: `1px solid ${V2_COLOR}`, color: V2_COLOR, background: 'transparent', borderRadius: 10, padding: '7px 12px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer' }}>
+                      Usar
+                    </button>
+                    <button type="button" aria-label="Borrar" onClick={() => void borrarGuardado(g)} style={{ border: `1px solid ${S.BORDER}`, color: S.MUTED_2, background: 'transparent', borderRadius: 10, padding: '7px 9px', fontSize: 12.5, cursor: 'pointer' }}>
+                      🗑
+                    </button>
+                  </div>
+                ))}
+            </Panel>
+          )}
+
           <Panel style={{ position: 'sticky', top: 0, zIndex: 5 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontWeight: 800, fontSize: 14, color: S.TEXT }}>
@@ -181,6 +252,7 @@ export default function V2Equipo() {
                 ))}
               </div>
             )}
+            {info && <p style={{ ...S.infoText, fontSize: 12.5, color: '#F0B94D' }}>{info}</p>}
             {error && <p style={S.errorText}>{error}</p>}
             <button type="button" onClick={guardar} disabled={guardando || cerrada} style={{ ...S.primaryButton, background: V2_COLOR, opacity: guardando || cerrada || seleccion.length !== tamano ? 0.55 : 1 }}>
               {guardando ? 'Guardando...' : 'Guardar equipo'}
