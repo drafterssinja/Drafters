@@ -32,6 +32,8 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
   const [lista, setLista] = useState<FilaLista[] | null>(null);
   const [pestana, setPestana] = useState<'mias' | 'publicas' | null>(null);
   const [codigo, setCodigo] = useState('');
+  // 16/10 (Iñi): se ven también las privadas (con candado) y hay un buscador arriba.
+  const [busqueda, setBusqueda] = useState('');
   const [errorCodigo, setErrorCodigo] = useState<string | null>(null);
 
   const cargar = useCallback(async () => {
@@ -44,8 +46,20 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
     return cadaXSegundos(cargar, 15);
   }, [cargar]);
 
-  const mias = (lista ?? []).filter((l) => l.soy_participante);
-  const publicas = (lista ?? []).filter((l) => !l.soy_participante).sort((a, b) => b.inscritos / b.num_jugadores - a.inscritos / a.num_jugadores);
+  const q = busqueda
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+  const coincide = (a: FilaLista) =>
+    !q ||
+    `${a.nombre} ${a.creador} ${a.competiciones.join(' ')}`
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .includes(q);
+  const mias = (lista ?? []).filter((l) => l.soy_participante && coincide(l));
+  const publicas = (lista ?? []).filter((l) => !l.soy_participante && coincide(l)).sort((a, b) => b.inscritos / b.num_jugadores - a.inscritos / a.num_jugadores);
   const vista = pestana ?? (lista && mias.length === 0 ? 'publicas' : 'mias');
   const mostradas = vista === 'mias' ? mias : publicas;
 
@@ -61,6 +75,7 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <input value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="🔍 Buscar sala por nombre, creador o jornada" style={S.input} />
       <Link href={`/v2/crear?deporte=${deporte}`} style={{ ...S.primaryButton, background: V2_COLOR, textAlign: 'center', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 0 }}>
         + Crear un amistoso
       </Link>
@@ -81,13 +96,13 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
           Mis amistosos ({mias.length})
         </button>
         <button type="button" style={S.pill(vista === 'publicas')} onClick={() => setPestana('publicas')}>
-          Públicos ({publicas.length})
+          Abiertos ({publicas.length})
         </button>
       </div>
 
       {lista === null && <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>Cargando...</p>}
       {lista !== null && mostradas.length === 0 && (
-        <p style={{ fontSize: 13, color: S.MUTED_3, margin: 0 }}>{vista === 'mias' ? 'Todavía no estás en ningún amistoso. Crea uno o únete a uno público.' : 'No hay amistosos públicos abiertos ahora mismo. ¡Crea el primero!'}</p>
+        <p style={{ fontSize: 13, color: S.MUTED_3, margin: 0 }}>{q ? 'Ninguna sala coincide con la búsqueda.' : vista === 'mias' ? 'Todavía no estás en ningún amistoso. Crea uno o únete a uno abierto.' : 'No hay amistosos abiertos ahora mismo. ¡Crea el primero!'}</p>
       )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {mostradas.map((a) => {
