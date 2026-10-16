@@ -870,7 +870,9 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
     // sentido en el historial (si vuelves a ella, redirige otra vez a la
     // sala) — con push, la flecha de "volver" quedaba atrapada rebotando
     // entre las dos pantallas en vez de salir a /salas.
-    if (v2 && sala) {
+    // 16/10: al editar un equipo de una mesa de la liga se vuelve a la ficha
+    // de la mesa (como en la V1); al entrar nueva, a la pantalla de la liga.
+    if (v2 && sala && !modoEdicion) {
       avisarCambioCreditos();
       router.replace(`/v2/${sala.deporte}`);
       return;
