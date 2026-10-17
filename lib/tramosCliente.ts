@@ -29,13 +29,11 @@ export async function aplicarTramo<J extends JugadorBase, P extends PartidoBase>
     return { jugadores: jugadores.filter((j) => vale(j.equipo_real)), partidos: partidos.filter((p) => vale(p.equipo_local) && vale(p.equipo_visitante)) };
   }
   if (deporte === 'golf' && esTramoCorte(tramo)) {
+    // 17/10 (fix): por función, que calcula los precios del corte si todavía
+    // no estaban (antes solo se calculaban al abrir la lista de mesas).
     const precios = new Map<string, number>();
-    for (let desde = 0; ; desde += 1000) {
-      const { data } = await supabase.from('precios_corte').select('jugador_id,precio').eq('competicion', competicion).range(desde, desde + 999);
-      const filas = (data as { jugador_id: string; precio: number }[] | null) ?? [];
-      filas.forEach((f) => precios.set(f.jugador_id, Number(f.precio)));
-      if (filas.length < 1000) break;
-    }
+    const { data } = await supabase.rpc('v2_precios_corte', { p_competicion: competicion });
+    ((data as { jugador_id: string; precio: number }[] | null) ?? []).forEach((f) => precios.set(f.jugador_id, Number(f.precio)));
     const lista = jugadores.filter((j) => precios.has(j.id)).map((j) => ({ ...j, precio: precios.get(j.id) as number }));
     lista.sort((a, b) => b.precio - a.precio);
     return { jugadores: lista, partidos };
