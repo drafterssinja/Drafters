@@ -50,10 +50,10 @@ export async function recalcularPuntosGolfCompeticion(admin: Admin, competicion:
   }
 
   // Lo ya guardado, para escribir solo lo que cambia.
-  const previos = new Map<string, { puntos_total: number; desglose: unknown; avisos: unknown; torneo_terminado: boolean }>();
+  const previos = new Map<string, { puntos_total: number; desglose: unknown; avisos: unknown; torneo_terminado: boolean; por_ronda?: unknown }>();
   for (let desde = 0; ; desde += 1000) {
-    const { data } = await admin.from('golf_puntos_jugador').select('jugador_id,puntos_total,desglose,avisos,torneo_terminado').eq('competicion', competicion).range(desde, desde + 999);
-    const filas = (data as { jugador_id: string; puntos_total: number; desglose: unknown; avisos: unknown; torneo_terminado: boolean }[]) ?? [];
+    const { data } = await admin.from('golf_puntos_jugador').select('jugador_id,puntos_total,desglose,avisos,torneo_terminado,por_ronda').eq('competicion', competicion).range(desde, desde + 999);
+    const filas = (data as { jugador_id: string; puntos_total: number; desglose: unknown; avisos: unknown; torneo_terminado: boolean; por_ronda?: unknown }[]) ?? [];
     for (const f of filas) previos.set(f.jugador_id, f);
     if (filas.length < 1000) break;
   }
@@ -70,10 +70,25 @@ export async function recalcularPuntosGolfCompeticion(admin: Admin, competicion:
       thruActual: j.resultado_en_vivo_thru,
     });
     for (const a of r.avisos) avisos.push(`${j.nombre}: ${a}`);
+    // 17/10: puntos de cada ronda por separado (mesas de una sola ronda o del
+    // fin de semana). Sin los puntos por posición final, que son del torneo.
+    const hoyos = hoyosPorJugador.get(j.id) ?? [];
+    const porRonda: Record<string, { total: number; desglose: unknown }> = {};
+    for (const ronda of Array.from(new Set(hoyos.map((h) => h.ronda))).sort((a, b) => a - b)) {
+      if (ronda < 1 || ronda > 4) continue;
+      const rr = puntuarGolfJugador({ hoyos: hoyos.filter((h) => h.ronda === ronda), posicion: null, torneoTerminado: false, rondaActual: null, thruActual: null });
+      porRonda[String(ronda)] = { total: rr.total, desglose: rr.desglose };
+    }
     const p = previos.get(j.id);
-    const igual = p && Number(p.puntos_total) === r.total && p.torneo_terminado === torneoTerminado && JSON.stringify(p.desglose ?? []) === JSON.stringify(r.desglose) && JSON.stringify(p.avisos ?? []) === JSON.stringify(r.avisos);
+    const igual =
+      p &&
+      Number(p.puntos_total) === r.total &&
+      p.torneo_terminado === torneoTerminado &&
+      JSON.stringify(p.desglose ?? []) === JSON.stringify(r.desglose) &&
+      JSON.stringify(p.avisos ?? []) === JSON.stringify(r.avisos) &&
+      JSON.stringify(p.por_ronda ?? {}) === JSON.stringify(porRonda);
     if (igual) continue;
-    aEscribir.push({ jugador_id: j.id, competicion, puntos_total: r.total, desglose: r.desglose, avisos: r.avisos, hoyos_contados: r.hoyosContados, torneo_terminado: torneoTerminado, actualizado_en: ahora });
+    aEscribir.push({ jugador_id: j.id, competicion, puntos_total: r.total, desglose: r.desglose, avisos: r.avisos, hoyos_contados: r.hoyosContados, torneo_terminado: torneoTerminado, por_ronda: porRonda, actualizado_en: ahora });
   }
   for (let i = 0; i < aEscribir.length; i += 300) {
     const { error } = await admin.from('golf_puntos_jugador').upsert(aEscribir.slice(i, i + 300), { onConflict: 'jugador_id' });

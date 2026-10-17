@@ -69,13 +69,15 @@ export type AmistosoJornada = {
   equipos_permitidos: string[] | null;
   partidos: { local: string; visitante: string }[] | null;
   cierre: string | null;
+  // 17/10: un solo día (fútbol) o una sola ronda (golf). Ver lib/tramos.ts.
+  tramo?: string | null;
 };
 
 export type Resumen = {
   participantes: { usuario_id: string; nombre: string; unido_en: string }[];
   nombres: Record<string, string>;
   equipos_hechos: { competicion: string; usuario_id: string }[];
-  jornadas: { competicion: string; publicada?: boolean; empezada: boolean; terminada: boolean }[];
+  jornadas: { competicion: string; publicada?: boolean; empezada: boolean; terminada: boolean; tramo?: string | null }[];
 };
 
 export type Mensaje = {

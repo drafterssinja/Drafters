@@ -1,6 +1,7 @@
 import type { crearClienteAdmin } from './supabaseAdmin';
 import { calcularReparto, repartirPremiosConEmpates, type TipoSala } from '@/lib/repartoPremios';
 import { parteParaPremios } from '@/lib/salaShared';
+import { diaDeTramo, fechaMadrid, puntosGolfTramo, rondasDeTramo, type PorRonda } from '@/lib/tramos';
 
 // ============================================================================
 // LIQUIDAR TODAS LAS MESAS DE UNA JORNADA / TORNEO DE GOLPE (12/10)
@@ -21,7 +22,7 @@ import { parteParaPremios } from '@/lib/salaShared';
 
 type Admin = ReturnType<typeof crearClienteAdmin>;
 
-type SalaRow = { id: string; nombre: string; tipo: TipoSala; aforo: number | null; buy_in: number; deporte: string; competicion: string; version?: number };
+type SalaRow = { id: string; nombre: string; tipo: TipoSala; aforo: number | null; buy_in: number; deporte: string; competicion: string; version?: number; tramo?: string | null };
 type EquipoRow = { id: string; sala_id: string; jugadores: string[] | null; inscripciones: { estado: string }[] };
 
 export type ResultadoMesa = { salaId: string; nombre: string; ok: boolean; motivo: string };
@@ -48,7 +49,7 @@ async function todasLasFilas<T>(consulta: (desde: number, hasta: number) => Prom
 
 export async function mesasJugadasPendientes(admin: Admin, competicion: string) {
   const salas = await todasLasFilas<SalaRow>((d, h) =>
-    admin.from('salas').select('id,nombre,tipo,aforo,buy_in,deporte,competicion,version').eq('competicion', competicion).range(d, h)
+    admin.from('salas').select('id,nombre,tipo,aforo,buy_in,deporte,competicion,version,tramo').eq('competicion', competicion).range(d, h)
   );
   const liquidadas = await todasLasFilas<{ sala_id: string }>((d, h) =>
     admin.from('liquidaciones').select('sala_id').eq('tipo', 'sala').not('sala_id', 'is', null).range(d, h)
@@ -78,12 +79,15 @@ export async function mesasJugadasPendientes(admin: Admin, competicion: string) 
   return { mesas };
 }
 
-async function comprobarTerminada(admin: Admin, deporte: string, competicion: string): Promise<string | null> {
+// 17/10: con `tramo` (mesas de un día o de una ronda) solo se mira ese día / esa ronda.
+async function comprobarTerminada(admin: Admin, deporte: string, competicion: string, tramo: string | null = null): Promise<string | null> {
   if (deporte === 'futbol') {
-    const partidos = await todasLasFilas<{ estado: string; actualizado: boolean; descartado: boolean | null }>((d, h) =>
-      admin.from('futbol_partidos_jornada').select('estado,actualizado,descartado').eq('competicion', competicion).range(d, h)
+    const dia = diaDeTramo(tramo);
+    const todos = await todasLasFilas<{ estado: string; actualizado: boolean; descartado: boolean | null; kickoff: string | null }>((d, h) =>
+      admin.from('futbol_partidos_jornada').select('estado,actualizado,descartado,kickoff').eq('competicion', competicion).range(d, h)
     );
-    if (partidos.length === 0) return 'No hay partidos cargados para esta jornada.';
+    const partidos = dia ? todos.filter((p) => p.kickoff && fechaMadrid(p.kickoff) === dia) : todos;
+    if (partidos.length === 0) return dia ? 'No hay partidos cargados para ese día.' : 'No hay partidos cargados para esta jornada.';
     // 12/10: los aplazados para más tarde quedan "descartados" (0 puntos) al
     // terminar la jornada; hasta entonces cuentan como pendientes.
     const faltan = partidos.filter((p) => !p.descartado && !(p.estado === 'finalizado' && p.actualizado)).length;
@@ -92,15 +96,27 @@ async function comprobarTerminada(admin: Admin, deporte: string, competicion: st
   if (deporte === 'golf') {
     const { data: torneo } = await admin.from('torneos_golf_live').select('finalizado_en').eq('competicion', competicion).maybeSingle();
     if (torneo && (torneo as { finalizado_en: string | null }).finalizado_en) return null;
+    // Rondas 1, 2 y 3 sueltas: terminadas cuando el campo ya va por la siguiente.
+    const rondas = rondasDeTramo(tramo);
+    if (rondas && rondas.length === 1 && rondas[0] < 4) {
+      const { count } = await admin.from('jugadores').select('id', { count: 'exact', head: true }).eq('deporte', 'golf').eq('competicion', competicion).gt('resultado_en_vivo_ronda', rondas[0]);
+      if ((count ?? 0) > 0) return null;
+      return `La ronda ${rondas[0]} todavía no ha terminado.`;
+    }
     return 'El torneo todavía no se ha dado por terminado (faltan rondas o la confirmación de cierre).';
   }
   return 'Este deporte todavía no tiene puntuación automática: liquida sus mesas una a una.';
 }
 
-async function puntosPorJugador(admin: Admin, deporte: string, competicion: string): Promise<Map<string, number>> {
-  const tabla = deporte === 'golf' ? 'golf_puntos_jugador' : 'futbol_puntos_jugador';
+async function puntosPorJugador(admin: Admin, deporte: string, competicion: string, tramo: string | null = null): Promise<Map<string, number>> {
+  if (deporte === 'golf') {
+    const filas = await todasLasFilas<{ jugador_id: string; puntos_total: number; por_ronda: PorRonda }>((d, h) =>
+      admin.from('golf_puntos_jugador').select('jugador_id,puntos_total,por_ronda').eq('competicion', competicion).range(d, h)
+    );
+    return new Map(filas.map((f) => [f.jugador_id, puntosGolfTramo(f, tramo).total]));
+  }
   const filas = await todasLasFilas<{ jugador_id: string; puntos_total: number }>((d, h) =>
-    admin.from(tabla).select('jugador_id,puntos_total').eq('competicion', competicion).range(d, h)
+    admin.from('futbol_puntos_jugador').select('jugador_id,puntos_total').eq('competicion', competicion).range(d, h)
   );
   return new Map(filas.map((f) => [f.jugador_id, Number(f.puntos_total) || 0]));
 }
@@ -108,18 +124,21 @@ async function puntosPorJugador(admin: Admin, deporte: string, competicion: stri
 export async function liquidarMesasDeCompeticion(
   admin: Admin,
   competicion: string,
-  opciones: { soloComprobar?: boolean; forzar?: boolean } = {}
+  opciones: { soloComprobar?: boolean; forzar?: boolean; tramo?: string | null } = {}
 ): Promise<ResultadoCompeticion> {
-  const { mesas } = await mesasJugadasPendientes(admin, competicion);
+  const todas = (await mesasJugadasPendientes(admin, competicion)).mesas;
+  // 17/10: cada tramo (jornada completa, un día, una ronda) se liquida por su lado.
+  const tramo = opciones.tramo ?? null;
+  const mesas = todas.filter((m) => (m.sala.tramo ?? null) === tramo);
   const deporte = mesas[0]?.sala.deporte ?? '';
   const equiposTotales = mesas.reduce((a, m) => a + m.equipos.length, 0);
-  const motivoNoListo = mesas.length === 0 ? 'No hay mesas jugadas pendientes de liquidar.' : await comprobarTerminada(admin, deporte, competicion);
+  const motivoNoListo = mesas.length === 0 ? 'No hay mesas jugadas pendientes de liquidar.' : await comprobarTerminada(admin, deporte, competicion, tramo);
   const base: ResultadoCompeticion = { listo: motivoNoListo === null, motivoNoListo, mesasJugadas: mesas.length, equipos: equiposTotales, liquidadas: 0, resultados: [] };
 
   const sinMotor = deporte !== 'futbol' && deporte !== 'golf';
   if (opciones.soloComprobar || mesas.length === 0 || sinMotor || (motivoNoListo && !opciones.forzar)) return base;
 
-  const puntos = await puntosPorJugador(admin, deporte, competicion);
+  const puntos = await puntosPorJugador(admin, deporte, competicion, tramo);
   for (const { sala, equipos } of mesas) {
     try {
       const clasificacion = equipos.map((e) => ({
