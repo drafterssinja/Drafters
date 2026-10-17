@@ -13,6 +13,8 @@ import CosteCredito from '@/components/v2/CosteCredito';
 import { avisarCambioCreditos } from '@/components/v2/creditos';
 import { MODALIDAD_DESC, MODALIDAD_LABEL, fechaCorta, mensajeError, premioValido, type Modalidad, type Premio } from '@/lib/v2';
 import Cargando from '@/components/Cargando';
+import { diaDeTramo, etiquetaTramo, fechaMadrid, ordenTramo } from '@/lib/tramos';
+import { claveEquipoLaLiga } from '@/lib/futbolLaLiga';
 
 // ============================================================================
 // DRAFTERS V2 — CREAR UNA SALA (15/10)
@@ -23,7 +25,9 @@ import Cargando from '@/components/Cargando';
 // (presupuesto / libre / draft), pública o privada con contraseña y, en las
 // privadas, lo que se juega cada uno y cómo se reparte.
 
-type Comp = { deporte: string; competicion: string; cierre: string | null };
+type Comp = { deporte: string; competicion: string; cierre: string | null; soloTramos?: boolean };
+// 17/10: tramos (un día de fútbol con 3+ partidos / una ronda de golf) que siguen abiertos.
+type TramoDisp = { competicion: string; tramo: string; cierre: string; partidos: number | null };
 
 // 15/10 (Iñi): se puede llegar hasta cualquier jornada de la competición,
 // aunque todavía no tenga horarios; se va completando sola al publicarse.
@@ -54,6 +58,8 @@ function V2CrearInner() {
   const router = useRouter();
   const { perfil, estado } = useSesionV2();
   const [comps, setComps] = useState<Comp[] | null>(null);
+  const [tramosDisp, setTramosDisp] = useState<TramoDisp[]>([]);
+  const [tramo, setTramo] = useState<string | null>(null);
 
   const [nombre, setNombre] = useState('');
   // 15/10: se crea desde la página de un deporte, así que ya viene elegido.
@@ -76,8 +82,17 @@ function V2CrearInner() {
 
   useEffect(() => {
     if (estado !== 'ok') return;
-    supabase.rpc('amistoso_competiciones_disponibles').then(({ data }) => setComps((data as Comp[]) ?? []));
-  }, [estado]);
+    void Promise.all([supabase.rpc('amistoso_competiciones_disponibles'), supabase.rpc('v2_tramos_disponibles', { p_deporte: deporte })]).then(([c, t]) => {
+      const lista = ((c.data as Comp[]) ?? []).slice();
+      const tramos = (t.data as TramoDisp[]) ?? [];
+      // Jornadas/torneos ya empezados que todavía tienen algún día o ronda abierto.
+      for (const x of tramos) {
+        if (!lista.some((l) => l.competicion === x.competicion)) lista.push({ deporte, competicion: x.competicion, cierre: x.cierre, soloTramos: true });
+      }
+      setTramosDisp(tramos);
+      setComps(lista);
+    });
+  }, [estado, deporte]);
 
   const futbol = useMemo(() => (comps ?? []).filter((c) => c.deporte === 'futbol'), [comps]);
   const golf = useMemo(() => (comps ?? []).filter((c) => c.deporte === 'golf'), [comps]);
@@ -132,14 +147,24 @@ function V2CrearInner() {
     (async () => {
       const [{ data: cuotas }, { data: jornada }, jugs] = await Promise.all([
         supabase.from('cuotas_partido_futbol').select('equipo_local,equipo_visitante').eq('competicion', unaJornadaFutbol),
-        supabase.from('futbol_partidos_jornada').select('equipo_local,equipo_visitante,kickoff').eq('competicion', unaJornadaFutbol),
+        supabase.from('futbol_partidos_jornada').select('equipo_local,equipo_visitante,clave_local,clave_visitante,kickoff').eq('competicion', unaJornadaFutbol),
         todasLasFilas<{ equipo_real: string | null; posicion: string | null }>((d, h) =>
           supabase.from('jugadores').select('equipo_real,posicion').eq('competicion', unaJornadaFutbol).not('baja', 'is', true).order('id').range(d, h)
         ),
       ]);
       if (!activo) return;
-      const kick = new Map(((jornada as { equipo_local: string; equipo_visitante: string; kickoff: string | null }[]) ?? []).map((p) => [`${p.equipo_local}|${p.equipo_visitante}`, p.kickoff]));
-      const lista = ((cuotas as { equipo_local: string; equipo_visitante: string }[]) ?? []).map((c) => ({ local: c.equipo_local, visitante: c.equipo_visitante, kickoff: kick.get(`${c.equipo_local}|${c.equipo_visitante}`) ?? null }));
+      // 17/10: los nombres de ESPN y los nuestros no siempre coinciden → por clave de equipo.
+      const filasJ = (jornada as { equipo_local: string; equipo_visitante: string; clave_local: string; clave_visitante: string; kickoff: string | null }[]) ?? [];
+      const kick = new Map<string, string | null>();
+      filasJ.forEach((p) => {
+        kick.set(`${p.equipo_local}|${p.equipo_visitante}`, p.kickoff);
+        kick.set(`${p.clave_local}|${p.clave_visitante}`, p.kickoff);
+      });
+      const lista = ((cuotas as { equipo_local: string; equipo_visitante: string }[]) ?? []).map((c) => ({
+        local: c.equipo_local,
+        visitante: c.equipo_visitante,
+        kickoff: kick.get(`${c.equipo_local}|${c.equipo_visitante}`) ?? kick.get(`${claveEquipoLaLiga(c.equipo_local)}|${claveEquipoLaLiga(c.equipo_visitante)}`) ?? null,
+      }));
       lista.sort((a, b) => (a.kickoff ?? '9').localeCompare(b.kickoff ?? '9'));
       setPartidos(lista);
       setPartidosOn(new Set(lista.map((p) => `${p.local}|${p.visitante}`)));
@@ -158,6 +183,33 @@ function V2CrearInner() {
   }, [unaJornadaFutbol]);
 
   const todosLosPartidos = partidos.length > 0 && partidosOn.size === partidos.length;
+
+  // 17/10 (Iñi): partidos de un solo día (3+ partidos) o una sola ronda de golf.
+  const compTramos = deporte === 'golf' ? torneo : unaJornadaFutbol;
+  const tramosDeSeleccion = useMemo(() => tramosDisp.filter((t) => t.competicion === compTramos).sort((a, b) => ordenTramo(a.tramo).localeCompare(ordenTramo(b.tramo))), [tramosDisp, compTramos]);
+  const compElegida = (comps ?? []).find((c) => c.competicion === compTramos);
+  const completaDisponible = !!compElegida && !compElegida.soloTramos;
+  // Al cambiar de jornada/torneo: si la completa ya ha empezado, el primer tramo abierto.
+  useEffect(() => {
+    if (!compTramos) return setTramo(null);
+    if (completaDisponible) return setTramo(null);
+    setTramo(tramosDeSeleccion[0]?.tramo ?? null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [compTramos, completaDisponible, tramosDeSeleccion.length]);
+  // Con un día elegido: solo sus partidos (y una sola jornada).
+  const partidosVisibles = useMemo(() => {
+    const dia = diaDeTramo(tramo);
+    return dia ? partidos.filter((p) => p.kickoff && fechaMadrid(p.kickoff) === dia) : partidos;
+  }, [partidos, tramo]);
+  useEffect(() => {
+    if (deporte !== 'futbol') return;
+    const dia = diaDeTramo(tramo);
+    if (dia) {
+      setPartidosOn(new Set(partidosVisibles.map((p) => `${p.local}|${p.visitante}`)));
+      setHasta(desde);
+    } else if (partidos.length) setPartidosOn(new Set(partidos.map((p) => `${p.local}|${p.visitante}`)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tramo, partidos]);
 
   // En el draft nadie repite jugador: tiene que haber suficientes de cada puesto.
   const avisoDraft = useMemo(() => {
@@ -182,17 +234,20 @@ function V2CrearInner() {
     if (seleccion.length === 0) return setError(deporte === 'golf' ? 'Elige un torneo.' : 'Elige la jornada (o la primera y la última).');
     if (privada && contrasena.trim().length < 3) return setError('Pon una contraseña de al menos 3 caracteres.');
     if (unaJornadaFutbol && partidos.length > 0 && partidosOn.size === 0) return setError('Elige al menos un partido.');
+    if (!tramo && compTramos && !completaDisponible) return setError(deporte === 'golf' ? 'El torneo ya ha empezado: elige una ronda.' : 'La jornada ya ha empezado: elige los partidos de un día.');
+    if (tramo && seleccion.length > 1) return setError('Los partidos de un solo día solo se pueden elegir en salas de una jornada.');
     if (avisoDraft) return setError(avisoDraft);
     const premioFinal = privada ? premio : PREMIO_VACIO;
     const errPremio = premioValido(premioFinal, numJugadores);
     if (errPremio) return setError(errPremio);
 
-    const jornadas = seleccion.map((competicion) => {
-      if (competicion === unaJornadaFutbol && partidos.length > 0 && !todosLosPartidos) {
+    const jornadas = seleccion.map((competicion, i) => {
+      const t = i === 0 ? tramo : null;
+      if (competicion === unaJornadaFutbol && partidos.length > 0 && (!todosLosPartidos || diaDeTramo(t))) {
         const elegidos = partidos.filter((p) => partidosOn.has(`${p.local}|${p.visitante}`));
-        return { competicion, equipos_permitidos: elegidos.flatMap((p) => [p.local, p.visitante]), partidos: elegidos.map((p) => ({ local: p.local, visitante: p.visitante })) };
+        return { competicion, tramo: t, equipos_permitidos: elegidos.flatMap((p) => [p.local, p.visitante]), partidos: elegidos.map((p) => ({ local: p.local, visitante: p.visitante })) };
       }
-      return { competicion, equipos_permitidos: null, partidos: null };
+      return { competicion, tramo: t, equipos_permitidos: null, partidos: null };
     });
 
     setEnviando(true);
@@ -279,7 +334,7 @@ function V2CrearInner() {
                 </label>
                 <label style={{ ...S.field, flex: 1 }}>
                   <span style={S.label}>Hasta</span>
-                  <select value={hasta} onChange={(e) => setHasta(e.target.value)} style={S.selectInput}>
+                  <select value={hasta} disabled={!!tramo} onChange={(e) => setHasta(e.target.value)} style={{ ...S.selectInput, opacity: tramo ? 0.5 : 1 }}>
                     {jornadasLiga
                       .filter((c) => numeroJornada(c.competicion) >= numeroJornada(desde))
                       .map((c) => (
@@ -339,20 +394,46 @@ function V2CrearInner() {
           )
         )}
 
+      {/* 17/10 (Iñi): jornada/torneo completo, solo los partidos de un día o una sola ronda. */}
+      {compTramos &&
+        (tramosDeSeleccion.length > 0 || !completaDisponible) &&
+        bloque(
+          deporte === 'golf' ? '¿Qué rondas cuentan?' : '¿Qué partidos cuentan?',
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {[{ tramo: null as string | null, cierre: compElegida?.soloTramos ? null : compElegida?.cierre ?? null, partidos: null as number | null, ok: completaDisponible }, ...tramosDeSeleccion.map((t) => ({ ...t, ok: true }))].map((t) => {
+              const on = tramo === t.tramo;
+              return (
+                <button
+                  key={t.tramo ?? 'completa'}
+                  type="button"
+                  disabled={!t.ok}
+                  onClick={() => setTramo(t.tramo)}
+                  style={{ textAlign: 'left', background: on ? 'rgba(167,139,250,0.12)' : 'transparent', border: `1px solid ${on ? V2_COLOR : S.BORDER}`, borderRadius: 12, padding: '10px 14px', cursor: t.ok ? 'pointer' : 'default', opacity: t.ok ? 1 : 0.45, display: 'flex', flexDirection: 'column', gap: 2 }}
+                >
+                  <span style={{ fontWeight: 800, fontSize: 13.5, color: on ? V2_COLOR : S.TEXT }}>{etiquetaTramo(t.tramo, deporte, t.partidos)}</span>
+                  <span style={{ fontSize: 11.5, color: S.MUTED_2 }}>{t.ok ? (t.cierre ? `Empieza ${fechaCorta(t.cierre)}` : '') : 'Ya ha empezado'}</span>
+                </button>
+              );
+            })}
+            {deporte === 'golf' && !tramosDeSeleccion.some((t) => t.tramo === 'r3') && <span style={{ fontSize: 11.5, color: S.MUTED_3 }}>La ronda 3, la 4 y el fin de semana se abren en cuanto se sepa el corte, solo con los que lo pasan.</span>}
+          </div>,
+          deporte === 'golf' ? 'Solo puntúan las rondas elegidas.' : 'Solo días con al menos 3 partidos. Sirve si se te ha pasado el inicio de la jornada.'
+        )}
+
       {unaJornadaFutbol &&
         partidos.length > 0 &&
         bloque(
-          `Partidos${varias ? ` de la jornada ${numeroJornada(unaJornadaFutbol)}` : ''} (${partidosOn.size} de ${partidos.length})`,
+          `Partidos${varias ? ` de la jornada ${numeroJornada(unaJornadaFutbol)}` : ''} (${partidosOn.size} de ${partidosVisibles.length})`,
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <div style={{ display: 'flex', gap: 6 }}>
-              <button type="button" style={S.pill(todosLosPartidos)} onClick={() => setPartidosOn(new Set(partidos.map((p) => `${p.local}|${p.visitante}`)))}>
+              <button type="button" style={S.pill(partidosOn.size === partidosVisibles.length)} onClick={() => setPartidosOn(new Set(partidosVisibles.map((p) => `${p.local}|${p.visitante}`)))}>
                 Todos
               </button>
               <button type="button" style={S.pill(false)} onClick={() => setPartidosOn(new Set())}>
                 Ninguno
               </button>
             </div>
-            {partidos.map((p) => {
+            {partidosVisibles.map((p) => {
               const k = `${p.local}|${p.visitante}`;
               const on = partidosOn.has(k);
               return (

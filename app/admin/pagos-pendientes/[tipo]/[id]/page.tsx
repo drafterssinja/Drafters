@@ -11,6 +11,7 @@ import { calcularTramosPorInscritos, calcularReparto, repartirPremiosConEmpates,
 import { formatGolfScore, calcularBonosPodio } from '@/lib/golfScoring';
 import { PorraFormato, PORRA_FORMATO_LABELS } from '@/lib/porraFormato';
 import Cargando from '@/components/Cargando';
+import { puntosGolfTramo, type PorRonda } from '@/lib/tramos';
 
 // ============================================================================
 // FICHA DE LIQUIDACIÓN de una sala o porra concreta (nuevo, 29/09)
@@ -35,7 +36,7 @@ import Cargando from '@/components/Cargando';
 type Tipo = 'sala' | 'porra';
 
 type PorraRow = { id: string; major: string; formato: PorraFormato; precio: number; competicion: string | null };
-type SalaRow = { id: string; nombre: string; tipo: TipoSala; aforo: number | null; buy_in: number; deporte: string; competicion: string; version?: number };
+type SalaRow = { id: string; nombre: string; tipo: TipoSala; aforo: number | null; buy_in: number; deporte: string; competicion: string; version?: number; tramo?: string | null };
 type EquipoRow = { id: string; nombre_equipo: string | null; usuario_id: string; jugadores: string[] };
 // CAMBIO 03/10 (pedido de Iñi): el desempate del bono de podio ya no mira el
 // grupo del jugador, mira su precio — ver lib/golfScoring.ts.
@@ -131,7 +132,7 @@ export default function AdminLiquidarPage() {
           }
         }
       } else {
-        const { data: salaData } = await supabase.from('salas').select('id, nombre, tipo, aforo, buy_in, deporte, competicion, version').eq('id', itemId).single();
+        const { data: salaData } = await supabase.from('salas').select('id, nombre, tipo, aforo, buy_in, deporte, competicion, version, tramo').eq('id', itemId).single();
         if (!activo) return;
         if (!salaData) {
           setError('No se ha encontrado esta sala.');
@@ -157,8 +158,9 @@ export default function AdminLiquidarPage() {
           // golf_puntos_jugador); se rellena sola la posición de cada equipo
           // (empatados = mismo puesto) y se puede corregir a mano.
           const tablaPuntos = salaRow.deporte === 'golf' ? 'golf_puntos_jugador' : 'futbol_puntos_jugador';
-          const { data: ptsData } = await supabase.from(tablaPuntos).select('jugador_id, puntos_total').eq('competicion', salaRow.competicion).range(0, 4999);
-          const pts = new Map(((ptsData as { jugador_id: string; puntos_total: number }[]) ?? []).map((f) => [f.jugador_id, Number(f.puntos_total)]));
+          // 17/10: mesas de una ronda / fin de semana → solo los puntos de esas rondas.
+          const { data: ptsData } = await supabase.from(tablaPuntos).select(salaRow.deporte === 'golf' ? 'jugador_id, puntos_total, por_ronda' : 'jugador_id, puntos_total').eq('competicion', salaRow.competicion).range(0, 4999);
+          const pts = new Map(((ptsData as unknown as { jugador_id: string; puntos_total: number; por_ronda?: PorRonda }[]) ?? []).map((f) => [f.jugador_id, puntosGolfTramo(f, salaRow.deporte === 'golf' ? salaRow.tramo : null).total]));
           const totales = equiposActivos.map((e) => ({ id: e.id, total: (e.jugadores ?? []).reduce((a, id) => a + (pts.get(id) ?? 0), 0) }));
           const sorted = totales.slice().sort((a, b) => b.total - a.total);
           const posiciones = new Map<string, string>();

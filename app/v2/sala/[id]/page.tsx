@@ -18,6 +18,7 @@ import CosteCredito from '@/components/v2/CosteCredito';
 import MiEquipoAmistoso from '@/components/v2/MiEquipoAmistoso';
 import { avisarCambioCreditos } from '@/components/v2/creditos';
 import ClasificacionAmistoso from '@/components/v2/ClasificacionAmistoso';
+import EtiquetaTramo from '@/components/v2/EtiquetaTramo';
 import EditorPremio, { PREMIO_VACIO } from '@/components/v2/EditorPremio';
 import { MODALIDAD_DESC, MODALIDAD_LABEL, cadaXSegundos, fechaCorta, mensajeError, premioValido,  type Amistoso, type AmistosoJornada, type Mensaje, type Premio, type Resumen } from '@/lib/v2';
 import Cargando from '@/components/Cargando';
@@ -316,6 +317,8 @@ export default function V2Sala() {
               )}
             </div>
             <Titulo>{amistoso.nombre}</Titulo>
+            {/* 17/10 (Iñi): justo debajo del nombre, si es de un solo día o una sola ronda. */}
+            {jornadas[0]?.tramo && <EtiquetaTramo tramo={jornadas[0].tramo} deporte={amistoso.deporte} />}
             <span style={{ fontSize: 11.5, fontWeight: 700, color: '#F0B94D', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{jornadas.map((j) => j.competicion).join(' · ')}</span>
             <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>
               <span style={{ color: V2_COLOR, fontWeight: 700 }}>{MODALIDAD_LABEL[amistoso.modalidad]}</span> · {n}/{amistoso.num_jugadores} jugadores

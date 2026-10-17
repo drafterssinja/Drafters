@@ -10,6 +10,7 @@ import { TIPO_SALA_LABELS, DEPORTE_LABELS, Deporte } from '@/lib/salaShared';
 import { TipoSala } from '@/lib/repartoPremios';
 import { PorraFormato, PORRA_FORMATO_LABELS } from '@/lib/porraFormato';
 import Cargando from '@/components/Cargando';
+import { etiquetaTramoCorta } from '@/lib/tramos';
 
 // ============================================================================
 // PAGOS PENDIENTES — liquidación de salas y porras (nuevo, 29/09)
@@ -37,11 +38,12 @@ import Cargando from '@/components/Cargando';
 // una, entrando en su ficha (/admin/pagos-pendientes/sala/[id] o
 // .../porra/[id]) para ver el reparto propuesto antes de confirmar.
 
-type SalaFila = { id: string; nombre: string; deporte: Deporte; tipo: TipoSala; estado: string; buy_in: number; competicion: string };
+type SalaFila = { id: string; nombre: string; deporte: Deporte; tipo: TipoSala; estado: string; buy_in: number; competicion: string; tramo?: string | null };
 type PorraFila = { id: string; major: string; formato: PorraFormato; estado: string; precio: number };
 type LiquidacionFila = { tipo: string; sala_id: string | null; porra_id: string | null };
 type EquipoFila = { sala_id: string | null; porra_id: string | null; inscripciones: { estado: string }[] };
-type GrupoCompeticion = { competicion: string; deporte: Deporte; mesas: number };
+// 17/10: un bloque por jornada/torneo Y tramo (completa, un día, una ronda).
+type GrupoCompeticion = { clave: string; competicion: string; tramo: string | null; deporte: Deporte; mesas: number };
 type EstadoGrupo = { listo: boolean; motivoNoListo: string | null; mesasJugadas: number; equipos: number };
 
 // 12/10, pedido de Iñi: solo se listan las mesas/porras que se han jugado
@@ -100,7 +102,7 @@ export default function AdminPagosPendientesPage() {
       setAutorizado(true);
 
       const [salasData, porrasData, liquidadas, equiposData] = await Promise.all([
-        todasLasFilas<SalaFila>((d, h) => supabase.from('salas').select('id, nombre, deporte, tipo, estado, buy_in, competicion').order('created_at', { ascending: false }).range(d, h)),
+        todasLasFilas<SalaFila>((d, h) => supabase.from('salas').select('id, nombre, deporte, tipo, estado, buy_in, competicion, tramo').order('created_at', { ascending: false }).range(d, h)),
         todasLasFilas<PorraFila>((d, h) => supabase.from('porras').select('id, major, formato, estado, precio').order('created_at', { ascending: false }).range(d, h)),
         todasLasFilas<LiquidacionFila>((d, h) => supabase.from('liquidaciones').select('tipo, sala_id, porra_id').range(d, h)),
         todasLasFilas<EquipoFila>((d, h) => supabase.from('equipos').select('sala_id, porra_id, inscripciones(estado)').range(d, h)),
@@ -133,9 +135,10 @@ export default function AdminPagosPendientesPage() {
 
       const mapaGrupos = new Map<string, GrupoCompeticion>();
       salasPendientes.forEach((s) => {
-        const g = mapaGrupos.get(s.competicion) ?? { competicion: s.competicion, deporte: s.deporte, mesas: 0 };
+        const clave = `${s.competicion}|${s.tramo ?? ''}`;
+        const g = mapaGrupos.get(clave) ?? { clave, competicion: s.competicion, tramo: s.tramo ?? null, deporte: s.deporte, mesas: 0 };
         g.mesas += 1;
-        mapaGrupos.set(s.competicion, g);
+        mapaGrupos.set(clave, g);
       });
       const listaGrupos = Array.from(mapaGrupos.values());
       setGrupos(listaGrupos);
@@ -148,9 +151,9 @@ export default function AdminPagosPendientesPage() {
             const r = await fetch('/api/admin/liquidar-competicion', {
               method: 'POST',
               headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
-              body: JSON.stringify({ competicion: g.competicion, soloComprobar: true }),
+              body: JSON.stringify({ competicion: g.competicion, tramo: g.tramo, soloComprobar: true }),
             });
-            if (r.ok) estados[g.competicion] = (await r.json()) as EstadoGrupo;
+            if (r.ok) estados[g.clave] = (await r.json()) as EstadoGrupo;
           } catch {
             // sin estado: se muestra igual, sin el aviso
           }
@@ -167,35 +170,36 @@ export default function AdminPagosPendientesPage() {
   }, [router, recargar]);
 
   async function liquidarGrupo(g: GrupoCompeticion) {
-    const estado = estadoGrupos[g.competicion];
+    const estado = estadoGrupos[g.clave];
+    const nombreGrupo = g.tramo ? `${g.competicion} (${etiquetaTramoCorta(g.tramo, g.deporte)})` : g.competicion;
     const sinMotor = g.deporte !== 'futbol' && g.deporte !== 'golf';
     if (sinMotor) return;
     let forzar = false;
     if (estado && !estado.listo) {
-      if (!window.confirm(`OJO: ${estado.motivoNoListo}\n\n¿Liquidar igualmente las ${g.mesas} mesas de ${g.competicion} con los puntos actuales? No se puede deshacer.`)) return;
+      if (!window.confirm(`OJO: ${estado.motivoNoListo}\n\n¿Liquidar igualmente las ${g.mesas} mesas de ${nombreGrupo} con los puntos actuales? No se puede deshacer.`)) return;
       forzar = true;
-    } else if (!window.confirm(`¿Liquidar las ${g.mesas} mesas de ${g.competicion}? Se reparten los premios con la clasificación final de cada mesa. No se puede deshacer.`)) {
+    } else if (!window.confirm(`¿Liquidar las ${g.mesas} mesas de ${nombreGrupo}? Se reparten los premios con la clasificación final de cada mesa. No se puede deshacer.`)) {
       return;
     }
     const {
       data: { session },
     } = await supabase.auth.getSession();
     if (!session) return;
-    setLiquidandoGrupo(g.competicion);
+    setLiquidandoGrupo(g.clave);
     setMensajeGrupo(null);
     try {
       const r = await fetch('/api/admin/liquidar-competicion', {
         method: 'POST',
         headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ competicion: g.competicion, forzar }),
+        body: JSON.stringify({ competicion: g.competicion, tramo: g.tramo, forzar }),
       });
       const json = await r.json();
       if (!r.ok) {
-        setMensajeGrupo({ competicion: g.competicion, texto: json.error ?? 'No se ha podido liquidar.', ok: false });
+        setMensajeGrupo({ competicion: nombreGrupo, texto: json.error ?? 'No se ha podido liquidar.', ok: false });
       } else {
         const fallos = (json.resultados as { ok: boolean; nombre: string; motivo: string }[]).filter((x) => !x.ok);
         setMensajeGrupo({
-          competicion: g.competicion,
+          competicion: nombreGrupo,
           ok: fallos.length === 0,
           texto:
             `${json.liquidadas} de ${json.mesasJugadas} mesas liquidadas.` +
@@ -204,7 +208,7 @@ export default function AdminPagosPendientesPage() {
         setRecargar((n) => n + 1);
       }
     } catch {
-      setMensajeGrupo({ competicion: g.competicion, texto: 'No se ha podido conectar. Inténtalo de nuevo.', ok: false });
+      setMensajeGrupo({ competicion: nombreGrupo, texto: 'No se ha podido conectar. Inténtalo de nuevo.', ok: false });
     }
     setLiquidandoGrupo(null);
   }
@@ -213,8 +217,8 @@ export default function AdminPagosPendientesPage() {
   // solo cuando ha terminado. Las mesas sueltas solo salen para deportes sin
   // puntuación automática (tenis).
   const tieneMotor = (d: string) => d === 'futbol' || d === 'golf';
-  const gruposListos = grupos.filter((g) => !tieneMotor(g.deporte) || estadoGrupos[g.competicion]?.listo);
-  const gruposEnJuego = grupos.filter((g) => tieneMotor(g.deporte) && !estadoGrupos[g.competicion]?.listo);
+  const gruposListos = grupos.filter((g) => !tieneMotor(g.deporte) || estadoGrupos[g.clave]?.listo);
+  const gruposEnJuego = grupos.filter((g) => tieneMotor(g.deporte) && !estadoGrupos[g.clave]?.listo);
   const salasSinMotor = salas.filter((s) => !tieneMotor(s.deporte));
 
   if (autorizado === null || !perfil) {
@@ -256,21 +260,23 @@ export default function AdminPagosPendientesPage() {
               {gruposListos.length === 0 && <p style={{ fontSize: 12.5, color: S.MUTED_3, margin: 0 }}>No hay ninguna jornada ni torneo terminado pendiente de liquidar.</p>}
               {gruposEnJuego.length > 0 && (
                 <p style={{ fontSize: 11.5, color: S.MUTED_2, margin: 0 }}>
-                  Todavía en juego (aparecerán aquí al terminar): {gruposEnJuego.map((g) => g.competicion).join(' · ')}
+                  Todavía en juego (aparecerán aquí al terminar): {gruposEnJuego.map((g) => (g.tramo ? `${g.competicion} (${etiquetaTramoCorta(g.tramo, g.deporte)})` : g.competicion)).join(' · ')}
                 </p>
               )}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {gruposListos.map((g) => {
-                  const estado = estadoGrupos[g.competicion];
+                  const estado = estadoGrupos[g.clave];
                   const sinMotor = g.deporte !== 'futbol' && g.deporte !== 'golf';
-                  const ocupado = liquidandoGrupo === g.competicion;
+                  const ocupado = liquidandoGrupo === g.clave;
                   return (
                     <div
-                      key={g.competicion}
+                      key={g.clave}
                       style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, background: S.PANEL, border: `1px solid ${S.ACCENT}`, borderRadius: 12, padding: '12px 14px' }}
                     >
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
-                        <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 14, color: S.TEXT }}>{g.competicion} pendiente de liquidar</span>
+                        <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 14, color: S.TEXT }}>{g.competicion}
+                          {g.tramo ? ` · ${etiquetaTramoCorta(g.tramo, g.deporte)}` : ''} pendiente de liquidar
+                        </span>
                         <span style={{ fontSize: 11, color: S.FAINT }}>
                           {DEPORTE_LABELS[g.deporte]} · {g.mesas} {g.mesas === 1 ? 'mesa' : 'mesas'}
                           {estado ? ` · ${estado.equipos} equipos` : ''}

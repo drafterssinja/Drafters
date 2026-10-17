@@ -31,6 +31,8 @@ import { TiraDraftis, PremiosDraftis, EntradaCredito } from '@/components/v2/Dra
 import { RecargaVideo, avisarCambioCreditos } from '@/components/v2/creditos';
 import type { Info as InfoLiga } from '@/components/v2/PanelLiga';
 import { competicionBonita, nombreMesaV2 } from '@/lib/draftisMesa';
+import { etiquetaTramo } from '@/lib/tramos';
+import EtiquetaTramo from '@/components/v2/EtiquetaTramo';
 import { mensajeError } from '@/lib/v2';
 
 // ============================================================================
@@ -53,6 +55,8 @@ type SalaRow = {
   fecha_limite_inscripcion: string | null;
   // 1 = V1 (€), 2 = mesa de la liga V2 (créditos y draftis)
   version?: number | null;
+  // 17/10: mesa de un solo día (fútbol) o de una sola ronda (golf).
+  tramo?: string | null;
 };
 
 type EquipoMio = {
@@ -111,7 +115,7 @@ export default function SalaDetallePage() {
 
       const [{ data: perfilData }, { data: salaData }] = await Promise.all([
         supabase.from('perfiles').select('*').eq('id', session.user.id).single(),
-        supabase.from('salas').select('id,nombre,competicion,deporte,tipo,aforo,buy_in,estado,fecha_limite_inscripcion,version').eq('id', salaId).single(),
+        supabase.from('salas').select('id,nombre,competicion,deporte,tipo,aforo,buy_in,estado,fecha_limite_inscripcion,version,tramo').eq('id', salaId).single(),
       ]);
 
       if (!activo) return;
@@ -319,6 +323,8 @@ export default function SalaDetallePage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#F0B94D' }}>{esV2 ? competicionBonita(sala.competicion) : sala.competicion}</span>
             <h1 style={{ fontSize: 24, fontWeight: 800, color: S.TEXT, lineHeight: 1.15 }}>{esV2 ? nombreMesaV2(sala.nombre) : sala.nombre}</h1>
+            {/* 17/10 (Iñi): justo debajo del nombre, qué partidos o rondas cuentan. */}
+            {esV2 && <EtiquetaTramo tramo={sala.tramo} deporte={sala.deporte} completa />}
             {esV2 && (
               <Link
                 href={`/v2/${sala.deporte}/clasificacion`}
@@ -435,6 +441,7 @@ export default function SalaDetallePage() {
                 <>
                   <InfoRow label="Entrada" value={<EntradaCredito />} />
                   <InfoRow label="Tipo de sala" value={tipoLabel} />
+                  <InfoRow label={sala.deporte === 'golf' ? 'Rondas que cuentan' : 'Partidos que cuentan'} value={etiquetaTramo(sala.tramo, sala.deporte)} />
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '13px 14px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
                       <span style={{ fontSize: 13, color: S.MUTED_2 }}>Formato</span>

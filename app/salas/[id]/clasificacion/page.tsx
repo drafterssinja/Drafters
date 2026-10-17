@@ -21,6 +21,8 @@ import { formatPuntos } from '@/lib/futbolLaLiga';
 import type { LineaDesglose } from '@/lib/futbolPuntuacion';
 import TablaHoyoAHoyo, { type CasillaHoyo, type FilaRondaTabla } from '@/components/TablaHoyoAHoyo';
 import Cargando from '@/components/Cargando';
+import { puntosGolfTramo, type PorRonda } from '@/lib/tramos';
+import EtiquetaTramo from '@/components/v2/EtiquetaTramo';
 
 // ============================================================================
 // CLASIFICACIÓN EN DIRECTO DE UNA MESA DRAFTERS (nuevo, 30/09)
@@ -57,7 +59,7 @@ import Cargando from '@/components/Cargando';
 // lib/favoritosEquipo.ts y app/porras/[id]/clasificacion/page.tsx (misma
 // función, reutilizada igual).
 
-type SalaRow = { id: string; nombre: string; competicion: string; deporte: string; tipo: string; estado: string; fecha_limite_inscripcion: string | null; buy_in: number; aforo: number | null; version?: number | null };
+type SalaRow = { id: string; nombre: string; competicion: string; deporte: string; tipo: string; estado: string; fecha_limite_inscripcion: string | null; buy_in: number; aforo: number | null; version?: number | null; tramo?: string | null };
 type JugadorRow = {
   id: string;
   nombre: string;
@@ -73,12 +75,16 @@ type HoyoRow = { ronda: number; hoyo: number; par: number; golpes: number; campo
 type Vista = 'mesa' | 'torneo' | 'premios' | 'eventos';
 
 // Puntos Drafters de golf de todo el campo de la competición (07/10).
-async function cargarPuntosGolf(competicion: string): Promise<Map<string, PuntosGolfRow>> {
+// 17/10: en las mesas de una ronda o del fin de semana, solo esas rondas.
+async function cargarPuntosGolf(competicion: string, tramo: string | null = null): Promise<Map<string, PuntosGolfRow>> {
   const mapa = new Map<string, PuntosGolfRow>();
   for (let desde = 0; ; desde += 1000) {
-    const { data } = await supabase.from('golf_puntos_jugador').select('jugador_id,puntos_total,desglose').eq('competicion', competicion).range(desde, desde + 999);
-    const filas = (data as PuntosGolfRow[]) ?? [];
-    filas.forEach((f) => mapa.set(f.jugador_id, f));
+    const { data } = await supabase.from('golf_puntos_jugador').select('jugador_id,puntos_total,desglose,por_ronda').eq('competicion', competicion).range(desde, desde + 999);
+    const filas = (data as (PuntosGolfRow & { por_ronda?: PorRonda })[]) ?? [];
+    filas.forEach((f) => {
+      const t = puntosGolfTramo(f, tramo);
+      mapa.set(f.jugador_id, { jugador_id: f.jugador_id, puntos_total: t.total, desglose: t.desglose });
+    });
     if (filas.length < 1000) break;
   }
   return mapa;
@@ -172,7 +178,7 @@ export default function SalaClasificacionPage() {
 
       const [{ data: perfilData }, { data: salaData }, favoritosSet, favoritosJugadorSet] = await Promise.all([
         supabase.from('perfiles').select('*').eq('id', session.user.id).single(),
-        supabase.from('salas').select('id,nombre,competicion,deporte,tipo,estado,fecha_limite_inscripcion,buy_in,aforo,version').eq('id', salaId).single(),
+        supabase.from('salas').select('id,nombre,competicion,deporte,tipo,estado,fecha_limite_inscripcion,buy_in,aforo,version,tramo').eq('id', salaId).single(),
         cargarFavoritos(session.user.id),
         cargarFavoritosJugador(session.user.id),
       ]);
@@ -238,7 +244,7 @@ export default function SalaClasificacionPage() {
 
       const jugadoresCargados = (jugData as JugadorRow[]) ?? [];
       setJugadores(jugadoresCargados);
-      cargarPuntosGolf(salaRow.competicion).then((m) => {
+      cargarPuntosGolf(salaRow.competicion, salaRow.tramo ?? null).then((m) => {
         if (activo) setPuntosGolf(m);
       });
       const camposArr = (camposData as { campo_id: string; nombre: string }[]) ?? [];
@@ -361,7 +367,7 @@ export default function SalaClasificacionPage() {
           .select('id,nombre,resultado_en_vivo_total,resultado_en_vivo_thru,resultado_en_vivo_ronda,resultado_en_vivo_posicion')
           .eq('deporte', 'golf')
           .eq('competicion', competicion as string),
-        cargarPuntosGolf(competicion as string),
+        cargarPuntosGolf(competicion as string, sala?.tramo ?? null),
       ]);
       if (!activo) return;
       if (jugData && (jugData as JugadorRow[]).length > 0) setJugadores(jugData as JugadorRow[]);
@@ -596,6 +602,7 @@ export default function SalaClasificacionPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '24px 20px 40px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#3DDC84' }}>{sala.nombre}</span>
+            {sala.tramo && <EtiquetaTramo tramo={sala.tramo} deporte={sala.deporte} />}
             {/* CAMBIO 04/10 (pedido de Iñi, mismo criterio que
                 app/porras/[id]/clasificacion/page.tsx): en cuanto el torneo
                 termina, el título deja de decir "en directo". */}

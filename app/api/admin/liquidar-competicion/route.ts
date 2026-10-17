@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'No autorizado.' }, { status: 401 });
   }
 
-  let body: { competicion?: string; soloComprobar?: boolean; forzar?: boolean } = {};
+  let body: { competicion?: string; soloComprobar?: boolean; forzar?: boolean; tramo?: string | null } = {};
   try {
     body = await req.json();
   } catch {
@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
   if (!competicion) return NextResponse.json({ error: 'Falta la competición.' }, { status: 400 });
 
   try {
-    const resultado = await liquidarMesasDeCompeticion(admin, competicion, { soloComprobar: !!body.soloComprobar, forzar: !!body.forzar });
+    const resultado = await liquidarMesasDeCompeticion(admin, competicion, { soloComprobar: !!body.soloComprobar, forzar: !!body.forzar, tramo: body.tramo ?? null });
     return NextResponse.json(resultado);
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
