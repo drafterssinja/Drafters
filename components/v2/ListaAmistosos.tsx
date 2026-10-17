@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 import * as S from '@/lib/mockupStyles';
+import EtiquetaTramo from '@/components/v2/EtiquetaTramo';
 import { V2_COLOR } from '@/components/v2/MarcoV2';
 import TiraPuestos from '@/components/v2/TiraPuestos';
 import { IconoCandado, type DeporteV2 } from '@/components/v2/IconosV2';
@@ -31,6 +32,8 @@ type FilaLista = {
   empezada?: boolean;
   // 16/10 (SQL 44): sala de Drafters (creada sola, sin administrador).
   sistema?: boolean;
+  // 17/10 (SQL 49): tramo de cada jornada ('' = completa).
+  tramos?: string[] | null;
 };
 
 export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
@@ -137,6 +140,7 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
                   {a.inscritos}/{a.num_jugadores}
                 </span>
               </div>
+              {a.tramos?.[0] && <EtiquetaTramo tramo={a.tramos[0]} deporte={a.deporte} compacta />}
               <span style={{ fontSize: 11, fontWeight: 700, color: '#F0B94D', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                 {a.competiciones.length > 1 ? `${a.competiciones[0]} → ${a.competiciones[a.competiciones.length - 1].replace(/^.* - /, '')}` : a.competiciones[0]}
               </span>

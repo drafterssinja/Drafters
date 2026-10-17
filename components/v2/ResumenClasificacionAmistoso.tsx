@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { etiquetasPosicion } from '@/lib/posicionesEmpate';
 import { formatPuntos } from '@/lib/futbolLaLiga';
 import * as S from '@/lib/mockupStyles';
+import { puntosGolfTramo, type PorRonda } from '@/lib/tramos';
 import type { Resumen } from '@/lib/v2';
 
 // "Vas 2º de 6 · 109 pts ▾" de un amistoso (16/10, Iñi): lo mismo que en "mis
@@ -29,8 +30,9 @@ export default function ResumenClasificacionAmistoso({ amistosoId, deporte, resu
       for (const comp of Array.from(new Set(eqs.map((e) => e.competicion)))) {
         const ids = Array.from(new Set(eqs.filter((e) => e.competicion === comp).flatMap((e) => e.jugadores)));
         for (let i = 0; i < ids.length; i += 200) {
-          const { data: ps } = await supabase.from(tabla).select('jugador_id,puntos_total').eq('competicion', comp).in('jugador_id', ids.slice(i, i + 200));
-          ((ps as { jugador_id: string; puntos_total: number }[]) ?? []).forEach((p) => pts.set(`${comp}|${p.jugador_id}`, Number(p.puntos_total) || 0));
+          // 17/10: en una ronda suelta de golf solo cuentan sus puntos.
+          const { data: ps } = await supabase.from(tabla).select(tabla === 'golf_puntos_jugador' ? 'jugador_id,puntos_total,por_ronda' : 'jugador_id,puntos_total').eq('competicion', comp).in('jugador_id', ids.slice(i, i + 200));
+          ((ps as unknown as { jugador_id: string; puntos_total: number; por_ronda?: PorRonda }[]) ?? []).forEach((p) => pts.set(`${comp}|${p.jugador_id}`, puntosGolfTramo(p, tabla === 'golf_puntos_jugador' ? resumen.jornadas.find((j) => j.competicion === comp)?.tramo ?? null : null).total));
         }
       }
       const lista = resumen.participantes

@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { etiquetasPosicion } from '@/lib/posicionesEmpate';
 import { formatPuntos } from '@/lib/futbolLaLiga';
 import * as S from '@/lib/mockupStyles';
+import { puntosGolfTramo, type PorRonda } from '@/lib/tramos';
 
 // ============================================================================
 // "VAS 2º DE 6" EN EL RESUMEN DE MIS MESAS (Inicio) — 13/10, pedido de Iñi
@@ -19,7 +20,8 @@ import * as S from '@/lib/mockupStyles';
 type Fila = { equipoId: string; nombre: string; total: number };
 
 // 16/10: `tercera` = se habla de otro (perfil de un amigo): "Va 2º de 6".
-export default function ResumenClasificacionMesa({ salaId, competicion, deporte, miEquipoId, finalizada = false, tercera = false }: { salaId: string; competicion: string; deporte: string; miEquipoId: string; finalizada?: boolean; tercera?: boolean }) {
+// 17/10: `tramo` = mesa de una ronda de golf (solo cuentan esas rondas).
+export default function ResumenClasificacionMesa({ salaId, competicion, deporte, miEquipoId, finalizada = false, tercera = false, tramo = null }: { salaId: string; competicion: string; deporte: string; miEquipoId: string; finalizada?: boolean; tercera?: boolean; tramo?: string | null }) {
   const [filas, setFilas] = useState<Fila[] | null>(null);
   const [abierto, setAbierto] = useState(false);
 
@@ -43,8 +45,8 @@ export default function ResumenClasificacionMesa({ salaId, competicion, deporte,
       const tabla = deporte === 'golf' ? 'golf_puntos_jugador' : 'futbol_puntos_jugador';
       const puntos = new Map<string, number>();
       for (let i = 0; i < ids.length; i += 200) {
-        const { data } = await supabase.from(tabla).select('jugador_id,puntos_total').eq('competicion', competicion).in('jugador_id', ids.slice(i, i + 200));
-        ((data as { jugador_id: string; puntos_total: number }[]) ?? []).forEach((p) => puntos.set(p.jugador_id, Number(p.puntos_total) || 0));
+        const { data } = await supabase.from(tabla).select(deporte === 'golf' ? 'jugador_id,puntos_total,por_ronda' : 'jugador_id,puntos_total').eq('competicion', competicion).in('jugador_id', ids.slice(i, i + 200));
+        ((data as unknown as { jugador_id: string; puntos_total: number; por_ronda?: PorRonda }[]) ?? []).forEach((p) => puntos.set(p.jugador_id, puntosGolfTramo(p, deporte === 'golf' ? tramo : null).total));
       }
       const lista = equipos
         .map((e) => ({ equipoId: e.id, nombre: e.nombre, total: Math.round(e.jugadores.reduce((a, id) => a + (puntos.get(id) ?? 0), 0) * 100) / 100 }))
@@ -67,7 +69,7 @@ export default function ResumenClasificacionMesa({ salaId, competicion, deporte,
       clearInterval(intervalo);
       document.removeEventListener('visibilitychange', alVolver);
     };
-  }, [salaId, competicion, deporte, finalizada]);
+  }, [salaId, competicion, deporte, finalizada, tramo]);
 
   if (!filas || filas.length === 0) return null;
   const etiquetas = etiquetasPosicion(filas, (f) => f.total);

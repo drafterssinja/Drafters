@@ -9,6 +9,7 @@ import type { TipoSala } from '@/lib/repartoPremios';
 import type { DeporteV2 } from '@/components/v2/IconosV2';
 import ResumenClasificacionMesa from '@/components/ResumenClasificacionMesa';
 import ResumenClasificacionAmistoso from '@/components/v2/ResumenClasificacionAmistoso';
+import EtiquetaTramo from '@/components/v2/EtiquetaTramo';
 import { MODALIDAD_LABEL, cadaXSegundos, type Modalidad, type Resumen } from '@/lib/v2';
 
 // ============================================================================
@@ -23,10 +24,10 @@ import { MODALIDAD_LABEL, cadaXSegundos, type Modalidad, type Resumen } from '@/
 type MesaLiga = {
   id: string;
   sala_id: string;
-  salas: { id: string; nombre: string; competicion: string; tipo: TipoSala; aforo: number | null; estado: string; fecha_limite_inscripcion: string | null; deporte: string } | null;
+  salas: { id: string; nombre: string; competicion: string; tipo: TipoSala; aforo: number | null; estado: string; fecha_limite_inscripcion: string | null; deporte: string; tramo?: string | null } | null;
   inscripciones: { estado: string }[];
 };
-type FilaAmistoso = { id: string; nombre: string; deporte: string; modalidad: Modalidad; competiciones: string[]; soy_participante: boolean; estado: string; created_at: string };
+type FilaAmistoso = { id: string; nombre: string; deporte: string; modalidad: Modalidad; competiciones: string[]; soy_participante: boolean; estado: string; created_at: string; tramos?: string[] | null };
 type Item =
   | { tipo: 'mesa'; key: string; orden: number; finalizada: boolean; empezada: boolean; mesa: MesaLiga }
   | { tipo: 'amistoso'; key: string; orden: number; finalizada: boolean; empezada: boolean; am: FilaAmistoso; resumen: Resumen };
@@ -49,7 +50,7 @@ export default function MisEquiposV2({ deporte, miId }: { deporte: DeporteV2; mi
     const [{ data: mesas }, { data: lista }] = await Promise.all([
       supabase
         .from('equipos')
-        .select('id,sala_id,created_at,salas!inner(id,nombre,competicion,tipo,aforo,estado,fecha_limite_inscripcion,deporte),inscripciones(estado)')
+        .select('id,sala_id,created_at,salas!inner(id,nombre,competicion,tipo,aforo,estado,fecha_limite_inscripcion,deporte,tramo),inscripciones(estado)')
         .eq('usuario_id', miId)
         .eq('salas.deporte', deporte)
         .eq('salas.version', 2)
@@ -117,8 +118,9 @@ export default function MisEquiposV2({ deporte, miId }: { deporte: DeporteV2; mi
                   <span style={{ fontSize: 13, fontWeight: 600, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {TIPO_SALA_LABELS[s.tipo] ?? s.nombre} · {s.aforo} jugadores
                   </span>
+                  {s.tramo && <EtiquetaTramo tramo={s.tramo} deporte={s.deporte} compacta />}
                 </Link>
-                {(it.empezada || it.finalizada) && <ResumenClasificacionMesa salaId={s.id} competicion={s.competicion} deporte={s.deporte} miEquipoId={it.mesa.id} finalizada={it.finalizada} />}
+                {(it.empezada || it.finalizada) && <ResumenClasificacionMesa salaId={s.id} competicion={s.competicion} deporte={s.deporte} miEquipoId={it.mesa.id} finalizada={it.finalizada} tramo={s.tramo ?? null} />}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
                 <Link href={`/salas/${s.id}`} style={botonVer}>
@@ -144,6 +146,7 @@ export default function MisEquiposV2({ deporte, miId }: { deporte: DeporteV2; mi
                 <span style={{ fontSize: 13, fontWeight: 600, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {a.nombre} · <span style={{ color: '#A78BFA' }}>{MODALIDAD_LABEL[a.modalidad]}</span>
                 </span>
+                {a.tramos?.[0] && <EtiquetaTramo tramo={a.tramos[0]} deporte={a.deporte} compacta />}
               </Link>
               {(it.empezada || it.finalizada) && <ResumenClasificacionAmistoso amistosoId={a.id} deporte={a.deporte} resumen={it.resumen} miId={miId} finalizada={it.finalizada} />}
             </div>

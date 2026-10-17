@@ -18,6 +18,8 @@ import CabeceraV2 from '@/components/v2/CabeceraV2';
 import { avisarCambioCreditos } from '@/components/v2/creditos';
 import type { DeporteV2 } from '@/components/v2/IconosV2';
 import Cargando from '@/components/Cargando';
+import EtiquetaTramo from '@/components/v2/EtiquetaTramo';
+import { aplicarTramo } from '@/lib/tramosCliente';
 
 // ============================================================================
 // CREAR EQUIPO EN UNA SALA (isCrearEquipo + isConfirmarEquipo de Main.dc.html,
@@ -48,6 +50,8 @@ type SalaRow = {
   buy_in: number;
   estado: string;
   fecha_limite_inscripcion: string | null;
+  // 17/10: mesa / jornada de un solo día (fútbol) o de una sola ronda (golf).
+  tramo?: string | null;
 };
 
 type EquipoHecho = { id: string; etiqueta: string; jugadores: string[]; alineacion: string | null; grupo?: string };
@@ -200,7 +204,7 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
 
       const [{ data: perfilData }, { data: salaData }] = await Promise.all([
         supabase.from('perfiles').select('*').eq('id', session.user.id).single(),
-        supabase.from('salas').select('id,nombre,competicion,deporte,tipo,aforo,buy_in,estado,fecha_limite_inscripcion').eq('id', salaId).single(),
+        supabase.from('salas').select('id,nombre,competicion,deporte,tipo,aforo,buy_in,estado,fecha_limite_inscripcion,tramo').eq('id', salaId).single(),
       ]);
 
       if (!activo) return;
@@ -340,21 +344,24 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
         setEquiposHechos(hechos);
       }
 
+      // 17/10: en las mesas de un día / una ronda, solo sus jugadores (y precios del corte).
+      const enTramo = await aplicarTramo(salaRow.deporte, salaRow.competicion, salaRow.tramo, ((jugData as JugadorRow[]) ?? []).filter((j) => !j.baja), (partidosData as PartidoRow[] | null) ?? []);
+      if (!activo) return;
       setSala(salaRow);
       // Bajas (jugadores que no van a jugar) fuera de la lista: no se pueden fichar.
-      setJugadores(((jugData as JugadorRow[]) ?? []).filter((j) => !j.baja));
-      setPartidos((partidosData as PartidoRow[] | null) ?? []);
+      setJugadores(enTramo.jugadores);
+      setPartidos(enTramo.partidos);
       setCargando(false);
     }
 
     // ---- Amistoso de V2 (16/10) ----
     async function cargarAmistoso(uid: string, am: AmistosoEquipo) {
       type FilaAm = { id: string; nombre: string; deporte: string; modalidad: AmistosoInfo['modalidad']; num_jugadores: number; estado: string; equipo_fijo: boolean | null };
-      type FilaJo = { competicion: string; orden: number; equipos_permitidos: string[] | null; cierre: string | null };
+      type FilaJo = { competicion: string; orden: number; equipos_permitidos: string[] | null; cierre: string | null; tramo?: string | null };
       const [{ data: perfilData }, { data: aData }, { data: jData }, { data: mioData }, { data: dentroData }] = await Promise.all([
         supabase.from('perfiles').select('*').eq('id', uid).single(),
         supabase.from('amistosos').select('id,nombre,deporte,modalidad,num_jugadores,estado,equipo_fijo').eq('id', am.id).maybeSingle(),
-        supabase.from('amistoso_jornadas').select('competicion,orden,equipos_permitidos,cierre').eq('amistoso_id', am.id).eq('competicion', am.competicion).maybeSingle(),
+        supabase.from('amistoso_jornadas').select('competicion,orden,equipos_permitidos,cierre,tramo').eq('amistoso_id', am.id).eq('competicion', am.competicion).maybeSingle(),
         supabase.from('amistoso_equipos').select('jugadores,alineacion').eq('amistoso_id', am.id).eq('competicion', am.competicion).eq('usuario_id', uid).maybeSingle(),
         supabase.from('amistoso_participantes').select('usuario_id').eq('amistoso_id', am.id).eq('usuario_id', uid).maybeSingle(),
       ]);
@@ -372,7 +379,7 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
         router.replace(`/v2/sala/${am.id}`);
         return;
       }
-      const salaRow: SalaRow = { id: a.id, nombre: a.nombre, competicion: jo.competicion, deporte: a.deporte, tipo: 'amistoso', aforo: a.num_jugadores, buy_in: 0, estado: a.estado, fecha_limite_inscripcion: jo.cierre };
+      const salaRow: SalaRow = { id: a.id, nombre: a.nombre, competicion: jo.competicion, deporte: a.deporte, tipo: 'amistoso', aforo: a.num_jugadores, buy_in: 0, estado: a.estado, fecha_limite_inscripcion: jo.cierre, tramo: jo.tramo ?? null };
       const permitidos = jo.equipos_permitidos ? new Set(jo.equipos_permitidos) : null;
       // 16/10 (Iñi): con presupuesto solo se ofrecen equipos hechos en ESTA jornada
       // (los precios cambian de una a otra). En libre, cualquiera.
@@ -425,7 +432,15 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
       }
 
       const mio = mioData as { jugadores: string[]; alineacion: string | null } | null;
-      const disponibles = ((jugData as JugadorRow[]) ?? []).filter((j) => !j.baja && (!permitidos || (j.equipo_real && permitidos.has(j.equipo_real))));
+      const enTramo = await aplicarTramo(
+        a.deporte,
+        jo.competicion,
+        jo.tramo,
+        ((jugData as JugadorRow[]) ?? []).filter((j) => !j.baja && (!permitidos || (j.equipo_real && permitidos.has(j.equipo_real)))),
+        ((partidosData as PartidoRow[] | null) ?? []).filter((p) => !permitidos || (permitidos.has(p.equipo_local) && permitidos.has(p.equipo_visitante)))
+      );
+      if (!activo) return;
+      const disponibles = enTramo.jugadores;
       if (mio) {
         const ids = new Set(disponibles.map((j) => j.id));
         setSelected((mio.jugadores ?? []).filter((x) => ids.has(x)));
@@ -436,7 +451,7 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
       setEquiposHechos(hechos);
       setSala(salaRow);
       setJugadores(disponibles);
-      setPartidos(((partidosData as PartidoRow[] | null) ?? []).filter((p) => !permitidos || (permitidos.has(p.equipo_local) && permitidos.has(p.equipo_visitante))));
+      setPartidos(enTramo.partidos);
       setCargando(false);
     }
 
@@ -942,6 +957,7 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 0, minWidth: 0 }}>
                   <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#F0B94D' }}>{sala.competicion}</span>
                   <h1 style={{ fontSize: 18, fontWeight: 800, color: S.TEXT, lineHeight: 1.15 }}>{modoEdicion || infoAmistoso?.tieneEquipo ? 'Modifica tu equipo' : 'Crea tu equipo'}</h1>
+                  {sala.tramo && <EtiquetaTramo tramo={sala.tramo} deporte={sala.deporte} compacta />}
                 </div>
               </div>
 

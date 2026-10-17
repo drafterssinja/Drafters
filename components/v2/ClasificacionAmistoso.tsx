@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { supabase } from '@/lib/supabaseClient';
 import * as S from '@/lib/mockupStyles';
+import { puntosGolfTramo, type PorRonda } from '@/lib/tramos';
 import { formatPuntos } from '@/lib/futbolLaLiga';
 import { V2_COLOR } from '@/components/v2/MarcoV2';
 import Cargando from '@/components/Cargando';
@@ -86,7 +87,7 @@ function ClasificacionAmistosoFutbol(props: Props) {
         <ClasificacionMesaFutbol
           key={vista}
           embebido
-          sala={{ id: amistoso.id, nombre: amistoso.nombre, competicion: vista, tipo: 'amistoso', estado: terminada(vista) ? 'finalizada' : 'abierta', buy_in: 0, aforo: amistoso.num_jugadores, fecha_limite_inscripcion: null }}
+          sala={{ id: amistoso.id, nombre: amistoso.nombre, competicion: vista, tipo: 'amistoso', estado: terminada(vista) ? 'finalizada' : 'abierta', buy_in: 0, aforo: amistoso.num_jugadores, fecha_limite_inscripcion: null, tramo: jornadas.find((j) => j.competicion === vista)?.tramo ?? null }}
           externo={{ equipos: equiposVista, misJugadores: equiposVista.find((e) => e.equipoId === miId)?.jugadores ?? [] }}
           premios={premios}
         />
@@ -126,8 +127,9 @@ function ListaClasificacionAmistoso({ amistoso, jornadas, resumen, miId, vistaIn
       for (const comp of Array.from(new Set(eqs.map((e) => e.competicion)))) {
         const idsComp = Array.from(new Set(eqs.filter((e) => e.competicion === comp).flatMap((e) => e.jugadores)));
         for (let i = 0; i < idsComp.length; i += 200) {
-          const { data: ps } = await supabase.from(tabla).select('jugador_id,puntos_total').eq('competicion', comp).in('jugador_id', idsComp.slice(i, i + 200));
-          ((ps as { jugador_id: string; puntos_total: number }[]) ?? []).forEach((p) => pts.set(`${comp}|${p.jugador_id}`, Number(p.puntos_total) || 0));
+          // 17/10: en una ronda suelta de golf solo cuentan sus puntos.
+          const { data: ps } = await supabase.from(tabla).select(tabla === 'golf_puntos_jugador' ? 'jugador_id,puntos_total,por_ronda' : 'jugador_id,puntos_total').eq('competicion', comp).in('jugador_id', idsComp.slice(i, i + 200));
+          ((ps as unknown as { jugador_id: string; puntos_total: number; por_ronda?: PorRonda }[]) ?? []).forEach((p) => pts.set(`${comp}|${p.jugador_id}`, puntosGolfTramo(p, tabla === 'golf_puntos_jugador' ? resumen.jornadas.find((j) => j.competicion === comp)?.tramo ?? null : null).total));
         }
       }
       if (!activo) return;

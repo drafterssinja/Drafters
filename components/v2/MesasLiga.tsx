@@ -15,6 +15,8 @@ import { Panel } from '@/components/v2/MarcoV2';
 import PanelLiga, { type Info as InfoLiga } from '@/components/v2/PanelLiga';
 import { fechaCorta, mensajeError } from '@/lib/v2';
 import Cargando from '@/components/Cargando';
+import EtiquetaTramo from '@/components/v2/EtiquetaTramo';
+import { ordenTramo } from '@/lib/tramos';
 
 // ============================================================================
 // MESAS DE LIGA DE UN DEPORTE (V2, 15/10)
@@ -24,7 +26,7 @@ import Cargando from '@/components/Cargando';
 // enseña una mesa de cada tipo y tamaño. Máximo 3 mesas por jornada (fútbol) o
 // semana (golf/tenis).
 
-type Sala = { id: string; nombre: string; competicion: string; tipo: TipoSala; aforo: number | null; buy_in: number; estado: string; fecha_limite_inscripcion: string | null };
+type Sala = { id: string; nombre: string; competicion: string; tipo: TipoSala; aforo: number | null; buy_in: number; estado: string; fecha_limite_inscripcion: string | null; tramo?: string | null };
 type MiEquipo = { id: string; sala_id: string; salas: Sala | null; inscripciones: { estado: string }[] };
 
 const GANAN: Record<string, (aforo: number) => number> = {
@@ -60,6 +62,16 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
   const [recargarPara, setRecargarPara] = useState<string | null>(null);
   const [entrando, setEntrando] = useState<string | null>(null);
   const [cambiadas, setCambiadas] = useState<Set<string>>(new Set());
+  // Nº de partidos de cada día (para la etiqueta "Solo partidos del sábado · 4 partidos").
+  const [partidosPorTramo, setPartidosPorTramo] = useState<Map<string, number>>(new Map());
+  useEffect(() => {
+    if (deporte !== 'futbol') return;
+    void supabase.rpc('v2_tramos_disponibles', { p_deporte: deporte }).then(({ data }) => {
+      const m = new Map<string, number>();
+      ((data as { competicion: string; tramo: string; partidos: number | null }[]) ?? []).forEach((x) => x.partidos && m.set(`${x.competicion}|${x.tramo}`, x.partidos));
+      setPartidosPorTramo(m);
+    });
+  }, [deporte, salas]);
   const previos = useRef<Map<string, number> | null>(null);
   // 15/10 (Iñi): las mesas de la liga son solo para los apuntados. Si no lo
   // estás, en vez de las mesas se ve directamente la información de la
@@ -75,8 +87,11 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
   const sinApuntar = !!temporada && !temporada.yo;
 
   const cargarSalas = useCallback(async () => {
+    // 17/10: antes de leerlas, que existan las mesas de un solo día (fútbol)
+    // o de una sola ronda (golf) de las jornadas/torneos abiertos (SQL 49).
+    await supabase.rpc('v2_asegurar_mesas_tramo', { p_deporte: deporte });
     const { data } = await todasLasFilas<Sala>((d, h) =>
-      supabase.from('salas').select('id,nombre,competicion,tipo,aforo,buy_in,estado,fecha_limite_inscripcion').eq('deporte', deporte).eq('version', 2).neq('tipo', 'maraton').order('id').range(d, h)
+      supabase.from('salas').select('id,nombre,competicion,tipo,aforo,buy_in,estado,fecha_limite_inscripcion,tramo').eq('deporte', deporte).eq('version', 2).neq('tipo', 'maraton').order('id').range(d, h)
     );
     setSalas(data);
   }, [deporte]);
@@ -146,7 +161,7 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
     abiertas
       .filter((s) => s.competicion === compActiva)
       .forEach((s) => {
-        const k = `${s.tipo}-${s.aforo}`;
+        const k = `${s.tramo ?? ''}-${s.tipo}-${s.aforo}`;
         const actual = porVariante.get(k);
         const yoEstoy = misSalaIds.has(s.id);
         if (!actual || (yoEstoy && !misSalaIds.has(actual.id)) || (!misSalaIds.has(actual.id) && (inscritos.get(s.id) ?? 0) > (inscritos.get(actual.id) ?? 0))) porVariante.set(k, s);
@@ -158,6 +173,14 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [abiertas, compActiva, inscritos, misEquipos]);
+
+  // Tramos de la competición elegida (completa primero) y su cierre.
+  const tramosVisibles = Array.from(new Set(mesas.map((s) => s.tramo ?? ''))).sort((a, b) => ordenTramo(a || null).localeCompare(ordenTramo(b || null)));
+  const cierreDeTramo = (t: string): string | null => {
+    const fechas = abiertas.filter((s) => s.competicion === compActiva && (s.tramo ?? '') === t && s.fecha_limite_inscripcion).map((s) => s.fecha_limite_inscripcion as string);
+    return fechas.length ? fechas.sort()[0] : null;
+  };
+  const partidosDeTramo = (t: string): number | null => (t ? (partidosPorTramo.get(`${compActiva}|${t}`) ?? null) : null);
 
   const salaRef = mesas[0] ?? abiertas.find((s) => s.competicion === compActiva) ?? null;
   const periodoActivo = salaRef ? periodoDe(deporte, salaRef) : null;
@@ -230,8 +253,15 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
           </div>
           {aviso && <p style={{ ...S.errorText, fontSize: 12.5 }}>{aviso}</p>}
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {mesas.map((s) => {
+          {/* 17/10 (Iñi): un bloque por tramo — jornada/torneo completo, cada día
+              con 3+ partidos (fútbol) y cada ronda / fin de semana (golf). */}
+          {tramosVisibles.map((t) => (
+          <div key={t || 'completa'} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 6 }}>
+              <EtiquetaTramo tramo={t || null} deporte={deporte} completa partidos={partidosDeTramo(t)} />
+              {cierreDeTramo(t) && <span style={{ fontSize: 11.5, color: S.MUTED_2 }}>Cierra {fechaCorta(cierreDeTramo(t))}</span>}
+            </div>
+            {mesas.filter((s) => (s.tramo ?? '') === t).map((s) => {
               const n = inscritos.get(s.id) ?? 0;
               const aforo = s.aforo ?? 0;
               const dentro = misSalaIds.has(s.id);
@@ -244,6 +274,7 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
                 >
                   <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 5 }}>
                     <span style={{ fontWeight: 800, fontSize: 15, color: S.TEXT }}>{TIPO_SALA_LABELS[s.tipo]}</span>
+                    {s.tramo && <EtiquetaTramo tramo={s.tramo} deporte={deporte} compacta />}
                     <span style={{ fontSize: 11.5, color: S.MUTED_2 }}>
                       {aforo} jugadores · {ganan === 1 ? 'gana 1' : `ganan ${ganan}`}
                     </span>
@@ -274,6 +305,7 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
               );
             })}
           </div>
+          ))}
         </>
       )}
 

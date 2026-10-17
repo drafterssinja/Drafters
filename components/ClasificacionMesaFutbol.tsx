@@ -19,6 +19,7 @@ import Cargando from '@/components/Cargando';
 import { PremiosDraftis } from '@/components/v2/DraftisMesa';
 import { IconoGema } from '@/components/v2/IconosV2';
 import { textoDraftis } from '@/lib/draftisMesa';
+import EtiquetaTramo from '@/components/v2/EtiquetaTramo';
 
 // ============================================================================
 // CLASIFICACIÓN EN DIRECTO DE UNA MESA DRAFTERS DE FÚTBOL (06/10)
@@ -52,6 +53,8 @@ type SalaMin = {
   fecha_limite_inscripcion: string | null;
   // 2 = mesa de la liga V2: los premios son draftis (16/10).
   version?: number | null;
+  // 17/10: mesa de un solo día ('dia:AAAA-MM-DD').
+  tramo?: string | null;
 };
 
 type JugadorF = { id: string; nombre: string; equipo_real: string | null; posicion: string | null };
@@ -578,6 +581,7 @@ export default function ClasificacionMesaFutbol({
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#3DDC84' }}>{sala.nombre}</span>
             <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT }}>{mesaFinalizada ? 'Clasificación final' : 'Clasificación en directo'}</h1>
+            {sala.tramo && <EtiquetaTramo tramo={sala.tramo} deporte={'futbol'} />}
             <p style={{ fontSize: 13, color: S.MUTED_2 }}>
               {equipos.length} equipo{equipos.length === 1 ? '' : 's'} inscrito{equipos.length === 1 ? '' : 's'} · {sala.competicion}
             </p>
