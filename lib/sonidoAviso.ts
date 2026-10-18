@@ -12,7 +12,13 @@
 // a esta pantalla ya se ha hecho clic en varios sitios. Si aun así el
 // navegador lo bloquea, se ignora en silencio: el aviso visual (la tira)
 // sigue apareciendo igual, el sonido es solo un extra.
+// 18/10: se probaron tres sonidos propios de Drafters y a Iñi no le gustaron;
+// de momento se queda el "ding" de siempre.
 export function reproducirSonidoAviso(): void {
+  reproducirDing();
+}
+
+function reproducirDing(): void {
   try {
     const AudioCtxCtor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioCtxCtor) return;
