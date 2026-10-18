@@ -24,7 +24,7 @@ import { MODALIDAD_LABEL, cadaXSegundos, type Modalidad, type Resumen } from '@/
 type MesaLiga = {
   id: string;
   sala_id: string;
-  salas: { id: string; nombre: string; competicion: string; tipo: TipoSala; aforo: number | null; estado: string; fecha_limite_inscripcion: string | null; deporte: string; tramo?: string | null } | null;
+  salas: { id: string; nombre: string; competicion: string; tipo: TipoSala; aforo: number | null; estado: string; fecha_limite_inscripcion: string | null; deporte: string; tramo?: string | null; bolsa?: boolean | null } | null;
   inscripciones: { estado: string }[];
 };
 type FilaAmistoso = { id: string; nombre: string; deporte: string; modalidad: Modalidad; competiciones: string[]; soy_participante: boolean; estado: string; created_at: string; tramos?: string[] | null };
@@ -45,12 +45,28 @@ export default function MisEquiposV2({ deporte, miId }: { deporte: DeporteV2; mi
   const [items, setItems] = useState<Item[] | null>(null);
   const [pestana, setPestana] = useState<'en_juego' | 'finalizadas'>('en_juego');
   const [mostrarTodos, setMostrarTodos] = useState(false);
+  // 18/10 (Iñi): "mis equipos" en su propia caja, que se pliega y despliega
+  // pulsando la cabecera (se recuerda en este dispositivo).
+  const [plegado, setPlegado] = useState(false);
+  useEffect(() => {
+    try {
+      setPlegado(localStorage.getItem('v2_mis_equipos_plegado') === '1');
+    } catch {}
+  }, []);
+  function alternarPlegado() {
+    setPlegado((v) => {
+      try {
+        localStorage.setItem('v2_mis_equipos_plegado', v ? '0' : '1');
+      } catch {}
+      return !v;
+    });
+  }
 
   const cargar = useCallback(async () => {
     const [{ data: mesas }, { data: lista }] = await Promise.all([
       supabase
         .from('equipos')
-        .select('id,sala_id,created_at,salas!inner(id,nombre,competicion,tipo,aforo,estado,fecha_limite_inscripcion,deporte,tramo),inscripciones(estado)')
+        .select('id,sala_id,created_at,salas!inner(id,nombre,competicion,tipo,aforo,estado,fecha_limite_inscripcion,deporte,tramo,bolsa),inscripciones(estado)')
         .eq('usuario_id', miId)
         .eq('salas.deporte', deporte)
         .eq('salas.version', 2)
@@ -96,7 +112,25 @@ export default function MisEquiposV2({ deporte, miId }: { deporte: DeporteV2; mi
   const botonClasif: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 5, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.03em', color: '#FF7A45', background: 'rgba(255,122,69,0.14)', border: '1px solid rgba(255,122,69,0.45)', borderRadius: 8, padding: '6px 10px', whiteSpace: 'nowrap', textDecoration: 'none' };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, borderRadius: 16, border: '1px solid rgba(61,220,132,0.35)', background: 'linear-gradient(180deg, rgba(61,220,132,0.07) 0%, rgba(17,22,20,0.6) 100%)', padding: plegado ? '4px 6px' : '6px 12px 14px' }}>
+      <button
+        type="button"
+        onClick={alternarPlegado}
+        aria-expanded={!plegado}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, background: 'transparent', border: 'none', padding: '8px 4px', cursor: 'pointer', textAlign: 'left' }}
+      >
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 18 }}>🧾</span>
+          <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 19, textTransform: 'uppercase', letterSpacing: '0.03em', color: S.TEXT }}>Mis equipos</span>
+          <span style={{ fontSize: 12, fontWeight: 800, color: '#04140B', background: S.ACCENT, borderRadius: 999, padding: '1px 8px' }}>{enJuego.length} en juego</span>
+        </span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: S.MUTED_2 }}>
+          {plegado ? 'Mostrar' : 'Ocultar'}
+          <span style={{ fontSize: 14, color: S.ACCENT, transform: plegado ? 'rotate(0deg)' : 'rotate(180deg)', transition: 'transform 0.2s' }}>▼</span>
+        </span>
+      </button>
+      {!plegado && (
+      <>
       <div style={{ display: 'flex', gap: 6, alignSelf: 'flex-start' }}>
         <button type="button" onClick={() => { setPestana('finalizadas'); setMostrarTodos(false); }} style={S.pill(pestana === 'finalizadas')}>
           Finalizadas ({finalizadas.length})
@@ -119,6 +153,7 @@ export default function MisEquiposV2({ deporte, miId }: { deporte: DeporteV2; mi
                     {TIPO_SALA_LABELS[s.tipo] ?? s.nombre} · {s.aforo} jugadores
                   </span>
                   {s.tramo && <EtiquetaTramo tramo={s.tramo} deporte={s.deporte} compacta />}
+                  {s.bolsa && <span style={{ fontSize: 11.5, fontWeight: 700, color: S.ACCENT }}>🎲 En espera del sorteo de rivales</span>}
                 </Link>
                 {(it.empezada || it.finalizada) && <ResumenClasificacionMesa salaId={s.id} competicion={s.competicion} deporte={s.deporte} miEquipoId={it.mesa.id} finalizada={it.finalizada} tramo={s.tramo ?? null} />}
               </div>
@@ -169,6 +204,8 @@ export default function MisEquiposV2({ deporte, miId }: { deporte: DeporteV2; mi
         <button type="button" onClick={() => setMostrarTodos((v) => !v)} style={{ alignSelf: 'center', background: 'transparent', border: 'none', color: S.ACCENT, fontWeight: 700, fontSize: 13, cursor: 'pointer', padding: '4px 8px' }}>
           {mostrarTodos ? 'Mostrar menos' : `Mostrar más (${lista.length - LIMITE})`}
         </button>
+      )}
+      </>
       )}
     </div>
   );

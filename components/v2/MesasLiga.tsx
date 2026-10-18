@@ -26,7 +26,7 @@ import { ordenTramo } from '@/lib/tramos';
 // enseña una mesa de cada tipo y tamaño. Máximo 3 mesas por jornada (fútbol) o
 // semana (golf/tenis).
 
-type Sala = { id: string; nombre: string; competicion: string; tipo: TipoSala; aforo: number | null; buy_in: number; estado: string; fecha_limite_inscripcion: string | null; tramo?: string | null };
+type Sala = { id: string; nombre: string; competicion: string; tipo: TipoSala; aforo: number | null; buy_in: number; estado: string; fecha_limite_inscripcion: string | null; tramo?: string | null; bolsa?: boolean };
 type MiEquipo = { id: string; sala_id: string; salas: Sala | null; inscripciones: { estado: string }[] };
 
 const GANAN: Record<string, (aforo: number) => number> = {
@@ -62,6 +62,8 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
   const [recargarPara, setRecargarPara] = useState<string | null>(null);
   const [entrando, setEntrando] = useState<string | null>(null);
   const [cambiadas, setCambiadas] = useState<Set<string>>(new Set());
+  const [pedirApuntarse, setPedirApuntarse] = useState<Sala | null>(null);
+  const [apuntando, setApuntando] = useState(false);
   // Nº de partidos de cada día (para la etiqueta "Solo partidos del sábado · 4 partidos").
   const [partidosPorTramo, setPartidosPorTramo] = useState<Map<string, number>>(new Map());
   useEffect(() => {
@@ -90,8 +92,10 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
     // 17/10: antes de leerlas, que existan las mesas de un solo día (fútbol)
     // o de una sola ronda (golf) de las jornadas/torneos abiertos (SQL 49).
     await supabase.rpc('v2_asegurar_mesas_tramo', { p_deporte: deporte });
+    // 18/10: las mesas de la liga se sortean al cerrar (SQL 52); por si el cron no ha pasado aún.
+    await supabase.rpc('v2_sortear_pendientes');
     const { data } = await todasLasFilas<Sala>((d, h) =>
-      supabase.from('salas').select('id,nombre,competicion,tipo,aforo,buy_in,estado,fecha_limite_inscripcion,tramo').eq('deporte', deporte).eq('version', 2).neq('tipo', 'maraton').order('id').range(d, h)
+      supabase.from('salas').select('id,nombre,competicion,tipo,aforo,buy_in,estado,fecha_limite_inscripcion,tramo,bolsa').eq('deporte', deporte).eq('version', 2).neq('tipo', 'maraton').order('id').range(d, h)
     );
     setSalas(data);
   }, [deporte]);
@@ -193,7 +197,7 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
     setEntrando(null);
     if (error) return setAviso(mensajeError(error));
     const info = data as { saldo: number; mesas: number; maximo: number; apuntado?: boolean };
-    if (info.apuntado === false) return setAviso('Las mesas de la liga son solo para los apuntados a la liga. Apúntate primero (es gratis).');
+    if (info.apuntado === false) return setPedirApuntarse(s);
     if (info.mesas >= info.maximo) return setAviso(`Ya tienes ${info.maximo} mesas ${deporte === 'futbol' ? 'en esta jornada' : 'esta semana'}: es el máximo.`);
     if (info.saldo < 1) return setRecargarPara(s.id);
     router.push(`/salas/${s.id}/crear-equipo?v2=1`);
@@ -208,10 +212,26 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
         <span style={{ fontSize: 13, color: S.MUTED_2, lineHeight: 1.5 }}>En cuanto se abra podrás apuntarte desde aquí y jugar sus mesas. Mientras tanto puedes jugar amistosos.</span>
       </div>
     );
-  if (sinApuntar) return <PanelLiga info={temporada} deporte={deporte} onApuntado={() => void cargarLiga()} />;
+  // 18/10 (Iñi): aunque no estés apuntado, primero se ven las mesas (y cuánta
+  // gente hay); te apuntas al entrar en la primera, y la info de la liga va abajo.
+  async function apuntarseYEntrar(s: Sala) {
+    setApuntando(true);
+    const { error } = await supabase.rpc('v2_apuntarse_liga', { p_deporte: deporte });
+    setApuntando(false);
+    if (error) return setAviso(mensajeError(error));
+    setPedirApuntarse(null);
+    await cargarLiga();
+    void entrar(s);
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {sinApuntar && temporada && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, borderRadius: 12, padding: '10px 14px', border: '1px solid rgba(240,185,77,0.4)', background: 'rgba(240,185,77,0.07)' }}>
+          <span style={{ fontSize: 13, fontWeight: 800, color: '#F0B94D' }}>Todavía no estás apuntado a la {temporada.liga}</span>
+          <span style={{ fontSize: 12, color: S.MUTED_2, lineHeight: 1.45 }}>Es gratis: te apuntamos al entrar en tu primera mesa. Debajo tienes toda la información de la temporada y quién está apuntado.</span>
+        </div>
+      )}
       {/* 15/10 (Iñi): enlace a la clasificación de la liga del deporte. */}
       <Link
         href={`/v2/${deporte}/clasificacion`}
@@ -272,12 +292,22 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
                   key={s.id}
                   style={{ background: cambiadas.has(s.id) ? 'rgba(61,220,132,0.1)' : S.PANEL, border: `1px solid ${dentro ? 'rgba(61,220,132,0.45)' : S.CARD_BORDER}`, borderRadius: 14, padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12, transition: 'background 0.6s' }}
                 >
-                  <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 5 }}>
-                    <span style={{ fontWeight: 800, fontSize: 15, color: S.TEXT }}>{TIPO_SALA_LABELS[s.tipo]}</span>
+                  <Link href={`/salas/${s.id}`} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 5, textDecoration: 'none' }}>
+                    <span style={{ fontWeight: 800, fontSize: 15, color: S.TEXT }}>
+                      {TIPO_SALA_LABELS[s.tipo]} <span style={{ fontSize: 11, color: S.MUTED_3, fontWeight: 700 }}>ⓘ</span>
+                    </span>
                     {s.tramo && <EtiquetaTramo tramo={s.tramo} deporte={deporte} compacta />}
                     <span style={{ fontSize: 11.5, color: S.MUTED_2 }}>
-                      {aforo} jugadores · {ganan === 1 ? 'gana 1' : `ganan ${ganan}`}
+                      Mesas de {aforo} · {ganan === 1 ? 'gana 1' : `ganan ${ganan}`}
                     </span>
+                    {s.bolsa ? (
+                      <span style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                        <span style={{ fontSize: 13, fontWeight: 800, color: n > 0 ? S.ACCENT : S.MUTED_3 }}>
+                          👥 {n} {n === 1 ? 'apuntado' : 'apuntados'}
+                        </span>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: S.MUTED_3 }}>🎲 Rivales por sorteo al cerrar</span>
+                      </span>
+                    ) : (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <div style={{ flex: 1, maxWidth: 140, height: 5, borderRadius: 99, background: '#1E2723', overflow: 'hidden' }}>
                         <motion.div animate={{ width: `${aforo ? (n / aforo) * 100 : 0}%` }} style={{ height: '100%', background: S.ACCENT }} />
@@ -286,7 +316,8 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
                         {n}/{aforo}
                       </span>
                     </div>
-                  </div>
+                    )}
+                  </Link>
                   {dentro ? (
                     <Link href={`/salas/${s.id}`} style={{ flexShrink: 0, whiteSpace: 'nowrap', fontSize: 12, fontWeight: 800, color: S.ACCENT, textDecoration: 'none', border: `1px solid rgba(61,220,132,0.45)`, borderRadius: 10, padding: '8px 10px' }}>
                       Ya estás ✓
@@ -308,6 +339,25 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
           ))}
         </>
       )}
+
+      {pedirApuntarse && temporada && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(4,8,6,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div style={{ width: '100%', maxWidth: 380, background: '#0F1513', border: `1px solid ${S.CARD_BORDER}`, borderRadius: 18, padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 22, color: S.TEXT }}>Apúntate a la {temporada.liga}</span>
+            <span style={{ fontSize: 13, color: S.MUTED_2, lineHeight: 1.5 }}>
+              Las mesas de la liga son para los apuntados. Es gratis: te apuntamos a la Temporada {temporada.numero} ({temporada.apuntados} {temporada.apuntados === 1 ? 'apuntado' : 'apuntados'} ya) y sigues a hacer tu equipo.
+            </span>
+            <button type="button" disabled={apuntando} onClick={() => void apuntarseYEntrar(pedirApuntarse)} style={{ ...S.primaryButton, opacity: apuntando ? 0.6 : 1 }}>
+              {apuntando ? 'Apuntando...' : 'Apuntarme gratis y entrar'}
+            </button>
+            <button type="button" onClick={() => setPedirApuntarse(null)} style={{ background: 'transparent', border: 'none', color: S.MUTED_2, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+              Ahora no
+            </button>
+          </div>
+        </div>
+      )}
+
+      {sinApuntar && temporada && <PanelLiga info={temporada} deporte={deporte} onApuntado={() => void cargarLiga()} />}
 
       {recargarPara && (
         <RecargaVideo

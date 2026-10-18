@@ -31,6 +31,8 @@ export type Info = {
   lista: { usuario_id: string; nombre: string; nivel: number; grupo: number; soy_yo: boolean }[];
   // 15/10 (Iñi): qué jornadas de Liga y de Champions cuentan en la temporada.
   jornadas?: { liga: string; desde: number; hasta: number; total: number }[];
+  // 17/10: en golf, los torneos que caen dentro de la temporada (SQL 51).
+  torneos?: { nombre: string; inicio: string }[];
 };
 export type Fila = { usuario_id: string; nombre: string; draftis: number; mesas: number; ganadas: number; soy_yo: boolean; nivel: number; grupo: number };
 
@@ -110,6 +112,20 @@ export default function PanelLiga({ info, deporte, onApuntado, conLista = true }
                   ) : (
                     <>Todas las jornadas de Liga y de Champions que se jueguen entre esas fechas.</>
                   )}
+                </Dato>
+              )}
+              {deporte === 'golf' && (
+                <Dato icono="⛳" titulo="Torneos que cuentan">
+                  {info.torneos && info.torneos.length > 0 ? (
+                    info.torneos.map((t) => (
+                      <span key={t.nombre} style={{ display: 'block' }}>
+                        <b style={{ color: S.TEXT }}>{t.nombre}</b> · {new Date(t.inicio).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', timeZone: 'Europe/Madrid' })}
+                      </span>
+                    ))
+                  ) : (
+                    <>Todos los torneos que se jueguen entre esas fechas.</>
+                  )}
+                  <span style={{ display: 'block', marginTop: 4 }}>En cada torneo hay mesas del torneo completo, de cada ronda y del fin de semana (rondas 3 y 4).</span>
                 </Dato>
               )}
               <Dato icono="🎯" titulo={yo ? 'Tu división' : 'Empezarías en'}>

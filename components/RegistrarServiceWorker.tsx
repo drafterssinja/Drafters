@@ -1,5 +1,7 @@
 'use client';
 
+import { leerPreferenciaSonido, reproducirSonidoAviso } from '@/lib/sonidoAviso';
+
 import { useEffect } from 'react';
 import { registrarAperturaSiToca, registrarEntradaConSesionGuardada, registrarUsoApp } from '@/lib/usoApp';
 import { supabase } from '@/lib/supabaseClient';
@@ -49,7 +51,13 @@ export default function RegistrarServiceWorker() {
     navigator.serviceWorker.register('/sw.js').catch(() => {
       // Si falla, la web funciona igual; solo no se podrá instalar en Android.
     });
+    // 18/10: llega una notificación push con Drafters abierto → sonido de Drafters.
+    const alMensaje = (e: MessageEvent) => {
+      if ((e.data as { tipo?: string } | null)?.tipo === 'drafters_sonido' && document.visibilityState === 'visible' && leerPreferenciaSonido()) reproducirSonidoAviso();
+    };
+    navigator.serviceWorker.addEventListener('message', alMensaje);
     return () => {
+      navigator.serviceWorker.removeEventListener('message', alMensaje);
       sub.subscription.unsubscribe();
       document.removeEventListener('visibilitychange', alVolver);
       window.removeEventListener('beforeinstallprompt', alAviso);

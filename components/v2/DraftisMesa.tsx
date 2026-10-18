@@ -3,6 +3,8 @@
 import * as S from '@/lib/mockupStyles';
 import { IconoCredito, IconoGema } from '@/components/v2/IconosV2';
 import { boteDraftis, draftisPorPuesto, textoDraftis, DRAFTIS_POR_JUGADOR } from '@/lib/draftisMesa';
+import { calcularReparto, repartirPremiosConEmpates, type TipoSala } from '@/lib/repartoPremios';
+import { etiquetasPosicion } from '@/lib/posicionesEmpate';
 
 // ============================================================================
 // MESAS DE LA LIGA (V2, 16/10): formato, premios y entrada en draftis/créditos
@@ -168,6 +170,38 @@ export function PremiosDraftis({ tipo, aforo, liga }: { tipo: string; aforo: num
       <span style={{ fontSize: 11.5, color: S.MUTED_3, lineHeight: 1.55 }}>
         Los draftis suman en la clasificación de {liga ?? 'la Liga Drafters'}. Empates: se reparten los draftis de los puestos empatados.
       </span>
+    </div>
+  );
+}
+
+// Mesa terminada: cada equipo con los draftis que suma o resta (empates repartidos).
+export function ResultadoDraftis({ tipo, aforo, filas }: { tipo: string; aforo: number | null; filas: { id: string; nombre: string; total: number }[] }) {
+  const ordenados = filas.slice().sort((a, b) => b.total - a.total);
+  const tramos = calcularReparto(tipo as TipoSala, aforo, ordenados.length);
+  const reparto = repartirPremiosConEmpates(
+    ordenados.map((o) => ({ equipoId: o.id, valor: o.total })),
+    tramos,
+    DRAFTIS_POR_JUGADOR * ordenados.length,
+    'desc'
+  );
+  const importe = new Map(reparto.map((r) => [r.equipoId, r.importe]));
+  const etiquetas = etiquetasPosicion(ordenados, (o) => o.total);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {ordenados.map((o, i) => {
+        const imp = importe.get(o.id) ?? 0;
+        const neto = imp > 0 ? Math.round(imp) - DRAFTIS_POR_JUGADOR : -DRAFTIS_POR_JUGADOR;
+        return (
+          <div key={o.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: S.PANEL, border: `1px solid ${neto > 0 ? 'rgba(61,220,132,0.35)' : 'rgba(255,92,92,0.3)'}`, borderRadius: 10 }}>
+            <span style={{ flexShrink: 0, width: 32, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, color: ORO }}>{etiquetas[i]}</span>
+            <span style={{ flex: 1, minWidth: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 13, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.nombre}</span>
+            <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14, color: S.MUTED_2 }}>{o.total} pts</span>
+            <span style={{ flexShrink: 0, width: 74, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 4, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 16, color: neto > 0 ? '#3DDC84' : '#FF8A8A' }}>
+              {textoDraftis(neto)} <IconoGema size={13} />
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }

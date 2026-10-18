@@ -9,6 +9,7 @@ import { formatPuntos } from '@/lib/futbolLaLiga';
 import { V2_COLOR } from '@/components/v2/MarcoV2';
 import Cargando from '@/components/Cargando';
 import ClasificacionMesaFutbol, { type EquipoExterno } from '@/components/ClasificacionMesaFutbol';
+import ClasificacionSala from '@/components/ClasificacionMesaGolf';
 import { cadaXSegundos, repartirPremio, textoBote, type Amistoso, type AmistosoJornada, type Resumen } from '@/lib/v2';
 
 type Equipo = { competicion: string; usuario_id: string; jugadores: string[]; alineacion: string | null };
@@ -27,7 +28,8 @@ type Props = { amistoso: Amistoso; jornadas: AmistosoJornada[]; resumen: Resumen
 // pulsar, eventos y premios. Con varias jornadas, una pestaña por jornada y
 // "Total" con la suma. Golf sigue con la lista.
 export default function ClasificacionAmistoso(props: Props) {
-  if (props.amistoso.deporte === 'futbol') return <ClasificacionAmistosoFutbol {...props} />;
+  // 18/10 (Iñi): el golf también, exactamente como la clasificación de golf de la V1.
+  if (props.amistoso.deporte === 'futbol' || props.amistoso.deporte === 'golf') return <ClasificacionAmistosoFutbol {...props} />;
   return <ListaClasificacionAmistoso {...props} />;
 }
 
@@ -84,6 +86,15 @@ function ClasificacionAmistosoFutbol(props: Props) {
       ) : equipos === null ? (
         <Cargando compacto />
       ) : (
+        amistoso.deporte === 'golf' ? (
+          <ClasificacionSala
+            key={vista}
+            embebido
+            salaFija={{ id: amistoso.id, nombre: amistoso.nombre, competicion: vista, deporte: 'golf', tipo: 'amistoso', estado: terminada(vista) ? 'finalizada' : 'abierta', buy_in: 0, aforo: amistoso.num_jugadores, fecha_limite_inscripcion: null, tramo: jornadas.find((j) => j.competicion === vista)?.tramo ?? null }}
+            externo={{ equipos: equiposVista, misJugadores: equiposVista.find((e) => e.equipoId === miId)?.jugadores ?? [] }}
+            premios={premios}
+          />
+        ) : (
         <ClasificacionMesaFutbol
           key={vista}
           embebido
@@ -91,6 +102,7 @@ function ClasificacionAmistosoFutbol(props: Props) {
           externo={{ equipos: equiposVista, misJugadores: equiposVista.find((e) => e.equipoId === miId)?.jugadores ?? [] }}
           premios={premios}
         />
+        )
       )}
     </div>
   );

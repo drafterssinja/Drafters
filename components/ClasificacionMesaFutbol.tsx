@@ -16,6 +16,7 @@ import type { LineaDesglose } from '@/lib/futbolPuntuacion';
 import { reproducirSonidoAviso, leerPreferenciaSonido, guardarPreferenciaSonido } from '@/lib/sonidoAviso';
 import { TIPOS_AVISO_FUTBOL, TIPOS_AVISO_POR_DEFECTO, INFO_TIPO_AVISO, textoAvisoFutbol, type EventoFutbol, type TipoAvisoFutbol } from '@/lib/futbolAvisos';
 import Cargando from '@/components/Cargando';
+import { BotonNotificaciones } from '@/components/AjustesNotificaciones';
 import { PremiosDraftis } from '@/components/v2/DraftisMesa';
 import { IconoGema } from '@/components/v2/IconosV2';
 import { textoDraftis } from '@/lib/draftisMesa';
@@ -591,7 +592,7 @@ export default function ClasificacionMesaFutbol({
             </p>
           </div>
 
-          <div style={{ display: 'flex', gap: 6, alignSelf: 'flex-start' }}>
+          <div style={{ display: 'flex', gap: 6, alignSelf: 'flex-start', flexWrap: 'wrap', alignItems: 'center' }}>
             {mesaFinalizada ? (
               <>
                 <button type="button" onClick={() => setVista('premios')} style={vistaPillStyle(vista === 'premios')}>
@@ -617,35 +618,28 @@ export default function ClasificacionMesaFutbol({
                 </button>
               </>
             )}
-            {/* Campanita de sonido (07/10): igual que en golf; se recuerda
-                por dispositivo (lib/sonidoAviso.ts). */}
-            <button
-              type="button"
-              onClick={() => {
-                const nuevoValor = !sonidoActivado;
-                setSonidoActivado(nuevoValor);
-                guardarPreferenciaSonido(nuevoValor);
-              }}
-              aria-pressed={sonidoActivado}
-              aria-label={sonidoActivado ? 'Desactivar el sonido de los avisos' : 'Activar el sonido de los avisos'}
-              title={sonidoActivado ? 'Sonido de avisos activado' : 'Sonido de avisos desactivado'}
-              style={{
-                flexShrink: 0,
-                width: 30,
-                height: 30,
-                alignSelf: 'center',
-                borderRadius: '50%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: 14,
-                cursor: 'pointer',
-                border: `1px solid ${sonidoActivado ? 'rgba(61,220,132,0.4)' : 'rgba(255,92,92,0.4)'}`,
-                background: sonidoActivado ? 'rgba(61,220,132,0.12)' : 'rgba(255,92,92,0.12)',
-              }}
-            >
-              {sonidoActivado ? '🔔' : '🔕'}
-            </button>
+            {/* 18/10 (Iñi): la campana, más grande, abre los avisos: sonido de
+                los avisos en pantalla y qué notificaciones push recibir. */}
+            <BotonNotificaciones
+              extra={
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nuevoValor = !sonidoActivado;
+                    setSonidoActivado(nuevoValor);
+                    guardarPreferenciaSonido(nuevoValor);
+                  }}
+                  aria-pressed={sonidoActivado}
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '12px 14px', borderRadius: 12, cursor: 'pointer', border: `1px solid ${sonidoActivado ? 'rgba(61,220,132,0.4)' : S.BORDER}`, background: sonidoActivado ? 'rgba(61,220,132,0.08)' : 'transparent', textAlign: 'left' }}
+                >
+                  <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <span style={{ fontWeight: 800, fontSize: 14, color: S.TEXT }}>{sonidoActivado ? '🔊 Sonido de los avisos en pantalla' : '🔇 Avisos en pantalla sin sonido'}</span>
+                    <span style={{ fontSize: 11.5, color: S.MUTED_2 }}>Mientras tienes la clasificación abierta.</span>
+                  </span>
+                  <span style={{ fontSize: 12, fontWeight: 800, color: sonidoActivado ? S.ACCENT : S.MUTED_3 }}>{sonidoActivado ? 'SÍ' : 'NO'}</span>
+                </button>
+              }
+            />
           </div>
 
           {/* Aviso de evento de uno de MIS jugadores (07/10): tira de 5
