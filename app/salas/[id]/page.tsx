@@ -57,6 +57,9 @@ type SalaRow = {
   version?: number | null;
   // 17/10: mesa de un solo día (fútbol) o de una sola ronda (golf).
   tramo?: string | null;
+  // 18/10: mesa de la liga a la que te apuntas (se sortea al cerrar) / mesa que sale del sorteo.
+  bolsa?: boolean | null;
+  bolsa_id?: string | null;
 };
 
 type EquipoMio = {
@@ -115,7 +118,7 @@ export default function SalaDetallePage() {
 
       const [{ data: perfilData }, { data: salaData }] = await Promise.all([
         supabase.from('perfiles').select('*').eq('id', session.user.id).single(),
-        supabase.from('salas').select('id,nombre,competicion,deporte,tipo,aforo,buy_in,estado,fecha_limite_inscripcion,version,tramo').eq('id', salaId).single(),
+        supabase.from('salas').select('id,nombre,competicion,deporte,tipo,aforo,buy_in,estado,fecha_limite_inscripcion,version,tramo,bolsa,bolsa_id').eq('id', salaId).single(),
       ]);
 
       if (!activo) return;
@@ -126,6 +129,18 @@ export default function SalaDetallePage() {
         setError('No se ha encontrado esta sala.');
         setCargando(false);
         return;
+      }
+      // 18/10: bolsa de la liga ya cerrada → sorteo (si no se ha hecho) y a tu mesa.
+      const sr = salaData as SalaRow;
+      if (sr.bolsa && sr.fecha_limite_inscripcion && new Date(sr.fecha_limite_inscripcion).getTime() <= Date.now()) {
+        if (sr.estado !== 'sorteada') await supabase.rpc('v2_sortear_pendientes');
+        const { data: mia } = await supabase.rpc('v2_mi_mesa_sorteada', { p_bolsa: sr.id });
+        if (mia && activo) {
+          router.replace(`/salas/${mia as string}`);
+          return;
+        }
+        const { data: sr2 } = await supabase.from('salas').select('estado').eq('id', sr.id).single();
+        if (sr2) sr.estado = (sr2 as { estado: string }).estado;
       }
       setSala(salaData as SalaRow);
       if ((salaData as SalaRow).version === 2) {
@@ -325,6 +340,20 @@ export default function SalaDetallePage() {
             <h1 style={{ fontSize: 24, fontWeight: 800, color: S.TEXT, lineHeight: 1.15 }}>{esV2 ? nombreMesaV2(sala.nombre) : sala.nombre}</h1>
             {/* 17/10 (Iñi): justo debajo del nombre, qué partidos o rondas cuentan. */}
             {esV2 && <EtiquetaTramo tramo={sala.tramo} deporte={sala.deporte} completa />}
+            {sala.bolsa && sala.estado !== 'sorteada' && (
+              <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 3, borderRadius: 12, padding: '10px 14px', border: '1px solid rgba(61,220,132,0.35)', background: 'rgba(61,220,132,0.06)' }}>
+                <span style={{ fontSize: 13, fontWeight: 800, color: S.ACCENT }}>🎲 Los rivales se sortean</span>
+                <span style={{ fontSize: 12, color: S.MUTED_2, lineHeight: 1.45 }}>
+                  Te apuntas a las mesas de {sala.aforo} jugadores. Al cerrar se reparten todos los apuntados al azar en mesas de {sala.aforo}; nadie elige contra quién juega. Si te quedas sin rival, te devolvemos el crédito, te regalamos +50 draftis y en el próximo sorteo tienes plaza asegurada.
+                </span>
+              </div>
+            )}
+            {sala.bolsa && sala.estado === 'sorteada' && (
+              <div style={{ marginTop: 6, borderRadius: 12, padding: '10px 14px', border: `1px solid ${S.CARD_BORDER}`, background: S.PANEL, fontSize: 12.5, color: S.MUTED_2 }}>
+                🎲 El sorteo ya está hecho. Si estabas apuntado, tu mesa está en "Mis equipos".
+              </div>
+            )}
+            {sala.bolsa_id && <span style={{ alignSelf: 'flex-start', fontSize: 11.5, fontWeight: 800, color: S.ACCENT }}>🎲 Mesa sorteada · rivales al azar</span>}
             {esV2 && (
               <Link
                 href={`/v2/${sala.deporte}/clasificacion`}
@@ -350,7 +379,7 @@ export default function SalaDetallePage() {
               cualquier usuario logueado de todas formas (ni el cliente ni
               la RPC equipos_sala_clasificacion() comprueban participación,
               solo que la sala haya empezado). */}
-          {salaEmpezada && (
+          {salaEmpezada && !sala.bolsa && (
             <Link
               href={`/salas/${sala.id}/clasificacion`}
               style={{
@@ -471,7 +500,19 @@ export default function SalaDetallePage() {
                   <InfoRow label="Competición" value={sala.competicion} />
                 </>
               )}
-              <InfoRow label="Jugadores inscritos" value={`${signedUp}/${capacidadLabel(sala.aforo)}`} />
+              {sala.bolsa ? (
+                <InfoRow
+                  label="Apuntados"
+                  value={
+                    <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                      <span>👥 {signedUp}</span>
+                      <span style={{ fontSize: 11.5, fontWeight: 600, color: S.MUTED_2 }}>Al cerrar, 🎲 sorteo de mesas de {sala.aforo}</span>
+                    </span>
+                  }
+                />
+              ) : (
+                <InfoRow label="Jugadores inscritos" value={`${signedUp}/${capacidadLabel(sala.aforo)}`} />
+              )}
               {!isFinalizada && <InfoRow label="Se cierra el" value={cierraEn ?? 'Sin fecha fijada'} />}
             </div>
           )}
@@ -497,7 +538,7 @@ export default function SalaDetallePage() {
           {tab === 'jugadores' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <span style={{ fontSize: 12, color: S.MUTED_3 }}>
-                {signedUp}/{capacidadLabel(sala.aforo)} inscritos
+                {sala.bolsa ? `${signedUp} ${signedUp === 1 ? 'apuntado' : 'apuntados'} · en espera del sorteo` : `${signedUp}/${capacidadLabel(sala.aforo)} inscritos`}
               </span>
               {participantes.map((p, i) => (
                 <div key={p.equipoId} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>

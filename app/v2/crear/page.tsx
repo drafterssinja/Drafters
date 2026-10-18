@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import { todasLasFilas } from '@/lib/paginar';
@@ -201,12 +201,41 @@ function V2CrearInner() {
     const dia = diaDeTramo(tramo);
     return dia ? partidos.filter((p) => p.kickoff && fechaMadrid(p.kickoff) === dia) : partidos;
   }, [partidos, tramo]);
+  // Días de la jornada (hora de Madrid) para los atajos "solo los del sábado".
+  const diasDePartidos = useMemo(() => {
+    const m = new Map<string, string[]>();
+    partidos.forEach((p) => {
+      if (!p.kickoff) return;
+      const d = fechaMadrid(p.kickoff);
+      m.set(d, [...(m.get(d) ?? []), `${p.local}|${p.visitante}`]);
+    });
+    return Array.from(m.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([dia, claves]) => ({ dia, claves, etiqueta: new Intl.DateTimeFormat('es-ES', { weekday: 'long', timeZone: 'Europe/Madrid' }).format(new Date(`${dia}T12:00:00Z`)) }));
+  }, [partidos]);
+  function elegirDia(dia: string, claves: string[]) {
+    // Si ese día tiene sus propias mesas (3+ partidos), la sala cierra al empezar ese día.
+    const t = tramosDeSeleccion.find((x) => x.tramo === `dia:${dia}`);
+    if (t) setTramo(t.tramo);
+    else {
+      if (!completaDisponible) return;
+      if (tramo === null) setPartidosOn(new Set(claves));
+      else {
+        seleccionPendiente.current = claves;
+        setTramo(null);
+      }
+    }
+  }
+  const seleccionPendiente = useRef<string[] | null>(null);
   useEffect(() => {
     if (deporte !== 'futbol') return;
     const dia = diaDeTramo(tramo);
     if (dia) {
       setPartidosOn(new Set(partidosVisibles.map((p) => `${p.local}|${p.visitante}`)));
       setHasta(desde);
+    } else if (seleccionPendiente.current) {
+      setPartidosOn(new Set(seleccionPendiente.current));
+      seleccionPendiente.current = null;
     } else if (partidos.length) setPartidosOn(new Set(partidos.map((p) => `${p.local}|${p.visitante}`)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tramo, partidos]);
@@ -433,6 +462,19 @@ function V2CrearInner() {
                 Ninguno
               </button>
             </div>
+            {/* 18/10 (Iñi): atajos "solo los del sábado / domingo" (o martes / miércoles en Champions). */}
+            {diasDePartidos.length > 1 && (
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {diasDePartidos.map((d) => {
+                  const on = partidosOn.size === d.claves.length && d.claves.every((k) => partidosOn.has(k));
+                  return (
+                    <button key={d.dia} type="button" style={S.pill(on)} onClick={() => elegirDia(d.dia, d.claves)}>
+                      Solo {d.etiqueta} ({d.claves.length})
+                    </button>
+                  );
+                })}
+              </div>
+            )}
             {partidosVisibles.map((p) => {
               const k = `${p.local}|${p.visitante}`;
               const on = partidosOn.has(k);

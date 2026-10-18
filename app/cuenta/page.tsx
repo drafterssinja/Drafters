@@ -4,6 +4,7 @@ import FechaNacimientoSelect, { fechaNacimientoCompleta } from '@/components/Fec
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import AjustesNotificaciones from '@/components/AjustesNotificaciones';
 import { supabase, Perfil, Movimiento } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
 import InstalarApp from '@/components/InstalarApp';
@@ -307,6 +308,12 @@ export default function CuentaPage() {
               <span style={{ flexShrink: 0, color: S.FAINT, fontSize: 18 }}>›</span>
             )}
           </Link>
+
+          {/* 18/10 (Iñi): activar o desactivar las notificaciones push y elegir cuáles. */}
+          <div style={{ ...S.card, flexDirection: 'column', alignItems: 'stretch', gap: 10 }}>
+            <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_2, fontWeight: 700 }}>🔔 Notificaciones</span>
+            <AjustesNotificaciones />
+          </div>
 
           {perfil.rol === 'admin' && (
             <Link href="/admin" style={S.card}>

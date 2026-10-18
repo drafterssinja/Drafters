@@ -17,7 +17,7 @@ import MisEquiposV2 from '@/components/v2/MisEquiposV2';
 // ============================================================================
 // Pedido de Iñi: cada deporte tiene su página (se cambia con las pelotas de
 // la cabecera) y sus propios créditos. Al entrar se ven directamente las
-// salas, sin elegir deporte: en fútbol, Liga o Amistosos; en golf, Mesas,
+// salas, sin elegir deporte: en fútbol, Liga o Amistosos; en golf, Liga,
 // Amistosos y Porras; el tenis llegará más adelante.
 
 type Modo = 'liga' | 'amistosos' | 'porras';
@@ -26,9 +26,11 @@ const MODOS: Record<DeporteV2, { id: Modo; label: string }[]> = {
     { id: 'amistosos', label: 'Amistosos' },
     { id: 'liga', label: 'Liga' },
   ],
+  // 17/10 (Iñi): en golf, igual que en fútbol: la Liga (con sus mesas de torneo,
+  // de cada ronda y de fin de semana) y además las Porras.
   golf: [
     { id: 'amistosos', label: 'Amistosos' },
-    { id: 'liga', label: 'Mesas' },
+    { id: 'liga', label: 'Liga' },
     { id: 'porras', label: 'Porras' },
   ],
   tenis: [],
@@ -84,6 +86,11 @@ export default function V2Deporte() {
         <>
           {/* 16/10 (Iñi): "mis equipos" como en la V1, encima de Amistosos / Liga. */}
           {perfil && <MisEquiposV2 deporte={deporte} miId={perfil.id} />}
+          {/* 18/10 (Iñi): que se distinga bien "mis equipos" de las salas para jugar. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6 }}>
+            <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 19, textTransform: 'uppercase', letterSpacing: '0.03em', color: S.TEXT, whiteSpace: 'nowrap' }}>🏟️ Salas para jugar</span>
+            <span style={{ flex: 1, height: 1, background: S.CARD_BORDER }} />
+          </div>
           <div style={{ display: 'flex', background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 4, gap: 4 }}>
             {modos.map((m) => {
               const activo = m.id === modo;
