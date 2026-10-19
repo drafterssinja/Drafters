@@ -1,6 +1,7 @@
 import webpush from 'web-push';
 import type { crearClienteAdmin } from './supabaseAdmin';
 import { claveEquipoLaLiga } from '@/lib/futbolLaLiga';
+import { mensajeRecordatorio } from '@/lib/mensajesPush';
 
 // ============================================================================
 // NOTIFICACIONES PUSH — QUÉ SE MANDA Y CUÁNDO (18/10, Iñi)
@@ -16,14 +17,18 @@ import { claveEquipoLaLiga } from '@/lib/futbolLaLiga';
 //   5. Copia como push de las notificaciones de la app: has ganado una mesa o
 //      un amistoso (resultado), sorteo de rivales, amigos e invitaciones.
 // Cada usuario elige qué tipos quiere (push_preferencias) y en qué
-// dispositivos (push_suscripciones).
+// dispositivos (push_suscripciones). 19/10: de serie solo 1 y 2 (lo demás se
+// enciende en el perfil); textos cortos y variados en lib/mensajesPush.ts.
 
 type Admin = ReturnType<typeof crearClienteAdmin>;
 type Tipo = 'recordatorio_dia_antes' | 'recordatorio_hora' | 'gol' | 'fin_partido' | 'ganado' | 'sorteo' | 'social';
 type Aviso = { clave: string; usuarioId: string; tipo: Tipo; titulo: string; cuerpo: string; url: string };
 type Sub = { id: string; usuario_id: string; endpoint: string; p256dh: string; auth: string };
 
-const TODOS: Tipo[] = ['recordatorio_dia_antes', 'recordatorio_hora', 'gol', 'fin_partido', 'ganado', 'sorteo', 'social'];
+// 19/10 (Iñi): "de serie solamente… que empieza una nueva jornada y que no te
+// olvides de hacer tu equipo. No quiero todavía ninguna de goles y demás".
+// El resto se puede encender a mano en el perfil.
+const POR_DEFECTO: Tipo[] = ['recordatorio_dia_antes', 'recordatorio_hora'];
 
 function madrid(d: Date) {
   const p = Object.fromEntries(
@@ -39,12 +44,6 @@ function horaMadrid(iso: string): string {
 function nombreBonito(competicion: string): string {
   return competicion.replace(/\s*-\s*Jornada\s*/i, ' · Jornada ').replace('La Liga', 'LaLiga').replace('Champions League', 'Champions');
 }
-function jornadaCorta(competicion: string): string {
-  const n = competicion.match(/Jornada\s*(\d+)/i)?.[1];
-  const liga = /champions/i.test(competicion) ? 'Champions' : 'LaLiga';
-  return n ? `la Jornada ${n} de ${liga}` : competicion;
-}
-const al = <T,>(xs: T[]): T => xs[Math.floor(Math.random() * xs.length)];
 
 async function todas<T>(consulta: (d: number, h: number) => PromiseLike<{ data: unknown }>): Promise<T[]> {
   const out: T[] = [];
@@ -80,46 +79,39 @@ async function recordatorios(admin: Admin, usuarios: string[]): Promise<Aviso[]>
   }
   const hoy = madrid(ahora);
   const out: Aviso[] = [];
-  inicio.forEach((c, competicion) => {
+  for (const [competicion, c] of Array.from(inicio.entries())) {
     const ini = new Date(c.inicio);
     const minutos = (ini.getTime() - ahora.getTime()) / 60000;
     const diaInicio = madrid(ini).fecha;
     const manana = madrid(new Date(ahora.getTime() + 24 * 3600e3)).fecha;
-    const golf = c.deporte === 'golf';
     const url = `/v2/${c.deporte}`;
-    // El día antes, a partir de las 18:00 de Madrid.
+    const hora = horaMadrid(c.inicio);
+    // El día antes, a partir de las 18:00 de Madrid: "mañana vuelve…".
     if (diaInicio === manana && hoy.hora >= 18) {
-      for (const u of usuarios)
-        out.push({
-          clave: `rd|${competicion}|${u}`,
-          usuarioId: u,
-          tipo: 'recordatorio_dia_antes',
-          titulo: golf ? `⛳ Mañana empieza el ${competicion}` : `⚽ Mañana empieza ${jornadaCorta(competicion)}`,
-          cuerpo: golf
-            ? `Primera salida a las ${horaMadrid(c.inicio)}. No te olvides de elegir a tus golfistas.`
-            : `Primer partido a las ${horaMadrid(c.inicio)}. No te olvides de hacer tus equipos.`,
-          url,
-        });
+      const m = mensajeRecordatorio('dia_antes', c.deporte, competicion, hora);
+      for (const u of usuarios) out.push({ clave: `rd|${competicion}|${u}`, usuarioId: u, tipo: 'recordatorio_dia_antes', titulo: m.titulo, cuerpo: m.cuerpo, url });
     }
-    // Una hora antes (frases distintas para no cansar).
+    // Una hora antes: "no te olvides de hacer tu equipo". 19/10: solo a quien
+    // todavía no tiene ningún equipo en esa jornada / torneo.
     if (minutos > 0 && minutos <= 60) {
-      const futbol = [
-        ['⏰ ¡Última llamada!', `En 1 hora arranca ${jornadaCorta(competicion)} y tu once sigue en el vestuario. ¿Lo sacas?`],
-        ['🔥 Se calienta el banquillo', `Queda 1 hora para ${jornadaCorta(competicion)}: último momento para fichar.`],
-        ['📋 El míster te espera', `A las ${horaMadrid(c.inicio)} cierra ${nombreBonito(competicion)}. Mete tu alineación antes del pitido.`],
-        ['🏟️ Abren las puertas del estadio', `En una hora rueda el balón en ${nombreBonito(competicion)}. ¿Tienes ya tu equipo?`],
-      ];
-      const golfFrases = [
-        ['⛳ En 1 hora salen al tee', `El ${competicion} empieza en 1 hora. Elige tus 5 golfistas antes de la primera salida.`],
-        ['🏌️ Calentando en el driving range', `Queda 1 hora para el ${competicion}. ¿Ya tienes a tus 5?`],
-        ['🕐 Último hoyo para fichar', `A las ${horaMadrid(c.inicio)} cierra el ${competicion}. Que no te pille el tee de salida.`],
-      ];
+      const conEquipo = await usuariosConEquipo(admin, competicion);
+      const m = mensajeRecordatorio('una_hora', c.deporte, competicion, hora);
       for (const u of usuarios) {
-        const [t, b] = al(golf ? golfFrases : futbol);
-        out.push({ clave: `rh|${competicion}|${u}`, usuarioId: u, tipo: 'recordatorio_hora', titulo: t, cuerpo: b, url });
+        if (conEquipo.has(u)) continue;
+        out.push({ clave: `rh|${competicion}|${u}`, usuarioId: u, tipo: 'recordatorio_hora', titulo: m.titulo, cuerpo: m.cuerpo, url });
       }
     }
-  });
+  }
+  return out;
+}
+
+// Usuarios que ya tienen algún equipo en una jornada / torneo (mesas o amistosos).
+async function usuariosConEquipo(admin: Admin, competicion: string): Promise<Set<string>> {
+  const out = new Set<string>();
+  const equipos = await todas<{ usuario_id: string }>((d, h) => admin.from('equipos').select('usuario_id,salas!inner(competicion)').eq('salas.competicion', competicion).range(d, h));
+  equipos.forEach((e) => out.add(e.usuario_id));
+  const amistosos = await todas<{ usuario_id: string }>((d, h) => admin.from('amistoso_equipos').select('usuario_id').eq('competicion', competicion).range(d, h));
+  amistosos.forEach((e) => out.add(e.usuario_id));
   return out;
 }
 
@@ -252,7 +244,7 @@ export async function enviarNotificacionesPush(admin: Admin): Promise<{ avisos: 
     const p = pref.get(u);
     if (!subsDe.has(u)) return false;
     if (p && !p.activo) return false;
-    return (p?.tipos ?? TODOS).includes(t);
+    return (p?.tipos ?? POR_DEFECTO).includes(t);
   };
   const usuarios = Array.from(subsDe.keys());
 

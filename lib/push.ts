@@ -11,8 +11,8 @@ import { supabase } from '@/lib/supabaseClient';
 export type TipoPush = 'recordatorio_dia_antes' | 'recordatorio_hora' | 'gol' | 'fin_partido' | 'ganado' | 'sorteo' | 'social';
 
 export const TIPOS_PUSH: { tipo: TipoPush; titulo: string; desc: string }[] = [
-  { tipo: 'recordatorio_dia_antes', titulo: 'El día antes, a las 18:00', desc: 'Mañana empieza la jornada o el torneo: no te olvides de tus equipos.' },
-  { tipo: 'recordatorio_hora', titulo: '1 hora antes de empezar', desc: 'Último aviso antes de que cierren las mesas.' },
+  { tipo: 'recordatorio_dia_antes', titulo: 'Nueva jornada', desc: 'El día antes, a las 18:00: mañana vuelve la Champions, LaLiga o el golf.' },
+  { tipo: 'recordatorio_hora', titulo: 'No te olvides de tu equipo', desc: '1 hora antes de empezar, si todavía no has hecho ningún equipo.' },
   { tipo: 'gol', titulo: 'Goles de tus jugadores', desc: 'Fútbol: cada vez que marca uno de tus jugadores.' },
   { tipo: 'fin_partido', titulo: 'Final de partido', desc: 'Fútbol: resultado y puntos de tus jugadores al acabar su partido.' },
   { tipo: 'ganado', titulo: 'Resultados', desc: 'Cuando ganas una mesa o un amistoso.' },
@@ -20,6 +20,8 @@ export const TIPOS_PUSH: { tipo: TipoPush; titulo: string; desc: string }[] = [
   { tipo: 'social', titulo: 'Amigos', desc: 'Solicitudes de amistad e invitaciones a salas.' },
 ];
 export const TODOS_LOS_TIPOS: TipoPush[] = TIPOS_PUSH.map((t) => t.tipo);
+// 19/10 (Iñi): de serie solo vienen activadas estas dos; goles y demás, a mano en el perfil.
+export const TIPOS_POR_DEFECTO: TipoPush[] = ['recordatorio_dia_antes', 'recordatorio_hora'];
 
 export type EstadoPush = 'no_soportado' | 'ios_sin_instalar' | 'denegado' | 'activo' | 'inactivo';
 
@@ -89,7 +91,7 @@ export async function desactivarPush(): Promise<void> {
 export async function leerTiposPush(uid: string): Promise<{ activo: boolean; tipos: TipoPush[] }> {
   const { data } = await supabase.from('push_preferencias').select('activo,tipos').eq('usuario_id', uid).maybeSingle();
   const d = data as { activo: boolean; tipos: TipoPush[] } | null;
-  return { activo: d?.activo ?? true, tipos: d?.tipos ?? TODOS_LOS_TIPOS };
+  return { activo: d?.activo ?? true, tipos: d?.tipos ?? TIPOS_POR_DEFECTO };
 }
 
 export async function guardarTiposPush(uid: string, activo: boolean, tipos: TipoPush[]): Promise<boolean> {
