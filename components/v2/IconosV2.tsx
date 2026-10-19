@@ -128,3 +128,21 @@ export function IconoGema({ size = 14 }: { size?: number }) {
     </svg>
   );
 }
+
+// 19/10 (Iñi): icono de cartas para la hoja de la pocha (solo Iñi y Javier).
+// Dos naipes abiertos en abanico; el de delante con un oro.
+export function IconoCartas({ size = 24 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden>
+      <g transform="rotate(-14 12 13)">
+        <rect x="4.5" y="4" width="10" height="15" rx="1.8" fill="#E9EEEA" stroke="#0B0F0E" strokeWidth="0.8" />
+        <rect x="6" y="5.5" width="7" height="12" rx="1" fill="none" stroke="#C0392B" strokeWidth="0.9" />
+      </g>
+      <g transform="rotate(12 12 13)">
+        <rect x="9" y="4.5" width="10" height="15" rx="1.8" fill="#FFFFFF" stroke="#0B0F0E" strokeWidth="0.8" />
+        <circle cx="14" cy="12" r="3.1" fill="#F0B94D" stroke="#B7832A" strokeWidth="0.8" />
+        <circle cx="14" cy="12" r="1.3" fill="none" stroke="#B7832A" strokeWidth="0.7" />
+      </g>
+    </svg>
+  );
+}

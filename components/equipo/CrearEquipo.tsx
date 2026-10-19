@@ -594,11 +594,17 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
   const restante = EQUIPO_PRESUPUESTO - gasto;
   // En los amistosos libres no hay presupuesto.
   const overBudget = !libre && restante < 0;
+  // 19/10 (Iñi): en el modo libre de fútbol, máximo 2 jugadores de cada equipo (como en el draft).
+  const limite2 = libre && isFutbol;
+  const porClub = new Map<string, number>();
+  seleccionados.forEach((j) => j.equipo_real && porClub.set(j.equipo_real, (porClub.get(j.equipo_real) ?? 0) + 1));
+  const clubLleno = (j: JugadorRow) => limite2 && !selected.includes(j.id) && !!j.equipo_real && (porClub.get(j.equipo_real) ?? 0) >= 2;
+  const clubPasado = limite2 ? Array.from(porClub.entries()).find(([, n]) => n > 2)?.[0] ?? null : null;
   const color = colorPresupuesto(restante);
   const spentPct = Math.max(0, Math.min(100, (gasto / EQUIPO_PRESUPUESTO) * 100));
 
   const equipoCompleto = isFutbol ? selected.length === totalHuecos : selected.length === TAMANO_EQUIPO_GOLF_TENIS;
-  const puedeConfirmar = equipoCompleto && !overBudget;
+  const puedeConfirmar = equipoCompleto && !overBudget && !clubPasado;
   // Textos que cambian entre crear e inscribirse por primera vez (con
   // cobro) y editar un equipo ya inscrito (sin cobro) — 27/09, décima
   // vuelta.
@@ -817,6 +823,7 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
     if (isFutbol) {
       const linea = lineaDePosicion(jugador.posicion);
       if (seleccionadosPorLinea[linea] >= huecos[linea]) return; // línea llena
+      if (clubLleno(jugador)) return; // ya tiene 2 de ese equipo (modo libre)
       setSelected((prev) => [...prev, jugador.id]);
     } else {
       if (selected.length >= TAMANO_EQUIPO_GOLF_TENIS) return; // equipo lleno
@@ -993,9 +1000,9 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
                   {(() => {
                     const faltan = (isFutbol ? totalHuecos : TAMANO_EQUIPO_GOLF_TENIS) - selected.length;
                     if (faltan <= 0) {
-                      return <span style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12.5, fontWeight: 700, color: overBudget ? '#FF5C5C' : '#3DDC84' }}>{overBudget ? 'Equipo completo, pero te has pasado del presupuesto' : 'Equipo completo'}</span>;
+                      return <span style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12.5, fontWeight: 700, color: overBudget || clubPasado ? '#FF5C5C' : '#3DDC84' }}>{overBudget ? 'Equipo completo, pero te has pasado del presupuesto' : clubPasado ? `Tienes más de 2 jugadores del ${clubPasado}: quita alguno` : 'Equipo completo'}</span>;
                     }
-                    if (libre) return <span style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12.5, fontWeight: 600, color: S.TEXT }}>Te {faltan === 1 ? 'falta 1 jugador' : `faltan ${faltan} jugadores`}: elige a quien quieras.</span>;
+                    if (libre) return <span style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12.5, fontWeight: 600, color: S.TEXT }}>Te {faltan === 1 ? 'falta 1 jugador' : `faltan ${faltan} jugadores`}: elige a quien quieras{limite2 ? ', máximo 2 de cada equipo' : ''}.</span>;
                     const media = Math.max(0, restante) / faltan;
                     return (
                       <span style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12.5, fontWeight: 600, color: S.TEXT, lineHeight: 1.3 }}>
@@ -1192,7 +1199,7 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
                             {abierta && (
                               <>
                                 {filas.map((j) => (
-                                  <PlayerRow key={j.id} jugador={j} selected={selected.includes(j.id)} disabled={!selected.includes(j.id) && seleccionadosPorLinea[linea] >= huecos[linea]} onToggle={() => toggleJugador(j)} sinPrecio={libre} />
+                                  <PlayerRow key={j.id} jugador={j} selected={selected.includes(j.id)} disabled={!selected.includes(j.id) && (seleccionadosPorLinea[linea] >= huecos[linea] || clubLleno(j))} onToggle={() => toggleJugador(j)} sinPrecio={libre} nota={clubLleno(j) && seleccionadosPorLinea[linea] < huecos[linea] ? 'ya tienes 2' : undefined} />
                                 ))}
                                 {restantes > 0 && (
                                   <button
@@ -1313,7 +1320,7 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
                 </div>
 
                 <button type="button" disabled={!puedeConfirmar} onClick={() => avanzarPaso('confirm')} style={{ ...submitButtonStyle(puedeConfirmar), fontSize: 12, padding: '5px 20px', minHeight: 26, borderRadius: 8 }}>
-                  {equipoCompleto ? (overBudget ? 'Supera el presupuesto' : textoRevisar) : `Faltan ${totalHuecos - selected.length} jugadores`}
+                  {equipoCompleto ? (overBudget ? 'Supera el presupuesto' : clubPasado ? 'Máximo 2 por equipo' : textoRevisar) : `Faltan ${totalHuecos - selected.length} jugadores`}
                 </button>
               </div>
               </>
@@ -1495,7 +1502,7 @@ function PuntuacionInfoScreen({ deporte, competicion, onEntendido, onVolver }: {
   );
 }
 
-function PlayerRow({ jugador, selected, disabled, onToggle, sinPrecio = false }: { jugador: JugadorRow; selected: boolean; disabled: boolean; onToggle: () => void; sinPrecio?: boolean }) {
+function PlayerRow({ jugador, selected, disabled, onToggle, sinPrecio = false, nota }: { jugador: JugadorRow; selected: boolean; disabled: boolean; onToggle: () => void; sinPrecio?: boolean; nota?: string }) {
   return (
     <a
       href="#"
@@ -1521,7 +1528,12 @@ function PlayerRow({ jugador, selected, disabled, onToggle, sinPrecio = false }:
           <span style={{ minWidth: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 13, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{jugador.nombre}</span>
           {jugador.lesionado && <span style={{ flexShrink: 0, width: 13, height: 13, borderRadius: '50%', background: '#FF5C5C' }} />}
         </div>
-        {jugador.equipo_real && <span style={{ fontSize: 10, color: S.MUTED_3 }}>{jugador.equipo_real}</span>}
+        {jugador.equipo_real && (
+          <span style={{ fontSize: 10, color: S.MUTED_3 }}>
+            {jugador.equipo_real}
+            {nota && <span style={{ color: '#F0B94D', fontWeight: 700 }}> · {nota}</span>}
+          </span>
+        )}
       </div>
       {!sinPrecio && <span style={{ flexShrink: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 11.5, color: '#F0B94D' }}>{formatEuros(jugador.precio)}</span>}
       <span

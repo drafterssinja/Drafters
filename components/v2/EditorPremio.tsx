@@ -1,9 +1,64 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import * as S from '@/lib/mockupStyles';
 import TiraPuestos from '@/components/v2/TiraPuestos';
 import { esDineroGP, esRepartoEquitativoGP, formatoEuros, repartoEquitativoGP, textoPagan, type Premio } from '@/lib/v2';
+
+// 19/10 (Iñi): en las cajitas de euros, al pinchar el cursor se quedaba a la
+// izquierda del número y no se sabía cómo borrarlo. Ahora: al pinchar se
+// selecciona todo (lo que escribas lo sustituye), se puede dejar vacía mientras
+// escribes, y a la derecha hay flechas ▲▼ que suben y bajan de 1 en 1 €.
+function aTexto(v: number | null): string {
+  if (v === null || !Number.isFinite(v)) return '';
+  return Number.isInteger(v) ? String(v) : String(Math.round(v * 100) / 100).replace('.', ',');
+}
+function CajaEuros({ valor, onChange, color, ancho = 120, vacioEsNull = false, placeholder }: { valor: number | null; onChange: (v: number | null) => void; color: string; ancho?: number | string; vacioEsNull?: boolean; placeholder?: string }) {
+  const [texto, setTexto] = useState(aTexto(valor));
+  const [editando, setEditando] = useState(false);
+  useEffect(() => {
+    if (!editando) setTexto(aTexto(valor));
+  }, [valor, editando]);
+  const cambiarTexto = (t: string) => {
+    const limpio = t.replace(/[^0-9.,]/g, '');
+    setTexto(limpio);
+    if (limpio === '') return onChange(vacioEsNull ? null : 0);
+    const n = Number(limpio.replace(',', '.'));
+    if (Number.isFinite(n)) onChange(Math.max(0, Math.round(n * 100) / 100));
+  };
+  const sumar = (d: number) => {
+    setEditando(false);
+    onChange(Math.max(0, Math.round(((valor ?? 0) + d) * 100) / 100));
+  };
+  const flecha = { flex: 1, width: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', color: S.TEXT, fontSize: 11, cursor: 'pointer', padding: 0 } as const;
+  return (
+    <div style={{ width: ancho, height: 44, display: 'flex', alignItems: 'stretch', borderRadius: 10, border: `1px solid ${color}66`, background: S.PANEL, overflow: 'hidden', flexShrink: 0 }}>
+      <input
+        type="text"
+        inputMode="decimal"
+        value={texto}
+        placeholder={placeholder}
+        onFocus={(e) => {
+          setEditando(true);
+          const el = e.currentTarget;
+          window.setTimeout(() => el.select(), 0);
+        }}
+        onBlur={() => setEditando(false)}
+        onChange={(e) => cambiarTexto(e.target.value)}
+        style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none', padding: '0 4px 0 10px', textAlign: 'right', fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 16, color }}
+      />
+      <span style={{ display: 'flex', alignItems: 'center', paddingRight: 6, fontWeight: 800, fontSize: 14, color }}>€</span>
+      <div style={{ display: 'flex', flexDirection: 'column', borderLeft: `1px solid ${color}44` }}>
+        <button type="button" aria-label="Subir 1 €" onClick={() => sumar(1)} style={{ ...flecha, borderBottom: `1px solid ${color}44` }}>
+          ▲
+        </button>
+        <button type="button" aria-label="Bajar 1 €" onClick={() => sumar(-1)} disabled={(valor ?? 0) <= 0} style={{ ...flecha, opacity: (valor ?? 0) <= 0 ? 0.35 : 1 }}>
+          ▼
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export const PREMIO_VACIO: Premio = { tipo: 'nada', aportacion: null, descripcion: '', ganadores: 1, reparto: [100], pagan: 1, ganan: 0 };
 
@@ -65,17 +120,7 @@ export default function EditorPremio({ premio, onChange, participantes }: { prem
         const totalPaga = Math.round(gp.pagos!.reduce((x, y) => x + y, 0) * 100) / 100;
         const cuadra = Math.abs(totalCobra - totalPaga) < 0.01;
         const manual = repartoManual || !esRepartoEquitativoGP(gp);
-        const importe = (valor: number, cambiar: (v: number) => void, color: string) => (
-          <input
-            type="number"
-            inputMode="decimal"
-            min={0}
-            step={0.5}
-            value={Number.isFinite(valor) ? valor : ''}
-            onChange={(e) => cambiar(e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
-            style={{ ...S.input, width: 86, padding: '8px 8px', textAlign: 'right', fontWeight: 800, color, border: `1px solid ${color}55` }}
-          />
-        );
+        const importe = (valor: number, cambiar: (v: number) => void, color: string) => <CajaEuros valor={valor} onChange={(v) => cambiar(v ?? 0)} color={color} />;
         return (
           <>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, justifyContent: 'space-between' }}>
@@ -90,18 +135,16 @@ export default function EditorPremio({ premio, onChange, participantes }: { prem
             </div>
             <label style={S.field}>
               <span style={S.label}>¿Cuánto paga cada uno de los que pierden? (€)</span>
-              <input
-                type="number"
-                inputMode="decimal"
-                min={0}
-                step={1}
-                value={gp.aportacion ?? ''}
-                onChange={(e) => {
-                  setRepartoManual(false);
-                  equitativo(ganan, pagan, e.target.value === '' ? null : Math.max(0, Number(e.target.value)));
-                }}
-                style={S.input}
+              <CajaEuros
+                valor={gp.aportacion ?? null}
+                vacioEsNull
+                ancho="100%"
+                color={S.TEXT}
                 placeholder="Ej. 10"
+                onChange={(v) => {
+                  setRepartoManual(false);
+                  equitativo(ganan, pagan, v);
+                }}
               />
             </label>
 

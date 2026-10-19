@@ -72,7 +72,7 @@ export default function EditorSala({ amistoso, dentro, empezada, conEquipo = 0, 
   }
 
   const titulo = (t: string) => <span style={S.sectionLabel}>{t}</span>;
-  const efecto = efectoCambioModalidad(amistoso.modalidad, modalidad);
+  const efecto = efectoCambioModalidad(amistoso.modalidad, modalidad, amistoso.deporte);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14, border: `1px solid ${V2_COLOR}`, borderRadius: 14, padding: 14, background: 'rgba(167,139,250,0.05)' }}>
@@ -110,6 +110,8 @@ export default function EditorSala({ amistoso, dentro, empezada, conEquipo = 0, 
                 ? `⚠️ ${conEquipo === 1 ? '1 jugador ya ha hecho su equipo' : `${conEquipo} jugadores ya han hecho su equipo`}: se quitarán (los equipos saldrán del draft) y les saldrá un aviso para que puedan guardarlo para otra sala.`
                 : efecto === 'caros'
                   ? '⚠️ Los equipos que se pasen de 100.000 € se quitarán y a sus dueños les saldrá un aviso (podrán guardarlo para otra sala).'
+                  : efecto === 'mas_de_2'
+                    ? '⚠️ Los equipos con más de 2 jugadores de un mismo equipo se quitarán y a sus dueños les saldrá un aviso (podrán guardarlo para otra sala).'
                   : '✓ Los equipos que ya están hechos siguen valiendo. Les avisaremos del cambio.'}
             </span>
           )}

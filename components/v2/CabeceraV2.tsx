@@ -6,7 +6,8 @@ import { useRouter } from 'next/navigation';
 import LogoDrafters from '@/components/LogoDrafters';
 import { supabase, type Perfil } from '@/lib/supabaseClient';
 import * as S from '@/lib/mockupStyles';
-import { DEPORTES_V2, DEPORTE_NOMBRE, IconoCredito, PelotaDeporte, type DeporteV2 } from '@/components/v2/IconosV2';
+import { DEPORTES_V2, DEPORTE_NOMBRE, IconoCartas, IconoCredito, PelotaDeporte, type DeporteV2 } from '@/components/v2/IconosV2';
+import { puedeJugarPocha } from '@/lib/pocha';
 import { FichaCreditos, useCreditosV2 } from '@/components/v2/creditos';
 
 // ============================================================================
@@ -17,11 +18,21 @@ import { FichaCreditos, useCreditosV2 } from '@/components/v2/creditos';
 // por separado). Lo de la derecha: avisos, créditos del deporte en el que
 // estás (al pulsarlo, la ficha con las reglas y el vídeo de recarga) y Mi cuenta.
 
-export default function CabeceraV2({ perfil, deporte, volverA }: { perfil: Perfil | null; deporte: DeporteV2; volverA?: string }) {
+export default function CabeceraV2({ perfil, deporte: deporteOPocha, volverA }: { perfil: Perfil | null; deporte: DeporteV2 | 'pocha'; volverA?: string }) {
+  // 19/10 (Iñi): en la hoja de la pocha no hay deporte; los créditos son los de fútbol.
+  const enPocha = deporteOPocha === 'pocha';
+  const deporte: DeporteV2 = enPocha ? 'futbol' : (deporteOPocha as DeporteV2);
   const router = useRouter();
   const { creditos } = useCreditosV2(!!perfil);
   const [ficha, setFicha] = useState(false);
   const [noLeidas, setNoLeidas] = useState(0);
+  // 19/10 (Iñi): el icono de cartas (pocha) solo lo ven Iñi y Javier.
+  const [pocha, setPocha] = useState(false);
+  useEffect(() => {
+    if (!perfil) return;
+    if (puedeJugarPocha(perfil.email)) return setPocha(true);
+    void supabase.auth.getSession().then(({ data }) => setPocha(puedeJugarPocha(data.session?.user.email)));
+  }, [perfil]);
   // 15/10 (Iñi: "la parte superior está muy achatada"): más alta, y tres
   // tamaños según el ancho del móvil para que todo quepa sin aplastarse.
   const [ancho, setAncho] = useState(400);
@@ -49,11 +60,11 @@ export default function CabeceraV2({ perfil, deporte, volverA }: { perfil: Perfi
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, minHeight: 68, padding: `18px ${t.pad}px`, borderBottom: '1px solid #1A211D' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
           <Link href="/v2/futbol" style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }} aria-label="Drafters">
-            <LogoDrafters size={t.logo} />
+            <LogoDrafters size={pocha ? t.logo - 2 : t.logo} />
           </Link>
-          <nav style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }} aria-label="Deportes">
+          <nav style={{ display: 'flex', alignItems: 'center', gap: pocha ? 0 : 2, flexShrink: 0 }} aria-label="Deportes">
             {DEPORTES_V2.map((d) => {
-              const activo = d === deporte;
+              const activo = !enPocha && d === deporte;
               return (
                 <Link
                   key={d}
@@ -61,10 +72,10 @@ export default function CabeceraV2({ perfil, deporte, volverA }: { perfil: Perfi
                   aria-label={DEPORTE_NOMBRE[d]}
                   aria-current={activo ? 'page' : undefined}
                   style={{
-                    height: t.bola + 2,
-                    minWidth: t.bola,
+                    height: pocha ? t.icono + 7 : t.bola + 2,
+                    minWidth: pocha ? t.icono + 3 : t.bola,
                     flexShrink: 0,
-                    padding: activo ? '0 10px 0 4px' : 0,
+                    padding: activo && !pocha ? '0 10px 0 4px' : 0,
                     borderRadius: 999,
                     display: 'flex',
                     alignItems: 'center',
@@ -79,10 +90,35 @@ export default function CabeceraV2({ perfil, deporte, volverA }: { perfil: Perfi
                 >
                   <PelotaDeporte deporte={d} size={t.icono} />
                   {/* 15/10 (Iñi): el nombre del deporte solo junto a la pelota seleccionada. */}
-                  {activo && <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: ancho >= 400 ? 13 : 12, color: S.ACCENT, whiteSpace: 'nowrap' }}>{DEPORTE_NOMBRE[d]}</span>}
+                  {activo && !pocha && <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: ancho >= 400 ? 13 : 12, color: S.ACCENT, whiteSpace: 'nowrap' }}>{DEPORTE_NOMBRE[d]}</span>}
                 </Link>
               );
             })}
+            {pocha && (
+              <Link
+                href="/pocha"
+                aria-label="Pocha"
+                aria-current={enPocha ? 'page' : undefined}
+                style={{
+                  height: pocha ? t.icono + 7 : t.bola + 2,
+                  minWidth: pocha ? t.icono + 3 : t.bola,
+                  flexShrink: 0,
+                  padding: 0,
+                  borderRadius: 999,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 5,
+                  background: enPocha ? 'rgba(61,220,132,0.16)' : 'transparent',
+                  border: `1.5px solid ${enPocha ? S.ACCENT : 'transparent'}`,
+                  opacity: enPocha ? 1 : 0.5,
+                  textDecoration: 'none',
+                  transition: 'all 0.15s',
+                }}
+              >
+                <IconoCartas size={t.icono} />
+              </Link>
+            )}
           </nav>
         </div>
 
