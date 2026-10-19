@@ -77,6 +77,7 @@ function V2CrearInner() {
   const [contrasena, setContrasena] = useState('');
   const [premio, setPremio] = useState<Premio>(PREMIO_VACIO);
   const [equipoFijo, setEquipoFijo] = useState(false);
+  const [paso, setPaso] = useState(1);
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -295,6 +296,31 @@ function V2CrearInner() {
     router.replace(`/v2/sala/${data as string}`);
   }
 
+  // 18/10 (Iñi): la configuración va apareciendo poco a poco: nombre →
+  // competición y jornada → partidos → jugadores → modalidad → privacidad.
+  const hayPasoPartidos = (!!compTramos && (tramosDeSeleccion.length > 0 || !completaDisponible)) || (!!unaJornadaFutbol && partidos.length > 0);
+  const okPaso: Record<number, string | null> = {
+    1: nombre.trim() ? null : 'Ponle un nombre a la sala.',
+    2: deporte === 'futbol' && !liga ? 'Elige si la sala es de LaLiga o de la Champions.' : seleccion.length === 0 ? (deporte === 'golf' ? 'Elige un torneo.' : 'Elige la jornada.') : null,
+    3: unaJornadaFutbol && partidos.length > 0 && partidosOn.size === 0 ? 'Elige al menos un partido.' : !tramo && compTramos && !completaDisponible ? (deporte === 'golf' ? 'El torneo ya ha empezado: elige una ronda.' : 'La jornada ya ha empezado: elige los partidos de un día.') : null,
+    4: null,
+    5: avisoDraft,
+  };
+  function avanzar(n: number) {
+    const problema = okPaso[n];
+    if (problema) return setError(problema);
+    setError(null);
+    const siguiente = n === 2 && deporte === 'golf' && !hayPasoPartidos ? 4 : n + 1;
+    setPaso((p) => Math.max(p, siguiente));
+    window.setTimeout(() => document.getElementById(`paso-${siguiente}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
+  }
+  const continuar = (n: number) =>
+    paso === n ? (
+      <button type="button" onClick={() => avanzar(n)} style={{ ...S.primaryButton, background: V2_COLOR, opacity: okPaso[n] ? 0.5 : 1 }}>
+        Continuar
+      </button>
+    ) : null;
+
   const bloque = (titulo: string, contenido: React.ReactNode, ayuda?: string) => (
     <Panel>
       <span style={S.sectionLabel}>{titulo}</span>
@@ -310,11 +336,27 @@ function V2CrearInner() {
         <Titulo>Nuevo amistoso de {deporte === 'golf' ? 'golf' : 'fútbol'}</Titulo>
       </div>
 
-      {bloque('Nombre', <input value={nombre} maxLength={40} onChange={(e) => setNombre(e.target.value)} placeholder="Ej. La liga de los jueves" style={S.input} />)}
+      {bloque(
+        'Nombre',
+        <input
+          value={nombre}
+          maxLength={40}
+          autoFocus
+          onChange={(e) => setNombre(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') avanzar(1);
+          }}
+          placeholder="Ej. La liga de los jueves"
+          style={S.input}
+        />
+      )}
+      {paso === 1 && error && <p style={S.errorText}>{error}</p>}
+      {continuar(1)}
 
-      {comps === null && <Cargando compacto />}
+      {paso >= 2 && <div id="paso-2" />}
+      {paso >= 2 && comps === null && <Cargando compacto />}
 
-      {comps !== null && deporte === 'futbol' &&
+      {paso >= 2 && comps !== null && deporte === 'futbol' &&
         bloque(
           'Competición y jornadas',
           futbol.length === 0 ? (
@@ -407,7 +449,7 @@ function V2CrearInner() {
           'Desde la próxima jornada publicada hasta la que quieras de la misma competición.'
         )}
 
-      {comps !== null && deporte === 'golf' &&
+      {paso >= 2 && comps !== null && deporte === 'golf' &&
         bloque(
           'Torneo',
           golf.length === 0 ? (
@@ -423,8 +465,12 @@ function V2CrearInner() {
           )
         )}
 
+      {paso === 2 && error && <p style={S.errorText}>{error}</p>}
+      {continuar(2)}
+
+      {paso >= 3 && <div id="paso-3" />}
       {/* 17/10 (Iñi): jornada/torneo completo, solo los partidos de un día o una sola ronda. */}
-      {compTramos &&
+      {paso >= 3 && compTramos &&
         (tramosDeSeleccion.length > 0 || !completaDisponible) &&
         bloque(
           deporte === 'golf' ? '¿Qué rondas cuentan?' : '¿Qué partidos cuentan?',
@@ -449,7 +495,7 @@ function V2CrearInner() {
           deporte === 'golf' ? 'Solo puntúan las rondas elegidas.' : 'Solo días con al menos 3 partidos. Sirve si se te ha pasado el inicio de la jornada.'
         )}
 
-      {unaJornadaFutbol &&
+      {paso >= 3 && unaJornadaFutbol &&
         partidos.length > 0 &&
         bloque(
           `Partidos${varias ? ` de la jornada ${numeroJornada(unaJornadaFutbol)}` : ''} (${partidosOn.size} de ${partidosVisibles.length})`,
@@ -506,13 +552,20 @@ function V2CrearInner() {
             : 'Solo se podrán elegir jugadores de los partidos marcados.'
         )}
 
-      {bloque(
+      {paso === 3 && error && <p style={S.errorText}>{error}</p>}
+      {paso >= 3 && continuar(3)}
+
+      {paso >= 4 && <div id="paso-4" />}
+      {paso >= 4 && bloque(
         'Jugadores en la sala',
         <SelectorJugadores valor={numJugadores} onChange={setNumJugadores} />,
         'Si al final sois menos, el administrador puede empezar con los que haya y ajustar quién gana y quién paga.'
       )}
 
-      {bloque(
+      {continuar(4)}
+
+      {paso >= 5 && <div id="paso-5" />}
+      {paso >= 5 && bloque(
         'Modalidad',
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {(['presupuesto', 'libre', 'draft'] as Modalidad[]).map((m) => (
@@ -540,7 +593,11 @@ function V2CrearInner() {
         </div>
       )}
 
-      {bloque(
+      {paso === 5 && error && <p style={S.errorText}>{error}</p>}
+      {continuar(5)}
+
+      {paso >= 6 && <div id="paso-6" />}
+      {paso >= 6 && bloque(
         'Privacidad',
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={{ display: 'flex', gap: 6 }}>
@@ -559,21 +616,25 @@ function V2CrearInner() {
         </div>
       )}
 
-      {privada &&
+      {paso >= 6 && privada &&
         bloque(
           '¿Qué os jugáis?',
           <EditorPremio premio={premio} onChange={setPremio} participantes={numJugadores} />,
           'Lo puedes cambiar después desde la sala (se avisa a todos en el chat).'
         )}
 
-      <p style={{ fontSize: 11.5, color: S.MUTED_3, lineHeight: 1.5, margin: 0 }}>Drafters no cobra ni paga nada en los amistosos: solo calcula la clasificación y cuánto le toca a cada uno.</p>
+      {paso >= 6 && (
+        <>
+          <p style={{ fontSize: 11.5, color: S.MUTED_3, lineHeight: 1.5, margin: 0 }}>Drafters no cobra ni paga nada en los amistosos: solo calcula la clasificación y cuánto le toca a cada uno.</p>
 
-      {/* 16/10 (Iñi): crear la sala (y entrar en ella) cuesta 1 crédito Drafters (SQL 45). */}
-      <CosteCredito deporte={deporte} accion="Crear la sala (y entrar en ella)" />
-      {error && <p style={S.errorText}>{error}</p>}
-      <button type="button" onClick={crear} disabled={enviando} style={{ ...S.primaryButton, background: V2_COLOR, opacity: enviando ? 0.6 : 1 }}>
-        {enviando ? 'Creando...' : 'Crear sala · 1 crédito'}
-      </button>
+          {/* 16/10 (Iñi): crear la sala (y entrar en ella) cuesta 1 crédito Drafters (SQL 45). */}
+          <CosteCredito deporte={deporte} accion="Crear la sala (y entrar en ella)" />
+          {error && <p style={S.errorText}>{error}</p>}
+          <button type="button" onClick={crear} disabled={enviando} style={{ ...S.primaryButton, background: V2_COLOR, opacity: enviando ? 0.6 : 1 }}>
+            {enviando ? 'Creando...' : 'Crear sala · 1 crédito'}
+          </button>
+        </>
+      )}
     </MarcoV2>
   );
 }
