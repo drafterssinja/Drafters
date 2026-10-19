@@ -142,7 +142,7 @@ export interface SalaNueva {
   fecha_limite_inscripcion: string | null;
   // 15/10 (Iñi: "no mezclar mesas"): 1 = mesas de la V1 (con €), 2 = mesas de
   // la liga de Drafters V2 (se entra con 1 crédito, se juegan draftis).
-  version?: number;
+  version: number;
 }
 
 // Genera todas las salas que hay que crear al abrir un torneo/jornada nuevo:
@@ -168,6 +168,7 @@ export function generarSalasParaTorneo(params: {
           aforo: v.aforo,
           buy_in: buyIn,
           fecha_limite_inscripcion: fechaLimiteIso,
+          version: 1,
         })
       )
     );
@@ -179,7 +180,12 @@ export function generarSalasParaTorneo(params: {
       aforo: null,
       buy_in: MARATON_BUY_IN,
       fecha_limite_inscripcion: fechaLimiteIso,
+      version: 1,
     });
+    // 19/10: TODAS las filas llevan "version". Al insertar varias filas de
+    // golpe, si unas la traen y otras no, Supabase manda null en las que no
+    // (no el valor por defecto) y la base de datos rechaza la jornada entera
+    // ("null value in column version"). Pasó con la Champions J3.
     // Mesas de la liga de Drafters V2: una de cada tipo y tamaño, aparte de las
     // de la V1 (15/10). Al llenarse, se crea otra igual (disparador en la BD).
     VARIANTES_FUTBOL.forEach((v) =>
@@ -219,6 +225,7 @@ export function generarSalasParaTorneo(params: {
         aforo: variante.aforo,
         buy_in: variante.buyIn,
         fecha_limite_inscripcion: fechaLimiteIso,
+        version: 1,
       })
     )
   );
@@ -231,6 +238,7 @@ export function generarSalasParaTorneo(params: {
     aforo: null,
     buy_in: MARATON_BUY_IN,
     fecha_limite_inscripcion: fechaLimiteIso,
+    version: 1,
   });
 
   return salas;
