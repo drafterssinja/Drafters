@@ -310,7 +310,7 @@ export default function CuentaPage() {
           </Link>
 
           {/* 18/10 (Iñi): activar o desactivar las notificaciones push y elegir cuáles. */}
-          <div style={{ ...S.card, flexDirection: 'column', alignItems: 'stretch', gap: 10 }}>
+          <div id="notificaciones" style={{ ...S.card, flexDirection: 'column', alignItems: 'stretch', gap: 10, scrollMarginTop: 80 }}>
             <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_2, fontWeight: 700 }}>🔔 Notificaciones</span>
             <AjustesNotificaciones />
           </div>
