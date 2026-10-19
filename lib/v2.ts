@@ -16,7 +16,7 @@ export const MODALIDAD_LABEL: Record<Modalidad, string> = {
 
 export const MODALIDAD_DESC: Record<Modalidad, string> = {
   presupuesto: 'Cada uno hace su equipo con 100.000 € de presupuesto, como en las mesas de siempre.',
-  libre: 'Sin presupuesto ni precios: cada uno elige a quien quiera. Se pueden repetir jugadores entre equipos.',
+  libre: 'Sin presupuesto ni precios: cada uno elige a quien quiera, con un máximo de 2 jugadores de cada equipo. Se pueden repetir jugadores entre equipos.',
   draft: 'Por turnos, como en la NBA: sorteo del orden y cada uno elige un jugador. Nadie puede repetir jugador.',
 };
 
@@ -356,9 +356,11 @@ export type AvisoModalidad = {
 export type EquipoGuardado = { id: string; deporte: string; competicion: string; nombre: string; jugadores: string[]; alineacion: string | null; created_at: string };
 
 // Qué pasa con los equipos ya hechos al pasar de una modalidad a otra.
-export function efectoCambioModalidad(antes: Modalidad, despues: Modalidad): 'todos' | 'caros' | 'ninguno' {
+export function efectoCambioModalidad(antes: Modalidad, despues: Modalidad, deporte?: string): 'todos' | 'caros' | 'mas_de_2' | 'ninguno' {
   if (antes === despues) return 'ninguno';
   if (despues === 'draft') return 'todos';
   if (antes === 'libre' && despues === 'presupuesto') return 'caros';
+  // 19/10: en el modo libre de fútbol, máximo 2 jugadores de cada equipo (SQL 57).
+  if (despues === 'libre' && deporte === 'futbol') return 'mas_de_2';
   return 'ninguno';
 }

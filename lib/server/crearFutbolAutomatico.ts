@@ -39,7 +39,6 @@
 // fecha límite = inicio del primer partido; (d) anota la jornada en
 // `futbol_jornadas_auto`.
 
-import { todasLasFilas } from '../paginar';
 import { randomUUID } from 'crypto';
 import type { crearClienteAdmin } from './supabaseAdmin';
 import { BASE_ESPN, jsonEspn, yyyymmdd, mapaEquiposNuestros, claveNuestraDe } from './sincronizarFutbolEspn';
@@ -421,6 +420,7 @@ async function crearUnaLiga(admin: Admin, liga: (typeof LIGAS_AUTO)[number], aho
       const rango = valores.length > 0 ? { valorMin: Math.min(...valores), valorMax: Math.max(...valores) } : undefined;
 
       const nuevosIds = fichas.map(() => randomUUID());
+      const lote = randomUUID();
       // 11/10: en la Champions se regulan defensas y porteros (ver crearAjusteValorPorPosicion).
       const ajustarValor = crearAjusteValorPorPosicion(competicion, plantilla.map((j) => ({ posicion: j.posicion, valor: j.valor_mercado })));
       const entrada = fichas.map((j, k) => {
@@ -445,39 +445,51 @@ async function crearUnaLiga(admin: Admin, liga: (typeof LIGAS_AUTO)[number], aho
           probabilidad_titular: j.probabilidad_titular,
           lesionado: j.lesionado,
           baja: false,
-          metadata: { ...(j.metadata ?? {}), origen_jugador_id: j.id, creada_automaticamente: true },
+          metadata: { ...(j.metadata ?? {}), origen_jugador_id: j.id, creada_automaticamente: true, lote_creacion: lote },
         };
       });
 
-      // Jugadores que ya hubiera con esta misma etiqueta (p.ej. los de una
-      // jornada creada a mano antes y cuyas mesas se borraron): se retiran al
-      // final, una vez creado todo lo nuevo, para no dejar jugadores duplicados.
-      const { data: antiguos } = await todasLasFilas<{ id: string }>((d, h) => admin.from('jugadores').select('id').eq('competicion', competicion).order('id').range(d, h));
-      const idsAntiguos = ((antiguos as { id: string }[] | null) ?? []).map((x) => x.id);
+      // 19/10 (Iñi: "se han duplicado los jugadores en Champions"): antes, si
+      // algo fallaba, se borraban los jugadores recién metidos con una lista de
+      // ~1.500 ids en la URL, que es demasiado larga: el borrado fallaba sin
+      // avisar y cada intento (cada 30 min) dejaba otra copia de todos.
+      // Ahora: (1) cada intento marca sus jugadores con un "lote" y, si falla,
+      // se borra ese lote con un solo filtro; (2) como esta jornada todavía no
+      // tiene mesas, lo que hubiera con su nombre son restos de intentos
+      // anteriores y se quita ANTES de empezar.
+      const deshacer = async () => {
+        await admin.from('jugadores').delete().eq('competicion', competicion).eq('metadata->>lote_creacion', lote);
+        await admin.from('cuotas_partido_futbol').delete().eq('competicion', competicion);
+      };
+      const { error: errLimpieza } = await admin.from('jugadores').delete().eq('competicion', competicion);
+      if (errLimpieza) throw new Error(`limpiando restos: ${errLimpieza.message}`);
 
       // Escritura: jugadores → cuotas → mesas. Si algo falla, se deshace lo anterior.
       for (let d = 0; d < filas.length; d += 500) {
         const { error } = await admin.from('jugadores').insert(filas.slice(d, d + 500));
         if (error) {
-          await admin.from('jugadores').delete().in('id', nuevosIds);
+          await deshacer();
           throw new Error(`jugadores: ${error.message}`);
         }
       }
       const filasCuotas = partidos.map((p) => ({ competicion, equipo_local: p.equipoLocal, equipo_visitante: p.equipoVisitante, cuota_1: p.cuota1, cuota_x: p.cuotaX, cuota_2: p.cuota2 }));
       const { error: errCuotas } = await admin.from('cuotas_partido_futbol').upsert(filasCuotas, { onConflict: 'competicion,equipo_local,equipo_visitante' });
       if (errCuotas) {
-        await admin.from('jugadores').delete().in('id', nuevosIds);
+        await deshacer();
         throw new Error(`cuotas: ${errCuotas.message}`);
+      }
+      // Por si otra ejecución (el cron y el botón a la vez) la ha creado mientras tanto.
+      const { count: yaCreada } = await admin.from('salas').select('id', { count: 'exact', head: true }).eq('competicion', competicion);
+      if ((yaCreada ?? 0) > 0) {
+        await admin.from('jugadores').delete().eq('competicion', competicion).eq('metadata->>lote_creacion', lote);
+        resultados.push({ liga: nombreLiga, jornada: numero, estado: 'ya_existe', detalle: 'Ya tiene mesas.' });
+        continue;
       }
       const salas = generarSalasParaTorneo({ competicionLabel: competicion, deporte: 'futbol', fechaLimiteIso: primerPartido.toISOString() });
       const { error: errSalas } = await admin.from('salas').insert(salas);
       if (errSalas) {
-        await admin.from('jugadores').delete().in('id', nuevosIds);
-        await admin.from('cuotas_partido_futbol').delete().eq('competicion', competicion);
+        await deshacer();
         throw new Error(`mesas: ${errSalas.message}`);
-      }
-      for (let d = 0; d < idsAntiguos.length; d += 200) {
-        await admin.from('jugadores').delete().in('id', idsAntiguos.slice(d, d + 200));
       }
       await admin.from('futbol_jornadas_auto').upsert({ liga: liga.prefijo, numero, primer_partido: primerPartido.toISOString(), competicion, creada: true }, { onConflict: 'liga,numero' });
 
