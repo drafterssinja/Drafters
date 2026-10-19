@@ -243,7 +243,9 @@ function V2CrearInner() {
 
   // En el draft nadie repite jugador: tiene que haber suficientes de cada puesto.
   const avisoDraft = useMemo(() => {
-    if (modalidad !== 'draft' || !unaJornadaFutbol || todosLosPartidos || partidos.length === 0) return null;
+    if ((modalidad !== 'draft' && modalidad !== 'libre') || !unaJornadaFutbol || todosLosPartidos || partidos.length === 0) return null;
+    // 19/10 (Iñi): en el modo libre también, máximo 2 jugadores de cada equipo → al menos 3 partidos.
+    if (modalidad === 'libre') return partidosOn.size < 3 ? 'En el modo libre solo se pueden coger 2 jugadores de cada equipo: elige al menos 3 partidos (o todos).' : null;
     const c: Record<string, number> = {};
     partidos.forEach((p) => {
       if (!partidosOn.has(`${p.local}|${p.visitante}`)) return;
@@ -321,6 +323,25 @@ function V2CrearInner() {
       </button>
     ) : null;
 
+  // 19/10 (Iñi): "que vaya poniendo 1 de 6, 2 de 6… así se ve que hay más
+  // cosas luego que completar". En golf sin rondas que elegir son 5 pasos.
+  const totalPasos = deporte === 'golf' && !hayPasoPartidos ? 5 : 6;
+  const cabeceraPaso = (n: number) => {
+    const num = totalPasos === 5 && n > 3 ? n - 1 : n;
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: n > 1 ? 10 : 0 }}>
+        <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 14, letterSpacing: '0.04em', textTransform: 'uppercase', color: V2_COLOR }}>
+          Paso {num} de {totalPasos}
+        </span>
+        <span style={{ flex: 1, display: 'flex', gap: 4 }}>
+          {Array.from({ length: totalPasos }).map((_, i) => (
+            <span key={i} style={{ flex: 1, height: 5, borderRadius: 999, background: i < num ? V2_COLOR : S.BORDER, transition: 'background 0.3s' }} />
+          ))}
+        </span>
+      </div>
+    );
+  };
+
   const bloque = (titulo: string, contenido: React.ReactNode, ayuda?: string) => (
     <Panel>
       <span style={S.sectionLabel}>{titulo}</span>
@@ -336,6 +357,7 @@ function V2CrearInner() {
         <Titulo>Nuevo amistoso de {deporte === 'golf' ? 'golf' : 'fútbol'}</Titulo>
       </div>
 
+      {cabeceraPaso(1)}
       {bloque(
         'Nombre',
         <input
@@ -354,6 +376,7 @@ function V2CrearInner() {
       {continuar(1)}
 
       {paso >= 2 && <div id="paso-2" />}
+      {paso >= 2 && cabeceraPaso(2)}
       {paso >= 2 && comps === null && <Cargando compacto />}
 
       {paso >= 2 && comps !== null && deporte === 'futbol' &&
@@ -469,6 +492,7 @@ function V2CrearInner() {
       {continuar(2)}
 
       {paso >= 3 && <div id="paso-3" />}
+      {paso >= 3 && (deporte !== 'golf' || hayPasoPartidos) && cabeceraPaso(3)}
       {/* 17/10 (Iñi): jornada/torneo completo, solo los partidos de un día o una sola ronda. */}
       {paso >= 3 && compTramos &&
         (tramosDeSeleccion.length > 0 || !completaDisponible) &&
@@ -556,6 +580,7 @@ function V2CrearInner() {
       {paso >= 3 && continuar(3)}
 
       {paso >= 4 && <div id="paso-4" />}
+      {paso >= 4 && cabeceraPaso(4)}
       {paso >= 4 && bloque(
         'Jugadores en la sala',
         <SelectorJugadores valor={numJugadores} onChange={setNumJugadores} />,
@@ -565,6 +590,7 @@ function V2CrearInner() {
       {continuar(4)}
 
       {paso >= 5 && <div id="paso-5" />}
+      {paso >= 5 && cabeceraPaso(5)}
       {paso >= 5 && bloque(
         'Modalidad',
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -597,6 +623,7 @@ function V2CrearInner() {
       {continuar(5)}
 
       {paso >= 6 && <div id="paso-6" />}
+      {paso >= 6 && cabeceraPaso(6)}
       {paso >= 6 && bloque(
         'Privacidad',
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
