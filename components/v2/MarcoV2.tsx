@@ -5,6 +5,7 @@ import Link from 'next/link';
 import CabeceraV2 from '@/components/v2/CabeceraV2';
 import AvisosV2 from '@/components/v2/AvisosV2';
 import ResultadoJornadaV2 from '@/components/v2/ResultadoJornadaV2';
+import AvisoActivarNotificaciones from '@/components/AvisoActivarNotificaciones';
 import type { DeporteV2 } from '@/components/v2/IconosV2';
 import type { Perfil } from '@/lib/supabaseClient';
 import * as S from '@/lib/mockupStyles';
@@ -34,6 +35,8 @@ export default function MarcoV2({ perfil, estado, volverA, deporte = 'futbol', c
           {estado === 'ok' && <AvisosV2 />}
           {/* 16/10: pop-up con los draftis y el puesto al cerrarse tu jornada de liga */}
           {estado === 'ok' && <ResultadoJornadaV2 />}
+          {/* 19/10: "ya llegan las notificaciones" (una vez por sesión) */}
+          {estado === 'ok' && <AvisoActivarNotificaciones />}
         </div>
       </div>
     </main>

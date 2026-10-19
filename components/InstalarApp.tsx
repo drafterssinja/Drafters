@@ -99,6 +99,7 @@ function Guia({
       role="dialog"
       aria-modal="true"
       onClick={onCerrar}
+      data-drafters-popup=""
       style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.72)', display: 'flex', alignItems: plataforma === 'ios' && navegadorIos === 'chrome' ? 'flex-start' : 'flex-end', justifyContent: 'center', padding: 16 }}
     >
       <div

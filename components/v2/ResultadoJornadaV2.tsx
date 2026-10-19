@@ -83,6 +83,7 @@ export default function ResultadoJornadaV2() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
+          data-drafters-popup=""
           style={{ position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(4,8,6,0.82)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
         >
           <motion.div
