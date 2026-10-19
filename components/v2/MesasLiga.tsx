@@ -17,6 +17,7 @@ import { fechaCorta, mensajeError } from '@/lib/v2';
 import Cargando from '@/components/Cargando';
 import EtiquetaTramo from '@/components/v2/EtiquetaTramo';
 import { ordenTramo } from '@/lib/tramos';
+import { competicionBonita } from '@/lib/draftisMesa';
 
 // ============================================================================
 // MESAS DE LIGA DE UN DEPORTE (V2, 15/10)
@@ -156,8 +157,6 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
   }, [abiertas]);
   const compActiva = comp && competiciones.some((x) => x.c === comp) ? comp : competiciones[0]?.c ?? null;
 
-  const tCierre = competiciones.find((x) => x.c === compActiva)?.t;
-  const cierreActivo = tCierre && Number.isFinite(tCierre) ? new Date(tCierre).toISOString() : null;
   const misSalaIds = new Set(misEquipos.map((e) => e.sala_id));
   // Una mesa por tipo y tamaño: la que tenga más gente (sin estar llena).
   const mesas = useMemo(() => {
@@ -247,6 +246,12 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
                 : `La Temporada ${temporada.numero} empieza el ${new Date(temporada.inicio).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}`
               : `Tus draftis y los de todos los que juegan la liga de ${deporte === 'futbol' ? 'fútbol' : deporte}`}
           </span>
+          {/* 18/10 (Iñi): "0/3 mesas esta jornada" va aquí, en la clasificación. */}
+          {competiciones.length > 0 && (
+            <span style={{ fontSize: 12, fontWeight: 800, color: misEnPeriodo >= 3 ? '#F0B94D' : S.TEXT }}>
+              Tus mesas: {misEnPeriodo}/3 {deporte === 'futbol' ? 'esta jornada' : 'esta semana'}
+            </span>
+          )}
         </span>
         <span style={{ fontSize: 18, color: '#F0B94D' }}>›</span>
       </Link>
@@ -258,6 +263,9 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
 
       {competiciones.length > 0 && (
         <>
+          {/* 18/10 (Iñi): página lo más simple posible; las pestañas de
+              competición solo si hay más de una abierta. */}
+          {competiciones.length > 1 && (
           <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 2 }}>
             {competiciones.map(({ c }) => (
               <button key={c} type="button" style={{ ...S.pill(c === compActiva), flexShrink: 0 }} onClick={() => setComp(c)}>
@@ -265,12 +273,7 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
               </button>
             ))}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: 12, color: S.MUTED_2 }}>
-            <span>{cierreActivo ? `Cierra ${fechaCorta(cierreActivo)}` : ''}</span>
-            <span style={{ fontWeight: 700, color: misEnPeriodo >= 3 ? '#F0B94D' : S.MUTED }}>
-              {misEnPeriodo}/3 mesas {deporte === 'futbol' ? 'esta jornada' : 'esta semana'}
-            </span>
-          </div>
+          )}
           {aviso && <p style={{ ...S.errorText, fontSize: 12.5 }}>{aviso}</p>}
 
           {/* 17/10 (Iñi): un bloque por tramo — jornada/torneo completo, cada día
@@ -293,17 +296,27 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
                   style={{ background: cambiadas.has(s.id) ? 'rgba(61,220,132,0.1)' : S.PANEL, border: `1px solid ${dentro ? 'rgba(61,220,132,0.45)' : S.CARD_BORDER}`, borderRadius: 14, padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12, transition: 'background 0.6s' }}
                 >
                   <Link href={`/salas/${s.id}`} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 5, textDecoration: 'none' }}>
-                    <span style={{ fontWeight: 800, fontSize: 15, color: S.TEXT }}>
-                      {TIPO_SALA_LABELS[s.tipo]} <span style={{ fontSize: 11, color: S.MUTED_3, fontWeight: 700 }}>ⓘ</span>
+                    {/* 19/10 (Iñi): en cada mesa, de qué competición y jornada es. */}
+                    <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#F0B94D' }}>
+                      {deporte === 'golf' ? '⛳' : '⚽'} {competicionBonita(s.competicion)}
+                    </span>
+                    <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 21, lineHeight: 1.1, color: S.TEXT }}>
+                      {TIPO_SALA_LABELS[s.tipo]} <span style={{ fontSize: 12, color: S.MUTED_3, fontWeight: 700 }}>ⓘ</span>
                     </span>
                     {s.tramo && <EtiquetaTramo tramo={s.tramo} deporte={deporte} compacta />}
-                    <span style={{ fontSize: 11.5, color: S.MUTED_2 }}>
-                      Mesas de {aforo} · {ganan === 1 ? 'gana 1' : `ganan ${ganan}`}
+                    {/* 18/10 (Iñi): que se vea bien de cuántos jugadores es y cuántos ganan. */}
+                    <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 13.5, fontWeight: 800, color: S.TEXT, background: 'rgba(255,255,255,0.06)', border: `1px solid ${S.CARD_BORDER}`, borderRadius: 999, padding: '3px 10px' }}>
+                        👥 {aforo} jugadores
+                      </span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 13.5, fontWeight: 800, color: '#3DDC84', background: 'rgba(61,220,132,0.12)', border: '1px solid rgba(61,220,132,0.4)', borderRadius: 999, padding: '3px 10px' }}>
+                        🏆 {ganan === 1 ? 'Gana 1' : `Ganan ${ganan}`}
+                      </span>
                     </span>
                     {s.bolsa ? (
                       <span style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                         <span style={{ fontSize: 13, fontWeight: 800, color: n > 0 ? S.ACCENT : S.MUTED_3 }}>
-                          👥 {n} {n === 1 ? 'apuntado' : 'apuntados'}
+                          🙋 {n} {n === 1 ? 'apuntado' : 'apuntados'}
                         </span>
                         <span style={{ fontSize: 11, fontWeight: 600, color: S.MUTED_3 }}>🎲 Rivales por sorteo al cerrar</span>
                       </span>
@@ -327,9 +340,9 @@ export default function MesasLiga({ deporte, miId }: { deporte: DeporteV2; miId:
                       type="button"
                       disabled={entrando === s.id}
                       onClick={() => entrar(s)}
-                      style={{ flexShrink: 0, whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 7, background: S.ACCENT, color: '#04140B', border: 'none', borderRadius: 10, padding: '10px 14px', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 16, letterSpacing: '0.02em', cursor: 'pointer', opacity: entrando === s.id ? 0.6 : 1 }}
+                      style={{ flexShrink: 0, width: 'auto', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 5, background: S.ACCENT, color: '#04140B', border: 'none', borderRadius: 9, padding: '7px 11px', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 14, letterSpacing: '0.02em', cursor: 'pointer', opacity: entrando === s.id ? 0.6 : 1 }}
                     >
-                      ENTRAR · 1 <IconoCredito size={13} oscuro />
+                      ENTRAR · 1 <IconoCredito size={12} oscuro />
                     </button>
                   )}
                 </motion.div>
