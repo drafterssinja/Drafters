@@ -9,12 +9,13 @@
 // hacia abajo: 4 jugadores → 10, 5 → 8, 6 → 6):
 //   · de 1 carta, una mano por jugador;
 //   · subiendo: 2, 3… hasta máximo − 1;
-//   · de todas las cartas, una mano por jugador (clásica);
-//     + otra vuelta igual si hay manos subastadas, + otra si hay manos a ciegas;
+//   · de todas las cartas, una vuelta (una mano por jugador) por cada tipo
+//     elegido: clásica, subastadas y/o a ciegas (20/10: las tres opcionales,
+//     al menos una);
 //   · bajando: máximo − 1… 2;
 //   · de 1 carta otra vez, una mano por jugador.
-// Puntos: acertar = 10 + 5 por cada baza pedida; fallar = −5 por cada baza de
-// diferencia. Si pinta oros, la mano vale ×2; si pinta el 5 de bastos, ×3.
+// Puntos: acertar = 10 + 5 por cada baza pedida (o 10 por baza, si se elige
+// al crear la partida); fallar = −5 por cada baza de diferencia. Si pinta oros, la mano vale ×2; si pinta el 5 de bastos, ×3.
 
 const NORMALIZAR = (s: string) =>
   s
@@ -52,7 +53,8 @@ export function cartasMaximas(jugadores: number): number {
   return Math.floor(BARAJA / Math.max(1, jugadores));
 }
 
-export function generarManos(jugadores: number, opciones: { subastadas: boolean; ciegas: boolean }): Mano[] {
+export type OpcionesPocha = { clasica?: boolean; subastadas: boolean; ciegas: boolean };
+export function generarManos(jugadores: number, opciones: OpcionesPocha): Mano[] {
   const n = Math.max(1, jugadores);
   const max = cartasMaximas(n);
   const manos: Mano[] = [];
@@ -61,7 +63,7 @@ export function generarManos(jugadores: number, opciones: { subastadas: boolean;
   };
   vuelta(1);
   for (let c = 2; c < max; c++) manos.push({ cartas: c, tipo: 'normal' });
-  vuelta(max);
+  if (opciones.clasica !== false) vuelta(max);
   if (opciones.subastadas) vuelta(max, 'subastada');
   if (opciones.ciegas) vuelta(max, 'ciega');
   for (let c = max - 1; c >= 2; c--) manos.push({ cartas: c, tipo: 'normal' });
@@ -74,18 +76,18 @@ export function manoVacia(jugadores: number): ManoApuntada {
 }
 
 /** Puntos de un jugador en una mano (null si todavía no se ha apuntado). */
-export function puntosMano(pedidas: number | null, resultado: number | null, pinta: Pinta): number | null {
+export function puntosMano(pedidas: number | null, resultado: number | null, pinta: Pinta, porBaza = 5): number | null {
   if (resultado === null || resultado === undefined) return null;
-  const base = resultado === 0 ? 10 + 5 * (pedidas ?? 0) : -5 * resultado;
+  const base = resultado === 0 ? 10 + porBaza * (pedidas ?? 0) : -5 * resultado;
   return base * pinta;
 }
 
 /** Acumulado de cada jugador después de cada mano (null donde aún no hay resultado). */
-export function acumulados(apuntadas: ManoApuntada[], jugadores: number): (number | null)[][] {
+export function acumulados(apuntadas: ManoApuntada[], jugadores: number, porBaza = 5): (number | null)[][] {
   const total = Array(jugadores).fill(0) as number[];
   return apuntadas.map((m) =>
     Array.from({ length: jugadores }, (_, j) => {
-      const p = puntosMano(m.pedidas[j] ?? null, m.resultado[j] ?? null, m.pinta);
+      const p = puntosMano(m.pedidas[j] ?? null, m.resultado[j] ?? null, m.pinta, porBaza);
       if (p === null) return null;
       total[j] += p;
       return total[j];
@@ -93,10 +95,10 @@ export function acumulados(apuntadas: ManoApuntada[], jugadores: number): (numbe
   );
 }
 
-export function totales(apuntadas: ManoApuntada[], jugadores: number): number[] {
+export function totales(apuntadas: ManoApuntada[], jugadores: number, porBaza = 5): number[] {
   const t = Array(jugadores).fill(0) as number[];
   apuntadas.forEach((m) => {
-    for (let j = 0; j < jugadores; j++) t[j] += puntosMano(m.pedidas[j] ?? null, m.resultado[j] ?? null, m.pinta) ?? 0;
+    for (let j = 0; j < jugadores; j++) t[j] += puntosMano(m.pedidas[j] ?? null, m.resultado[j] ?? null, m.pinta, porBaza) ?? 0;
   });
   return t;
 }
@@ -122,8 +124,10 @@ export type PartidaPocha = {
   id: string;
   nombre: string;
   jugadores: string[];
+  clasica?: boolean;
   subastadas: boolean;
   ciegas: boolean;
+  puntos_baza?: number;
   reparte_primero: number;
   manos: ManoApuntada[];
   terminada: boolean;
