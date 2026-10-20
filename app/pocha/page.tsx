@@ -30,7 +30,9 @@ export default function PaginaPocha() {
   const [num, setNum] = useState(4);
   const [nombres, setNombres] = useState<string[]>(['', '', '', '', '', '', '', '']);
   const [nombre, setNombre] = useState('');
+  const [clasica, setClasica] = useState(true);
   const [subastadas, setSubastadas] = useState(false);
+  const [porBaza, setPorBaza] = useState(5);
   const [ciegas, setCiegas] = useState(false);
   const [reparte, setReparte] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -47,7 +49,7 @@ export default function PaginaPocha() {
       .then(({ data }) => setPartidas((data as PartidaPocha[]) ?? []));
   }, [estado]);
 
-  const manos = useMemo(() => generarManos(num, { subastadas, ciegas }), [num, subastadas, ciegas]);
+  const manos = useMemo(() => generarManos(num, { clasica, subastadas, ciegas }), [num, clasica, subastadas, ciegas]);
   const max = cartasMaximas(num);
 
   function mover(i: number, d: number) {
@@ -67,10 +69,11 @@ export default function PaginaPocha() {
     const jugadores = nombres.slice(0, num).map((x) => x.trim());
     if (jugadores.some((x) => !x)) return setError('Pon el nombre de todos los jugadores.');
     if (new Set(jugadores.map((x) => x.toLowerCase())).size !== jugadores.length) return setError('Hay dos jugadores con el mismo nombre.');
+    if (!clasica && !subastadas && !ciegas) return setError('Elige al menos un tipo de partida: clásica, subastadas o a ciegas.');
     setCreando(true);
     const { data, error: e } = await supabase
       .from('pocha_partidas')
-      .insert({ nombre: nombre.trim() || 'Pocha', jugadores, subastadas, ciegas, reparte_primero: Math.min(reparte, num - 1), manos: manos.map(() => manoVacia(num)) })
+      .insert({ nombre: nombre.trim() || 'Pocha', jugadores, clasica, subastadas, ciegas, puntos_baza: porBaza, reparte_primero: Math.min(reparte, num - 1), manos: manos.map(() => manoVacia(num)) })
       .select('id')
       .single();
     setCreando(false);
@@ -97,7 +100,7 @@ export default function PaginaPocha() {
           {partidas.map((p) => {
             const n = p.jugadores.length;
             const hechas = p.manos.filter((m) => manoCompleta(m, n)).length;
-            const t = totales(p.manos, n);
+            const t = totales(p.manos, n, p.puntos_baza ?? 5);
             const mejor = Math.max(...t);
             const lider = p.jugadores[t.indexOf(mejor)];
             return (
@@ -190,10 +193,11 @@ export default function PaginaPocha() {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <span style={etiqueta}>Tipo de partida</span>
+          <span style={{ fontSize: 12, color: S.MUTED_3, marginTop: -4 }}>Siempre se sube de 1 en 1 hasta {max} cartas y se baja. Arriba, una vuelta de {num} manos de {max} cartas por cada tipo que marques (al menos uno).</span>
           {[
-            { k: 'clasica', t: 'Clásica', d: `Se sube de 1 en 1 hasta ${max} cartas (una vuelta de ${max} por jugador) y se baja.`, on: true, fijo: true, set: () => {} },
-            { k: 'subastadas', t: 'Manos subastadas', d: `Otra vuelta de ${num} manos de ${max} cartas, subastadas.`, on: subastadas, fijo: false, set: () => setSubastadas(!subastadas) },
-            { k: 'ciegas', t: 'Manos a ciegas', d: `Otra vuelta de ${num} manos de ${max} cartas, a ciegas.`, on: ciegas, fijo: false, set: () => setCiegas(!ciegas) },
+            { k: 'clasica', t: 'Clásica', d: `${num} manos de ${max} cartas: pinta la última carta.`, on: clasica, fijo: false, set: () => setClasica(!clasica) },
+            { k: 'subastadas', t: 'Manos subastadas', d: `${num} manos de ${max} cartas, subastadas.`, on: subastadas, fijo: false, set: () => setSubastadas(!subastadas) },
+            { k: 'ciegas', t: 'Manos a ciegas', d: `${num} manos de ${max} cartas, a ciegas.`, on: ciegas, fijo: false, set: () => setCiegas(!ciegas) },
           ].map((o) => (
             <label key={o.k} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px', borderRadius: 12, border: `1px solid ${o.on ? 'rgba(61,220,132,0.45)' : S.BORDER}`, background: o.on ? 'rgba(61,220,132,0.07)' : 'transparent', cursor: o.fijo ? 'default' : 'pointer' }}>
               <input type="checkbox" checked={o.on} disabled={o.fijo} onChange={o.set} style={{ width: 20, height: 20, marginTop: 1, accentColor: '#3DDC84', flexShrink: 0 }} />
@@ -203,6 +207,19 @@ export default function PaginaPocha() {
               </span>
             </label>
           ))}
+        </div>
+
+        {/* 20/10 (Iñi): hay quien juega a que cada baza acertada vale 10 en vez de 5. */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <span style={etiqueta}>Cada baza acertada vale</span>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {[5, 10].map((v) => (
+              <button key={v} type="button" onClick={() => setPorBaza(v)} style={{ ...S.pill(porBaza === v), width: 'auto', flex: 1 }}>
+                {v} puntos{v === 5 ? ' (lo normal)' : ''}
+              </button>
+            ))}
+          </div>
+          <span style={{ fontSize: 12, color: S.MUTED_3 }}>Acertar suma 10 + {porBaza} por cada baza pedida. Fallar resta 5 por cada baza de diferencia.</span>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 12px', borderRadius: 12, background: 'rgba(255,255,255,0.03)' }}>
