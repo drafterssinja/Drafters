@@ -3,6 +3,8 @@ import { calcularPreciosPorCuota } from '@/lib/precioPorCuota';
 import { normalizarNombre } from '@/lib/nombreMatch';
 import { detectarBreaks, puntuarPartidoTenis, type EstadoPartido } from '@/lib/tenisPuntuacion';
 import type { LineaDesglose } from '@/lib/futbolPuntuacion';
+import { buscarCuota, cuotasParaTorneo } from './oddsApi';
+import { cuotasGanadorSimuladas, type PartidoSim } from '@/lib/tenisSimulacion';
 
 // ============================================================================
 // TENIS EN DIRECTO CON ESPN (27/10, Iñi) — gratis
@@ -32,6 +34,9 @@ export type PartidoEspn = {
   juegos2: number[];
   sirve: 1 | 2 | null;
   ganador: 1 | 2 | null;
+  // 28/10: cuotas del partido (decimales) si ESPN las da.
+  cuota1: number | null;
+  cuota2: number | null;
 };
 export type EventoEspn = { id: string; nombre: string; liga: LigaTenis; inicio: string | null; fin: string | null; partidos: PartidoEspn[] };
 
@@ -46,6 +51,35 @@ function jugador(c: any): JugadorEspn | null {
   const a = c?.athlete;
   if (!a || !c?.id) return null;
   return { espn: String(c.id), nombre: String(a.displayName ?? a.fullName ?? ''), pais: a.flag?.alt ?? null };
+}
+
+function cuotaDecimal(lado: any): number | null {
+  if (!lado || typeof lado !== 'object') return null;
+  const desdeAmericana = (ml: unknown): number | null => {
+    if (typeof ml === 'string' && /^even$/i.test(ml.trim())) return 2;
+    const n = typeof ml === 'number' ? ml : Number(String(ml ?? '').replace(/[^0-9.+-]/g, ''));
+    if (!Number.isFinite(n) || n === 0 || (n > -100 && n < 100)) return null;
+    return n > 0 ? 1 + n / 100 : 1 + 100 / Math.abs(n);
+  };
+  const a = desdeAmericana(lado.moneyLine);
+  if (a) return a;
+  for (const k of ['current', 'close', 'open']) {
+    const ml = lado[k]?.moneyLine;
+    if (!ml) continue;
+    const d = Number(ml.decimal);
+    if (Number.isFinite(d) && d > 1) return d;
+    const b = desdeAmericana(ml.american ?? ml.value);
+    if (b) return b;
+  }
+  return null;
+}
+function cuotasPartido(c: any): { c1: number | null; c2: number | null } {
+  for (const o of (Array.isArray(c?.odds) ? c.odds : []) as any[]) {
+    const c1 = cuotaDecimal(o?.homeTeamOdds ?? o?.homeAthleteOdds);
+    const c2 = cuotaDecimal(o?.awayTeamOdds ?? o?.awayAthleteOdds);
+    if (c1 && c2) return { c1, c2 };
+  }
+  return { c1: null, c2: null };
 }
 
 function partido(c: any): PartidoEspn | null {
@@ -72,11 +106,13 @@ function partido(c: any): PartidoEspn | null {
     juegos2: juegos(away),
     sirve: home?.possession === true ? 1 : away?.possession === true ? 2 : null,
     ganador: home?.winner === true ? 1 : away?.winner === true ? 2 : null,
+    cuota1: cuotasPartido(c).c1,
+    cuota2: cuotasPartido(c).c2,
   };
 }
 
-export async function leerEventos(liga: LigaTenis): Promise<EventoEspn[]> {
-  const json: any = await pedirJson(`${BASE}/${liga}/scoreboard`);
+export async function leerEventos(liga: LigaTenis, fechas?: string): Promise<EventoEspn[]> {
+  const json: any = await pedirJson(`${BASE}/${liga}/scoreboard${fechas ? `?dates=${fechas}` : ''}`);
   const out: EventoEspn[] = [];
   for (const e of (json?.events ?? []) as any[]) {
     const comps: any[] = [...(e.competitions ?? []), ...((e.groupings ?? []) as any[]).flatMap((g) => g.competitions ?? [])];
@@ -86,23 +122,60 @@ export async function leerEventos(liga: LigaTenis): Promise<EventoEspn[]> {
   return out;
 }
 
+const yyyymmdd = (d: Date) => `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
+
+/**
+ * 28/10 (Iñi): los torneos de esta semana y de los próximos días (en cuanto
+ * sale el cuadro, ESPN ya da los partidos de primera ronda con los inscritos).
+ * Se juntan el marcador de hoy y el de los próximos 10 días.
+ */
+export async function leerEventosProximos(liga: LigaTenis): Promise<EventoEspn[]> {
+  const hoy = new Date();
+  const desde = new Date(hoy.getTime() - 86400000);
+  const hasta = new Date(hoy.getTime() + 10 * 86400000);
+  const [a, b] = await Promise.all([
+    leerEventos(liga).catch(() => [] as EventoEspn[]),
+    leerEventos(liga, `${yyyymmdd(desde)}-${yyyymmdd(hasta)}`).catch(() => [] as EventoEspn[]),
+  ]);
+  const porId = new Map<string, EventoEspn>();
+  for (const e of [...a, ...b]) {
+    const ya = porId.get(e.id);
+    if (!ya) porId.set(e.id, e);
+    else {
+      // Mismo torneo en las dos lecturas: se juntan sus partidos (sin repetir).
+      const vistos = new Set(ya.partidos.map((p) => p.id));
+      ya.partidos.push(...e.partidos.filter((p) => !vistos.has(p.id)));
+    }
+  }
+  return Array.from(porId.values());
+}
+
 // Ranking: primero el de ESPN (si lo da); si no, el pegado en Admin → Rankings.
+/** Ranking de ESPN (gratis, sin cargar nada): nombre → puesto. Exportado para el diagnóstico del admin. */
+export async function rankingEspn(liga: LigaTenis): Promise<Map<string, { nombre: string; puesto: number }>> {
+  const m = new Map<string, { nombre: string; puesto: number }>();
+  const recorrer = (x: any) => {
+    if (!x || typeof x !== 'object') return;
+    if (Array.isArray(x)) return x.forEach(recorrer);
+    const nombre = x.athlete?.displayName ?? x.athlete?.fullName;
+    const rank = Number(x.current ?? x.rank);
+    if (nombre && rank > 0 && !m.has(normalizarNombre(nombre))) m.set(normalizarNombre(nombre), { nombre, puesto: rank });
+    Object.values(x).forEach((v) => typeof v === 'object' && recorrer(v));
+  };
+  for (const url of [`${BASE}/${liga}/rankings`, `https://site.web.api.espn.com/apis/site/v2/sports/tennis/${liga}/rankings`]) {
+    try {
+      recorrer(await pedirJson(url));
+      if (m.size >= 20) break;
+    } catch {
+      // siguiente
+    }
+  }
+  return m;
+}
+
 async function rankingTenis(admin: Admin, liga: LigaTenis): Promise<Map<string, number>> {
   const m = new Map<string, number>();
-  try {
-    const json = await pedirJson(`${BASE}/${liga}/rankings`);
-    const recorrer = (x: any) => {
-      if (!x || typeof x !== 'object') return;
-      if (Array.isArray(x)) return x.forEach(recorrer);
-      const nombre = x.athlete?.displayName;
-      const rank = Number(x.current ?? x.rank);
-      if (nombre && rank > 0) m.set(normalizarNombre(nombre), rank);
-      Object.values(x).forEach((v) => typeof v === 'object' && recorrer(v));
-    };
-    recorrer(json);
-  } catch {
-    // sin ranking de ESPN
-  }
+  (await rankingEspn(liga)).forEach((v, k) => m.set(k, v.puesto));
   if (m.size < 20) {
     const { data } = await admin.from('rankings_mundiales').select('nombre,puesto').eq('deporte', 'tenis');
     for (const r of (data as { nombre: string; puesto: number }[] | null) ?? []) if (!m.has(normalizarNombre(r.nombre))) m.set(normalizarNombre(r.nombre), r.puesto);
@@ -113,8 +186,10 @@ async function rankingTenis(admin: Admin, liga: LigaTenis): Promise<Map<string, 
 
 // Precio: el algoritmo de golf/tenis (v3, por cuota) con una "cuota" sacada
 // del ranking mundial de cada uno (sin ranking = como el 400º).
-function preciosPorRanking(nombres: string[], ranking: Map<string, number>): Map<string, number> {
-  const pesos = nombres.map((n) => 1 / Math.pow(ranking.get(normalizarNombre(n)) ?? 400, 1.25));
+// 28/10: si ESPN da la cuota de su próximo partido, el peso se corrige con lo
+// que dicen las casas de apuestas frente a lo que diría el ranking.
+function preciosPorRanking(nombres: string[], ranking: Map<string, number>, ajuste: Map<string, number> = new Map()): Map<string, number> {
+  const pesos = nombres.map((n) => (1 / Math.pow(ranking.get(normalizarNombre(n)) ?? 400, 1.25)) * (ajuste.get(n) ?? 1));
   const total = pesos.reduce((s, x) => s + x, 0);
   const precios = calcularPreciosPorCuota(nombres.map((n, i) => ({ nombre: n, cuota: Math.round((total / pesos[i]) * 100) / 100 })));
   return new Map(nombres.map((n, i) => [n, precios[i].precio]));
@@ -148,7 +223,7 @@ export async function listarTorneosSemana(admin: Admin): Promise<TorneoSemana[]>
   for (const liga of ['atp', 'wta'] as LigaTenis[]) {
     let evs: EventoEspn[] = [];
     try {
-      evs = await leerEventos(liga);
+      evs = await leerEventosProximos(liga);
     } catch {
       continue;
     }
@@ -174,7 +249,27 @@ export async function listarTorneosSemana(admin: Admin): Promise<TorneoSemana[]>
   return out;
 }
 
-async function anadirJugadores(admin: Admin, competicion: string, liga: LigaTenis, nuevos: JugadorEspn[]) {
+/** Factor por cuotas: (prob. de ganar su partido según las casas) / (según el ranking), entre 0,5 y 2. */
+function ajustePorCuotas(ev: EventoEspn | undefined, ranking: Map<string, number>): Map<string, number> {
+  const m = new Map<string, number>();
+  if (!ev) return m;
+  const peso = (n: string) => 1 / Math.pow(ranking.get(normalizarNombre(n)) ?? 400, 1.25);
+  for (const p of ev.partidos) {
+    if (p.estado !== 'pre' || !p.j1 || !p.j2 || !p.cuota1 || !p.cuota2) continue;
+    const i1 = 1 / p.cuota1;
+    const i2 = 1 / p.cuota2;
+    const q1 = i1 / (i1 + i2);
+    const w1 = peso(p.j1.nombre);
+    const w2 = peso(p.j2.nombre);
+    const r1 = w1 / (w1 + w2);
+    const lim = (x: number) => Math.min(2, Math.max(0.5, x));
+    m.set(p.j1.nombre, lim(q1 / r1));
+    m.set(p.j2.nombre, lim((1 - q1) / (1 - r1)));
+  }
+  return m;
+}
+
+async function anadirJugadores(admin: Admin, competicion: string, liga: LigaTenis, nuevos: JugadorEspn[], ev?: EventoEspn) {
   if (nuevos.length === 0) return 0;
   const { data: ya } = await admin.from('jugadores').select('nombre,metadata').eq('deporte', 'tenis').eq('competicion', competicion);
   const existentes = ((ya as { nombre: string; metadata: { espn_id?: string } | null }[] | null) ?? []);
@@ -184,14 +279,43 @@ async function anadirJugadores(admin: Admin, competicion: string, liga: LigaTeni
   const ranking = await rankingTenis(admin, liga);
   // El precio de los nuevos se calcula con todo el cuadro (los de antes no cambian).
   const todos = [...existentes.map((j) => j.nombre), ...aMeter.map((j) => j.nombre)];
-  const precios = preciosPorRanking(todos, ranking);
+  // 28/10 (Iñi): en tenis la mesa es del TORNEO entero, así que el precio sale,
+  // como en golf, de la cuota de cada uno a GANAR EL TORNEO:
+  //  1) la de las casas de apuestas (The Odds API), si la hay;
+  //  2) si no, calculada: se juega el cuadro 20.000 veces (lib/tenisSimulacion.ts)
+  //     con la fuerza de cada uno por ranking y, en la primera ronda, la cuota
+  //     de ese partido si existe (solo como dato para el cálculo).
+  const odds = await cuotasParaTorneo(admin, competicion, liga, ev?.nombre ?? null);
+  let cuotas: Map<string, number>;
+  let origen: 'casas' | 'calculada';
+  if (odds.ganador.size > 0) {
+    origen = 'casas';
+    const encontradas = todos.map((n) => buscarCuota(odds.ganador, n));
+    const peor = Math.max(...encontradas.filter((c): c is number => c !== null), 2);
+    cuotas = new Map(todos.map((n, i) => [n, encontradas[i] ?? Math.round(peor * 1.5 * 100) / 100]));
+  } else {
+    origen = 'calculada';
+    const vivos = new Set(todos);
+    const primeraRonda: PartidoSim[] = [];
+    for (const p of ev?.partidos ?? []) {
+      if (p.estado !== 'pre' || !p.j1 || !p.j2 || !vivos.has(p.j1.nombre) || !vivos.has(p.j2.nombre)) continue;
+      // Probabilidad del partido si hay cuota (The Odds API o ESPN).
+      const c = buscarCuota(odds.partidos, p.j1.nombre);
+      let pA: number | null = c ? c.p : null;
+      if (pA === null && p.cuota1 && p.cuota2) pA = 1 / p.cuota1 / (1 / p.cuota1 + 1 / p.cuota2);
+      primeraRonda.push({ a: p.j1.nombre, b: p.j2.nombre, pA });
+    }
+    cuotas = cuotasGanadorSimuladas(todos.map((n) => ({ nombre: n, ranking: ranking.get(normalizarNombre(n)) ?? null })), primeraRonda);
+  }
+  const calc = calcularPreciosPorCuota(todos.map((n) => ({ nombre: n, cuota: cuotas.get(n) ?? 500 })));
+  const precios = new Map(todos.map((n, i) => [n, calc[i].precio]));
   const filas = aMeter.map((j) => ({
     nombre: j.nombre,
     deporte: 'tenis',
     competicion,
     precio: precios.get(j.nombre) ?? 4000,
     es_espanol: j.pais === 'Spain',
-    metadata: { espn_id: j.espn, ranking: ranking.get(normalizarNombre(j.nombre)) ?? null, pais: j.pais },
+    metadata: { espn_id: j.espn, ranking: ranking.get(normalizarNombre(j.nombre)) ?? null, pais: j.pais, cuota_ganador: cuotas.get(j.nombre) ?? null, origen_cuota: origen },
   }));
   const { error } = await admin.from('jugadores').insert(filas);
   if (error) throw new Error(`No se han podido guardar los jugadores: ${error.message}`);
@@ -199,7 +323,7 @@ async function anadirJugadores(admin: Admin, competicion: string, liga: LigaTeni
 }
 
 export async function crearTorneoTenis(admin: Admin, liga: LigaTenis, eventId: string): Promise<{ competicion: string; jugadores: number; cierre: string }> {
-  const ev = (await leerEventos(liga)).find((e) => e.id === eventId);
+  const ev = (await leerEventosProximos(liga)).find((e) => e.id === eventId);
   if (!ev) throw new Error('ESPN ya no devuelve ese torneo.');
   const { data: ya } = await admin.from('tenis_torneos').select('competicion').eq('espn_event_id', eventId).maybeSingle();
   if (ya) throw new Error('Este torneo ya está creado.');
@@ -214,7 +338,7 @@ export async function crearTorneoTenis(admin: Admin, liga: LigaTenis, eventId: s
   const { error: e1 } = await admin.from('tenis_torneos').insert({ competicion, liga, espn_event_id: ev.id, nombre_espn: ev.nombre, desde: cierre });
   if (e1) throw new Error(`No se ha podido crear el torneo: ${e1.message}`);
   try {
-    const n = await anadirJugadores(admin, competicion, liga, vivos);
+    const n = await anadirJugadores(admin, competicion, liga, vivos, ev);
     // Una mesa interna (oculta) para que el torneo tenga su hora de cierre,
     // como las jornadas de fútbol y los torneos de golf. Los amistosos la usan.
     const { error: e2 } = await admin.from('salas').insert({
@@ -257,7 +381,7 @@ export async function sincronizarTenis(admin: Admin, soloCompeticion?: string): 
   const porLiga = new Map<LigaTenis, EventoEspn[]>();
   for (const liga of Array.from(new Set(torneos.map((t) => t.liga)))) {
     try {
-      porLiga.set(liga, await leerEventos(liga));
+      porLiga.set(liga, await leerEventosProximos(liga));
     } catch {
       porLiga.set(liga, []);
     }
@@ -270,7 +394,7 @@ export async function sincronizarTenis(admin: Admin, soloCompeticion?: string): 
     // Jugadores que aparecen nuevos (p. ej. los que entraban con bye) mientras la inscripción sigue abierta.
     if (!t.desde || new Date(t.desde).getTime() > Date.now()) {
       try {
-        res.jugadores += await anadirJugadores(admin, t.competicion, t.liga, jugadoresVivos(ev));
+        res.jugadores += await anadirJugadores(admin, t.competicion, t.liga, jugadoresVivos(ev), ev);
       } catch {
         // no bloquea la sincronización
       }
@@ -385,4 +509,53 @@ export async function sincronizarTenis(admin: Admin, soloCompeticion?: string): 
     }
   }
   return res;
+}
+
+// ============================================================================
+// 28/10 (Iñi): como en fútbol y golf, los torneos se crean SOLOS en cuanto
+// ESPN publica el cuadro (los inscritos), con su precio por ranking y cuotas.
+// Lo llama el cron cada 15 minutos. Solo cuadros de individuales con al menos
+// 8 jugadores, con partidos por empezar y sin que se haya jugado medio cuadro.
+// ============================================================================
+export type ResultadoTenisAuto = { liga: LigaTenis; torneo: string; estado: 'creado' | 'ya_existe' | 'esperando' | 'error'; detalle: string };
+
+export async function crearTorneosTenisAutomaticos(admin: Admin): Promise<ResultadoTenisAuto[]> {
+  const { data } = await admin.from('tenis_torneos').select('espn_event_id');
+  const ya = new Set(((data as { espn_event_id: string }[] | null) ?? []).map((t) => t.espn_event_id));
+  const out: ResultadoTenisAuto[] = [];
+  for (const liga of ['atp', 'wta'] as LigaTenis[]) {
+    let evs: EventoEspn[] = [];
+    try {
+      evs = await leerEventosProximos(liga);
+    } catch (e) {
+      out.push({ liga, torneo: '—', estado: 'error', detalle: (e as Error).message });
+      continue;
+    }
+    for (const ev of evs) {
+      if (ya.has(ev.id)) {
+        out.push({ liga, torneo: ev.nombre, estado: 'ya_existe', detalle: 'Ya está en Drafters.' });
+        continue;
+      }
+      const jugadores = new Set<string>();
+      ev.partidos.forEach((p) => [p.j1, p.j2].forEach((j) => j && jugadores.add(j.espn)));
+      const pre = ev.partidos.filter((p) => p.estado === 'pre' && p.inicio && new Date(p.inicio).getTime() > Date.now() + 30 * 60000).length;
+      const jugados = ev.partidos.filter((p) => p.estado === 'post').length;
+      if (jugadores.size < 8) {
+        out.push({ liga, torneo: ev.nombre, estado: 'esperando', detalle: jugadores.size === 0 ? 'Todavía no hay cuadro.' : `Solo ${jugadores.size} jugadores en el cuadro.` });
+        continue;
+      }
+      if (pre === 0 || jugados > ev.partidos.length / 2) {
+        out.push({ liga, torneo: ev.nombre, estado: 'esperando', detalle: 'Ya va muy avanzado: no se crea.' });
+        continue;
+      }
+      try {
+        const r = await crearTorneoTenis(admin, liga, ev.id);
+        ya.add(ev.id);
+        out.push({ liga, torneo: ev.nombre, estado: 'creado', detalle: `${r.competicion}: ${r.jugadores} jugadores, cierra ${r.cierre}.` });
+      } catch (e) {
+        out.push({ liga, torneo: ev.nombre, estado: 'error', detalle: (e as Error).message });
+      }
+    }
+  }
+  return out;
 }
