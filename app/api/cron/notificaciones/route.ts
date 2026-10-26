@@ -18,6 +18,8 @@ async function ejecutar(req: NextRequest) {
     const admin = crearClienteAdmin();
     // De paso, los sorteos de las mesas de la liga que ya han cerrado.
     await admin.rpc('v2_sortear_pendientes');
+    // 27/10: liga de duelos — jornadas recién publicadas (sorteo de duelos) y cierre de temporada.
+    await admin.rpc('duelos_actualizar');
     // Tenis en directo (27/10): marcador, saque y breaks de ESPN cada minuto.
     let tenis: unknown = null;
     try {
