@@ -41,7 +41,8 @@ function etiquetaComp(deporte: DeporteV2, c: string): string {
   return n ? `${liga.replace('Champions League', 'Champions')} · J${n}` : c;
 }
 
-export default function MisEquiposV2({ deporte, miId }: { deporte: DeporteV2; miId: string }) {
+// 27/10 (Iñi): Amistosos y Liga van en pestañas separadas, cada una con sus equipos.
+export default function MisEquiposV2({ deporte, miId, solo }: { deporte: DeporteV2; miId: string; solo?: 'amistosos' | 'liga' }) {
   const [items, setItems] = useState<Item[] | null>(null);
   const [pestana, setPestana] = useState<'en_juego' | 'finalizadas'>('en_juego');
   const [mostrarTodos, setMostrarTodos] = useState(false);
@@ -64,7 +65,9 @@ export default function MisEquiposV2({ deporte, miId }: { deporte: DeporteV2; mi
 
   const cargar = useCallback(async () => {
     const [{ data: mesas }, { data: lista }] = await Promise.all([
-      supabase
+      solo === 'amistosos'
+        ? Promise.resolve({ data: [] as unknown[] })
+        : supabase
         .from('equipos')
         .select('id,sala_id,created_at,salas!inner(id,nombre,competicion,tipo,aforo,estado,fecha_limite_inscripcion,deporte,tramo,bolsa),inscripciones(estado)')
         .eq('usuario_id', miId)
@@ -72,7 +75,7 @@ export default function MisEquiposV2({ deporte, miId }: { deporte: DeporteV2; mi
         .eq('salas.version', 2)
         .order('created_at', { ascending: false })
         .limit(30),
-      supabase.rpc('amistosos_v2_lista'),
+      solo === 'liga' ? Promise.resolve({ data: [] as unknown[] }) : supabase.rpc('amistosos_v2_lista'),
     ]);
     const ahora = Date.now();
     const out: Item[] = [];
@@ -94,7 +97,7 @@ export default function MisEquiposV2({ deporte, miId }: { deporte: DeporteV2; mi
     // En juego primero las que ya han empezado; dentro, las más recientes.
     out.sort((x, y) => Number(y.empezada) - Number(x.empezada) || y.orden - x.orden);
     setItems(out);
-  }, [deporte, miId]);
+  }, [deporte, miId, solo]);
 
   useEffect(() => {
     setItems(null);

@@ -100,15 +100,19 @@ function normalizarBusqueda(texto: string): string {
 // se guarda con amistoso_guardar_equipo() y se ofrecen también los equipos
 // guardados (v2_equipos_guardados) y los hechos en mesas de la V1.
 export type AmistosoEquipo = { id: string; competicion: string };
+// 26/10 (Iñi): equipo de una jornada de la Liga Drafters de duelos 1 contra 1
+// (SQL 60): la misma pantalla, con presupuesto; se guarda con duelos_guardar_equipo().
+export type DueloEquipo = { ronda: string };
 
 // soyParticipante = false → todavía no estás en la sala: entras al guardar el equipo (SQL 47).
 type AmistosoInfo = { modalidad: 'presupuesto' | 'libre' | 'draft'; equipo_fijo: boolean; equipos_permitidos: string[] | null; tieneEquipo: boolean; soyParticipante: boolean; deporte: string };
 
-export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } = {}) {
+export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEquipo; duelo?: DueloEquipo } = {}) {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const salaId = params.id;
-  const esAmistoso = !!amistoso;
+  const esDuelo = !!duelo;
+  const esAmistoso = !!amistoso || esDuelo;
   const [infoAmistoso, setInfoAmistoso] = useState<AmistosoInfo | null>(null);
   const libre = infoAmistoso?.modalidad === 'libre';
   const searchParams = useSearchParams();
@@ -197,6 +201,10 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
         return;
       }
 
+      if (duelo) {
+        await cargarDuelo(session.user.id, duelo);
+        return;
+      }
       if (amistoso) {
         await cargarAmistoso(session.user.id, amistoso);
         return;
@@ -355,6 +363,71 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
     }
 
     // ---- Amistoso de V2 (16/10) ----
+    async function cargarDuelo(uid: string, du: DueloEquipo) {
+      const [{ data: perfilData }, { data: infoData, error: infoError }] = await Promise.all([
+        supabase.from('perfiles').select('*').eq('id', uid).single(),
+        supabase.rpc('duelos_ronda_para_equipo', { p_ronda: du.ronda }),
+      ]);
+      if (!activo) return;
+      if (perfilData) setPerfil(perfilData as Perfil);
+      const info = infoData as { competicion: string; tipo: string; cierre: string | null; publicada: boolean; mi_equipo: { jugadores: string[]; alineacion: string | null } | null } | null;
+      if (infoError || !info) {
+        setError(infoError?.message?.replace(/^ERROR:\s*/i, '') ?? 'No se ha encontrado esta jornada.');
+        setCargando(false);
+        return;
+      }
+      if (!info.cierre || !info.publicada || new Date(info.cierre).getTime() <= Date.now()) {
+        router.replace('/v2/futbol?modo=liga');
+        return;
+      }
+      const nombreJornada = info.competicion.replace('La Liga', 'LaLiga').replace('Champions League', 'Champions').replace(/\s*-\s*Jornada\s*/i, ' · Jornada ');
+      const salaRow: SalaRow = { id: du.ronda, nombre: `Liga Drafters · ${nombreJornada}`, competicion: info.competicion, deporte: 'futbol', tipo: 'amistoso', aforo: 2, buy_in: 0, estado: 'abierta', fecha_limite_inscripcion: info.cierre, tramo: null };
+      const [{ data: jugData }, { data: partidosData }, { data: otrosData }, { data: v1Data }] = await Promise.all([
+        todasLasFilas((d, h) => supabase.from('jugadores').select('id,nombre,posicion,precio,lesionado,equipo_real,baja').eq('deporte', 'futbol').eq('competicion', info.competicion).order('precio', { ascending: false }).order('id').range(d, h)),
+        supabase.from('cuotas_partido_futbol').select('equipo_local,equipo_visitante,cuota_1,cuota_x,cuota_2').eq('competicion', info.competicion),
+        supabase.from('amistoso_equipos').select('id,competicion,jugadores,alineacion,amistosos(nombre)').eq('usuario_id', uid).eq('competicion', info.competicion).order('updated_at', { ascending: false }).limit(20),
+        supabase
+          .from('equipos')
+          .select('id, nombre_equipo, jugadores, alineacion, created_at, salas!inner(nombre, competicion, deporte)')
+          .eq('usuario_id', uid)
+          .eq('salas.competicion', info.competicion)
+          .order('created_at', { ascending: false })
+          .limit(20),
+      ]);
+      if (!activo) return;
+      type Uno<T> = T | T[] | null;
+      const uno = <T,>(x: Uno<T>): T | null => (Array.isArray(x) ? (x[0] ?? null) : x);
+      const hechos: EquipoHecho[] = [];
+      const vistos = new Set<string>();
+      const meter = (e: EquipoHecho) => {
+        if (!e.jugadores.length) return;
+        const firma = `${[...e.jugadores].sort().join(',')}|${e.alineacion ?? ''}`;
+        if (vistos.has(firma)) return;
+        vistos.add(firma);
+        hechos.push(e);
+      };
+      for (const e of (otrosData as { id: string; jugadores: string[]; alineacion: string | null; amistosos: Uno<{ nombre: string }> }[] | null) ?? []) {
+        meter({ id: `a:${e.id}`, etiqueta: `${uno(e.amistosos)?.nombre ?? 'Amistoso'}`, jugadores: e.jugadores ?? [], alineacion: e.alineacion, grupo: 'Tus amistosos de esta jornada' });
+      }
+      for (const e of (v1Data as { id: string; nombre_equipo: string | null; jugadores: string[] | null; alineacion: string | null; salas: Uno<{ nombre: string }> }[] | null) ?? []) {
+        meter({ id: `v1:${e.id}`, etiqueta: `${e.nombre_equipo ? `${e.nombre_equipo} · ` : ''}${uno(e.salas)?.nombre ?? 'Mesa'}`, jugadores: Array.isArray(e.jugadores) ? e.jugadores : [], alineacion: e.alineacion, grupo: 'Tus mesas de esta jornada' });
+      }
+      const disponibles = ((jugData as JugadorRow[]) ?? []).filter((j) => !j.baja);
+      const mio = info.mi_equipo;
+      if (mio) {
+        const ids = new Set(disponibles.map((j) => j.id));
+        setSelected((mio.jugadores ?? []).filter((x) => ids.has(x)));
+        if (mio.alineacion) setAlineacion(mio.alineacion);
+        setStep('draft');
+      }
+      setInfoAmistoso({ modalidad: 'presupuesto', equipo_fijo: false, equipos_permitidos: null, tieneEquipo: !!mio, soyParticipante: true, deporte: 'futbol' });
+      setEquiposHechos(hechos);
+      setSala(salaRow);
+      setJugadores(disponibles);
+      setPartidos((partidosData as PartidoRow[] | null) ?? []);
+      setCargando(false);
+    }
+
     async function cargarAmistoso(uid: string, am: AmistosoEquipo) {
       type FilaAm = { id: string; nombre: string; deporte: string; modalidad: AmistosoInfo['modalidad']; num_jugadores: number; estado: string; equipo_fijo: boolean | null };
       type FilaJo = { competicion: string; orden: number; equipos_permitidos: string[] | null; cierre: string | null; tramo?: string | null };
@@ -460,7 +533,7 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
       activo = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router, salaId, equipoEditandoId, amistoso?.id, amistoso?.competicion]);
+  }, [router, salaId, equipoEditandoId, amistoso?.id, amistoso?.competicion, duelo?.ronda]);
 
   // Sin pantalla previa de "cómo puntúan" al editar (o si ya tenías equipo en el amistoso).
   const sinPasoInfo = modoEdicion || !!infoAmistoso?.tieneEquipo;
@@ -518,7 +591,7 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
     if (step === 'confirm' || (step === 'draft' && !sinPasoInfo)) {
       window.history.back();
     } else {
-      router.push(esAmistoso ? `/v2/sala/${salaId}` : v2 && sala ? `/v2/${sala.deporte}` : `/salas/${salaId}`);
+      router.push(esDuelo ? '/v2/futbol?modo=liga' : esAmistoso ? `/v2/sala/${salaId}` : v2 && sala ? `/v2/${sala.deporte}` : `/salas/${salaId}`);
     }
   }
 
@@ -834,6 +907,17 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
   async function confirmarInscripcion() {
     setEnviando(true);
     setErrorEnvio(null);
+    if (esDuelo && duelo && sala) {
+      const { error: errDu } = await supabase.rpc('duelos_guardar_equipo', { p_ronda: duelo.ronda, p_jugadores: selected, p_alineacion: alineacion });
+      if (errDu) {
+        setErrorEnvio(traducirError(errDu.message));
+        setEnviando(false);
+        return;
+      }
+      if (!infoAmistoso?.tieneEquipo) avisarCambioCreditos();
+      router.replace('/v2/futbol?modo=liga');
+      return;
+    }
     if (esAmistoso && sala) {
       const comun = { p_amistoso: salaId, p_competicion: sala.competicion, p_jugadores: selected, p_alineacion: isFutbol ? alineacion : null };
       let clave: string | null = null;
@@ -1350,7 +1434,7 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
                     se pagó al inscribirse la primera vez; modificar el
                     equipo nunca vuelve a cobrar (ver editar_equipo_sala() en
                     drafters-schema.sql). */}
-                {esAmistoso ? `${sala.nombre} · Amistoso ${libre ? 'libre' : 'con presupuesto'}${infoAmistoso?.soyParticipante ? '' : ' · al guardar entras en la sala y se usa 1 crédito'}` : modoEdicion ? sala.nombre : v2 ? `${sala.nombre.replace(/\s*·\s*\d+\s*€\s*$/, '')} · Entrada: 1 crédito` : `${sala.nombre} · Buy-in ${formatEuros(sala.buy_in)}`}
+                {esDuelo ? `${sala.nombre}${infoAmistoso?.tieneEquipo ? '' : ' · al guardar se usa 1 crédito'}` : esAmistoso ? `${sala.nombre} · Amistoso ${libre ? 'libre' : 'con presupuesto'}${infoAmistoso?.soyParticipante ? '' : ' · al guardar entras en la sala y se usa 1 crédito'}` : modoEdicion ? sala.nombre : v2 ? `${sala.nombre.replace(/\s*·\s*\d+\s*€\s*$/, '')} · Entrada: 1 crédito` : `${sala.nombre} · Buy-in ${formatEuros(sala.buy_in)}`}
               </p>
             </div>
 
@@ -1421,7 +1505,7 @@ export default function CrearEquipo({ amistoso }: { amistoso?: AmistosoEquipo } 
               >
                 {errorEnvio && <p style={{ ...S.errorText, margin: 0 }}>{errorEnvio}</p>}
                 <button type="button" disabled={enviando} onClick={confirmarInscripcion} style={{ ...submitButtonStyle(true), opacity: enviando ? 0.7 : 1 }}>
-                  {enviando ? (modoEdicion || esAmistoso ? 'Guardando...' : 'Inscribiendo...') : esAmistoso ? (infoAmistoso?.soyParticipante ? 'Guardar mi equipo' : 'Unirme a la sala · 1 crédito') : modoEdicion ? 'Guardar cambios' : 'Confirmar inscripción'}
+                  {enviando ? (modoEdicion || esAmistoso ? 'Guardando...' : 'Inscribiendo...') : esDuelo ? (infoAmistoso?.tieneEquipo ? 'Guardar mi equipo' : 'Guardar mi equipo · 1 crédito') : esAmistoso ? (infoAmistoso?.soyParticipante ? 'Guardar mi equipo' : 'Unirme a la sala · 1 crédito') : modoEdicion ? 'Guardar cambios' : 'Confirmar inscripción'}
                 </button>
               </div>
             ) : (

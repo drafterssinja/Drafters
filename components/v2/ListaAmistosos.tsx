@@ -95,7 +95,7 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <input value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="🔍 Buscar sala por nombre, creador o jornada" style={S.input} />
       <Link href={`/v2/crear?deporte=${deporte}`} style={{ ...S.primaryButton, background: V2_COLOR, textAlign: 'center', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 0 }}>
-        + Crear un amistoso
+        🔒 Crear sala privada
       </Link>
 
 
