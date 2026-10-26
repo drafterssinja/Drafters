@@ -13,7 +13,7 @@ import { mensajeError } from '@/lib/v2';
 // LIGA DRAFTERS DE FÚTBOL — DUELOS 1 CONTRA 1 POR DIVISIONES (26/10, Iñi)
 // ============================================================================
 // Temporada = una vuelta de LaLiga. En tu división te enfrentas una vez a cada
-// uno (calendario sorteado), con equipo con presupuesto: ganar 3, empatar 1,
+// uno (rival sorteado al publicarse cada jornada, 27/10), con equipo con presupuesto: ganar 3, empatar 1,
 // perder 0. Las jornadas de Champions son jornadas extra con rival sorteado.
 // Al final suben y bajan (5 de 20). Cada jornada cuesta 1 crédito al hacer el
 // equipo. Ver SQL 60.
@@ -37,7 +37,7 @@ type Ronda = {
 type Info = {
   apuntado: boolean;
   apuntados: number;
-  temporada: { id: string; nombre: string; estado: 'inscripcion' | 'en_juego' | 'terminada'; desde: number; hasta: number; tam: number; ascensos: number; descensos: number; jornadas: number; primera_cierre: string | null } | null;
+  temporada: { id: string; nombre: string; estado: 'inscripcion' | 'en_juego' | 'terminada'; desde: number; hasta: number; tam: number; ascensos: number; descensos: number; jornadas: number; primera_cierre: string | null; sin_fin?: boolean } | null;
   division: { id: string; nombre: string; nivel: number } | null;
   divisiones: { id: string; nombre: string; nivel: number; jugadores: number }[];
   ronda: Ronda | null;
@@ -132,6 +132,15 @@ export default function LigaDuelos() {
   const enJuego = t?.estado === 'en_juego';
   const juego = !!info.division && enJuego;
 
+  // 27/10 (Iñi): arriba del todo la clasificación; debajo, todas las jornadas
+  // (la más reciente arriba) con todos los enfrentamientos, el tuyo resaltado.
+  const totalLiga = t ? t.hasta - t.desde + 1 : 0;
+  const ligaTerminadas = (jornadas ?? []).filter((j) => j.tipo === 'liga' && j.estado === 'terminada').length;
+  const faltan = Math.max(0, totalLiga - ligaTerminadas);
+  const hayPendiente = (jornadas ?? []).some((j) => j.estado === 'pendiente');
+  // 28/10 (Iñi): "Hacer mi equipo" arriba del todo, solo si todavía no lo has hecho.
+  const sinEquipo = juego ? [...info.calendario].sort((a, b) => a.orden - b.orden).find((r) => r.estado === 'pendiente' && !!r.cierre && !!r.rival_id && !r.tengo_equipo && new Date(r.cierre).getTime() > Date.now()) : undefined;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {/* Cabecera */}
@@ -143,15 +152,6 @@ export default function LigaDuelos() {
         </span>
       </div>
 
-      {/* Mi duelo de la jornada */}
-      {juego && info.ronda && <MiDuelo r={info.ronda} />}
-      {juego && !info.ronda && (
-        <Panel>
-          <span style={{ fontWeight: 800, color: S.TEXT }}>Has jugado todas las jornadas de esta temporada.</span>
-          <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>Al cerrar la temporada se ve quién sube y quién baja.</span>
-        </Panel>
-      )}
-
       {/* Apuntarse / explicación */}
       {!juego && (
         <Panel style={{ gap: 12 }}>
@@ -159,7 +159,7 @@ export default function LigaDuelos() {
           {[
             ['⚔️', 'Cada jornada, un duelo 1 contra 1 con un rival de tu división.'],
             ['📋', 'Equipo con presupuesto de 100.000 €, como siempre.'],
-            ['🔁', 'En una temporada (una vuelta de LaLiga) juegas una vez contra cada uno de tu división.'],
+            ['🔁', 'Tu rival se sortea en cuanto se publica cada jornada. En una temporada (una vuelta de LaLiga) no repites rival.'],
             ['⭐', 'Las jornadas de Champions son jornadas extra, con rival sorteado.'],
             ['3️⃣', 'Ganar 3 puntos · empatar 1 · perder 0. Si no haces equipo, pierdes.'],
             ['⬆️', `Al final de la temporada suben y bajan los ${t?.ascensos && t.tam >= 20 ? t.ascensos : 5} primeros y últimos de cada división.`],
@@ -179,7 +179,9 @@ export default function LigaDuelos() {
                 {t && t.estado === 'inscripcion'
                   ? `Empiezas en la ${t.nombre}${t.primera_cierre ? ` (${fecha(t.primera_cierre)})` : ''}. Las divisiones se forman al empezar.`
                   : enJuego
-                    ? 'La temporada ya está en marcha: entras en la próxima.'
+                    ? t.sin_fin
+                      ? 'Entras en la liga con la próxima jornada que se publique (empiezas con 0 puntos).'
+                      : 'La temporada ya está en marcha: entras en la próxima.'
                     : 'Entrarás en cuanto empiece la próxima temporada.'}
               </span>
               <button type="button" disabled={ocupado} onClick={() => void apuntarse(false)} style={{ alignSelf: 'flex-start', width: 'auto', background: 'none', border: 'none', padding: 0, color: S.MUTED_3, fontSize: 12, textDecoration: 'underline', cursor: 'pointer' }}>
@@ -196,31 +198,35 @@ export default function LigaDuelos() {
         </Panel>
       )}
 
-      {/* Mi calendario */}
-      {juego && info.calendario.length > 0 && (
-        <Panel style={{ padding: 14, gap: 6 }}>
-          <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 20, color: S.TEXT }}>Tus equipos y duelos</span>
-          {info.calendario.map((r) => (
-            <Link key={r.ronda_id} href={r.partido_id ? `/v2/liga/duelo/${r.partido_id}` : '#'} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderTop: '1px solid #1A221E', textDecoration: 'none' }}>
-              <span style={{ width: 104, flexShrink: 0, whiteSpace: 'nowrap', fontSize: 12, fontWeight: 800, color: r.tipo === 'champions' ? '#7FB2FF' : S.MUTED }}>{jornadaBonita(r.competicion)}</span>
-              <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 700, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.rival_id ? `vs ${r.rival_nombre ?? 'Alguien'}` : 'Descanso'}</span>
-              {r.estado === 'terminada' ? (
-                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  {r.rival_id && <span style={{ fontSize: 12, color: S.MUTED_2 }}>{pts(r.mio)}–{pts(r.rival)}</span>}
-                  <span style={{ width: 24, height: 24, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 12, background: r.resultado === 'G' ? 'rgba(61,220,132,0.2)' : r.resultado === 'E' ? 'rgba(240,185,77,0.2)' : 'rgba(255,92,92,0.2)', color: r.resultado === 'G' ? VERDE : r.resultado === 'E' ? ORO : ROJO }}>{r.resultado}</span>
-                </span>
-              ) : r.estado === 'en_juego' ? (
-                <span style={{ fontSize: 12, fontWeight: 800, color: VERDE }}>
-                  ● {pts(r.mio)}–{pts(r.rival)}
-                </span>
-              ) : (
-                <span style={{ fontSize: 11.5, color: r.tengo_equipo ? VERDE : S.MUTED_3 }}>{r.tengo_equipo ? '✓ equipo' : r.cierre ? fecha(r.cierre) : 'sin publicar'}</span>
-              )}
-              <span style={{ color: S.MUTED_3, fontSize: 14 }}>›</span>
-            </Link>
-          ))}
-        </Panel>
+      {/* Hacer mi equipo (solo si falta) */}
+      {sinEquipo && (
+        <Link href={`/v2/liga/${sinEquipo.ronda_id}/equipo`} style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 12, padding: '14px 14px', borderRadius: 16, background: 'linear-gradient(135deg, rgba(61,220,132,0.22) 0%, rgba(61,220,132,0.06) 100%)', border: '1px solid rgba(61,220,132,0.5)' }}>
+          <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: VERDE }}>
+              Jornada {sinEquipo.orden} · {etiquetaReal(sinEquipo.competicion)}
+            </span>
+            <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 21, color: S.TEXT, lineHeight: 1.1 }}>Haz tu equipo contra {sinEquipo.rival_nombre ?? 'tu rival'}</span>
+            <span style={{ fontSize: 12, color: S.MUTED_2 }}>Hasta {fecha(sinEquipo.cierre)}</span>
+          </span>
+          <span style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6, padding: '10px 12px', borderRadius: 12, background: VERDE, color: '#04140B', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 16, textTransform: 'uppercase' }}>
+            Hacer · 1 <IconoCredito size={15} oscuro />
+          </span>
+        </Link>
       )}
+
+      {/* 28/10: elegir división (cambia la clasificación y las jornadas) */}
+      {t && info.divisiones.length > 1 && (
+        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 2 }}>
+          {info.divisiones.map((d) => (
+            <button key={d.id} type="button" onClick={() => setDivVista(d.id)} style={{ ...S.pill(divVista === d.id), width: 'auto', flexShrink: 0 }}>
+              {d.nivel === 1 ? '🥇 ' : d.nivel === 2 ? '🥈 ' : d.nivel === 3 ? '🥉 ' : ''}
+              {d.nombre}
+              {info.division?.id === d.id ? ' · tú' : ''}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Clasificación */}
       {t && info.divisiones.length > 0 && (
         <Panel style={{ padding: 14, scrollMarginTop: 12 }}>
@@ -228,16 +234,6 @@ export default function LigaDuelos() {
             <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 20, color: S.TEXT }}>Clasificación</span>
             <span style={{ fontSize: 12, fontWeight: 700, color: S.MUTED_2 }}>{info.divisiones.find((x) => x.id === divVista)?.nombre} división</span>
           </div>
-          {info.divisiones.length > 1 && (
-            <div style={{ display: 'flex', gap: 6, overflowX: 'auto' }}>
-              {info.divisiones.map((d) => (
-                <button key={d.id} type="button" onClick={() => { setDivVista(d.id); setAbierta(null); }} style={{ ...S.pill(divVista === d.id), width: 'auto', flexShrink: 0 }}>
-                  {d.nombre}
-                  {info.division?.id === d.id ? ' · tú' : ''}
-                </button>
-              ))}
-            </div>
-          )}
           {tabla === null ? (
             <Cargando compacto />
           ) : (
@@ -246,49 +242,51 @@ export default function LigaDuelos() {
               const n = tabla.length;
               const mov = movimientos(n, t.tam, t.ascensos);
               const ultimo = Math.max(...info.divisiones.map((x) => x.nivel));
+              const cols = '18px minmax(0,1fr) 24px 30px 40px 40px 42px';
+              const num = { textAlign: 'right' as const, fontSize: 12, color: S.MUTED, fontVariantNumeric: 'tabular-nums' as const };
               return (
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '26px 1fr 26px 26px 26px 26px 36px', gap: 2, padding: '4px 6px', fontSize: 10.5, fontWeight: 800, color: S.MUTED_3, textTransform: 'uppercase' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: cols, gap: 3, padding: '4px 4px', fontSize: 10, fontWeight: 800, color: S.MUTED_3, textTransform: 'uppercase' }}>
                     <span>#</span>
-                    <span>Jugador</span>
-                    <span style={{ textAlign: 'center' }}>PJ</span>
-                    <span style={{ textAlign: 'center' }}>G</span>
-                    <span style={{ textAlign: 'center' }}>E</span>
-                    <span style={{ textAlign: 'center' }}>P</span>
+                    <span>Equipo</span>
+                    <span style={{ textAlign: 'right' }}>PJ</span>
                     <span style={{ textAlign: 'right' }}>Pts</span>
+                    <span style={{ textAlign: 'right' }}>PF</span>
+                    <span style={{ textAlign: 'right' }}>PC</span>
+                    <span style={{ textAlign: 'right' }}>Dif</span>
                   </div>
                   {tabla.map((f, i) => {
                     const sube = d && d.nivel > 1 && i < mov;
                     const baja = d && d.nivel < ultimo && i >= n - mov;
+                    const dif = Math.round((Number(f.a_favor) - Number(f.en_contra)) * 10) / 10;
                     return (
                       <div
                         key={f.usuario_id}
-                        style={{ display: 'grid', gridTemplateColumns: '26px 1fr 26px 26px 26px 26px 36px', gap: 2, alignItems: 'center', padding: '8px 6px', borderTop: '1px solid #1A221E', background: f.soy_yo ? 'rgba(61,220,132,0.08)' : 'transparent', borderLeft: `3px solid ${sube ? VERDE : baja ? ROJO : 'transparent'}` }}
+                        style={{ display: 'grid', gridTemplateColumns: cols, gap: 3, alignItems: 'center', padding: '8px 4px', borderTop: '1px solid #1A221E', background: f.soy_yo ? 'rgba(61,220,132,0.08)' : 'transparent', borderLeft: `3px solid ${sube ? VERDE : baja ? ROJO : 'transparent'}` }}
                       >
-                        <span style={{ fontWeight: 800, fontSize: 13, color: i === 0 && d?.nivel === 1 ? ORO : S.MUTED }}>{i + 1}</span>
-                        <span style={{ fontWeight: 800, fontSize: 13.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.nombre}</span>
-                        <span style={{ textAlign: 'center', fontSize: 12.5, color: S.MUTED }}>{f.pj}</span>
-                        <span style={{ textAlign: 'center', fontSize: 12.5, color: S.MUTED }}>{f.g}</span>
-                        <span style={{ textAlign: 'center', fontSize: 12.5, color: S.MUTED }}>{f.e}</span>
-                        <span style={{ textAlign: 'center', fontSize: 12.5, color: S.MUTED }}>{f.p}</span>
+                        <span style={{ fontWeight: 800, fontSize: 12.5, color: i === 0 && d?.nivel === 1 ? ORO : S.MUTED }}>{i + 1}</span>
+                        <span style={{ fontWeight: 800, fontSize: 13, color: f.soy_yo ? VERDE : S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.nombre}</span>
+                        <span style={num}>{f.pj}</span>
                         <span style={{ textAlign: 'right', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 18, color: S.TEXT }}>{f.pts}</span>
+                        <span style={num}>{pts(f.a_favor)}</span>
+                        <span style={num}>{pts(f.en_contra)}</span>
+                        <span style={{ ...num, fontWeight: 700, color: dif > 0 ? VERDE : dif < 0 ? ROJO : S.MUTED }}>{dif > 0 ? '+' : ''}{pts(dif)}</span>
                       </div>
                     );
                   })}
-                  {mov > 0 && (
-                    <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 8, fontSize: 11.5, color: S.MUTED_2 }}>
-                      {d && d.nivel > 1 && (
-                        <span>
-                          <span style={{ color: VERDE }}>■</span> Suben {mov}
-                        </span>
-                      )}
-                      {d && d.nivel < ultimo && (
-                        <span>
-                          <span style={{ color: ROJO }}>■</span> Bajan {mov}
-                        </span>
-                      )}
-                    </div>
-                  )}
+                  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 8, fontSize: 11, color: S.MUTED_2 }}>
+                    <span>PF: puntos a favor · PC: en contra · Dif: diferencia (desempata)</span>
+                    {mov > 0 && d && d.nivel > 1 && (
+                      <span>
+                        <span style={{ color: VERDE }}>■</span> Suben {mov}
+                      </span>
+                    )}
+                    {mov > 0 && d && d.nivel < ultimo && (
+                      <span>
+                        <span style={{ color: ROJO }}>■</span> Bajan {mov}
+                      </span>
+                    )}
+                  </div>
                 </div>
               );
             })()
@@ -296,44 +294,71 @@ export default function LigaDuelos() {
         </Panel>
       )}
 
-      {/* Histórico de jornadas de la división que se está viendo */}
-      {t && jornadas && jornadas.length > 0 && (
-        <Panel style={{ padding: 14, gap: 8 }}>
+      {/* Jornadas: la más reciente arriba, con todos los enfrentamientos */}
+      {t && info.divisiones.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 20, color: S.TEXT }}>Jornadas</span>
-          {[...jornadas].reverse().map((j) => {
-            const open = abierta === j.ronda_id;
-            return (
-              <div key={j.ronda_id} style={{ borderTop: '1px solid #1A221E' }}>
-                <button type="button" onClick={() => setAbierta(open ? null : j.ronda_id)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
-                  <span style={{ flex: 1, fontSize: 14, fontWeight: 800, color: j.tipo === 'champions' ? '#7FB2FF' : S.TEXT }}>
-                    {j.tipo === 'champions' ? '⭐ ' : ''}
-                    {jornadaBonita(j.competicion)}
-                  </span>
-                  <span style={{ fontSize: 11.5, fontWeight: 700, color: j.estado === 'en_juego' ? VERDE : S.MUTED_3 }}>{j.estado === 'terminada' ? 'Terminada' : j.estado === 'en_juego' ? '● En juego' : j.cierre ? fecha(j.cierre) : 'Sin publicar'}</span>
-                  <span style={{ color: S.MUTED_3, fontSize: 12 }}>{open ? '▾' : '▸'}</span>
-                </button>
-                {open && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: 10 }}>
-                    {j.partidos.map((p) => (
-                      <Link key={p.id} href={`/v2/liga/duelo/${p.id}`} style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr 12px', alignItems: 'center', gap: 8, padding: '10px 10px', borderRadius: 10, background: p.local?.soy_yo || p.visitante?.soy_yo ? 'rgba(61,220,132,0.08)' : '#111614', border: `1px solid ${S.CARD_BORDER}`, textDecoration: 'none' }}>
-                        <NombreDuelo lado={p.local} res={p.resultado_local} />
-                        <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 17, color: S.TEXT, whiteSpace: 'nowrap' }}>
-                          {j.estado === 'pendiente' ? 'vs' : `${p.local ? (p.local.equipo ? pts(p.local.total) : '0') : '·'} – ${p.visitante ? (p.visitante.equipo ? pts(p.visitante.total) : '0') : '·'}`}
-                        </span>
-                        <NombreDuelo lado={p.visitante} res={p.resultado_visitante} derecha />
-                        <span style={{ color: S.MUTED_3, fontSize: 13 }}>›</span>
-                      </Link>
+          {enJuego && jornadas && !hayPendiente && (
+            <span style={{ fontSize: 12.5, color: S.MUTED_2, lineHeight: 1.45 }}>
+              {faltan > 0 || t.sin_fin ? 'La próxima jornada todavía no está publicada. En cuanto se publique, se sortean los duelos y ya puedes hacer tu equipo.' : ''}
+            </span>
+          )}
+          {jornadas === null ? (
+            <Cargando compacto />
+          ) : jornadas.length === 0 ? (
+            <span style={{ fontSize: 12.5, color: S.MUTED_3 }}>Todavía no hay jornadas publicadas.</span>
+          ) : (
+            [...jornadas].sort((a, b) => b.orden - a.orden).map((j) => {
+              const miRonda = info.calendario.find((r) => r.ronda_id === j.ronda_id);
+              const puedoHacer = !!miRonda && j.estado === 'pendiente' && !!j.cierre && !!miRonda.rival_id;
+              return (
+                <Panel key={j.ronda_id} style={{ padding: 12, gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+                    <span style={{ fontSize: 14.5, fontWeight: 800, color: j.tipo === 'champions' ? '#7FB2FF' : S.TEXT }}>
+                      {j.tipo === 'champions' ? '⭐ ' : ''}Jornada {j.orden}{' '}
+                      <span style={{ fontWeight: 600, fontSize: 12.5, color: S.MUTED_2 }}>({etiquetaReal(j.competicion)})</span>
+                    </span>
+                    <span style={{ fontSize: 11.5, fontWeight: 700, color: j.estado === 'en_juego' ? VERDE : S.MUTED_3, whiteSpace: 'nowrap' }}>{j.estado === 'en_juego' ? '● En juego' : j.estado === 'terminada' ? `${dia(j.cierre)} · Terminada` : dia(j.cierre)}</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', borderRadius: 12, background: '#0E1311', border: '1px solid #1A221E', overflow: 'hidden' }}>
+                    {j.partidos.map((p, i) => (
+                      <TarjetaDuelo key={p.id} p={p} estado={j.estado} primera={i === 0} />
                     ))}
                   </div>
-                )}
-              </div>
-            );
-          })}
+                  {/* El botón grande de hacer el equipo va arriba del todo; aquí, solo cambiarlo. */}
+                  {puedoHacer && miRonda?.tengo_equipo && (
+                    <Link href={`/v2/liga/${j.ronda_id}/equipo`} style={{ alignSelf: 'center', fontSize: 12, fontWeight: 700, color: VERDE, textDecoration: 'none', padding: '2px 0' }}>
+                      ✏️ Cambiar mi equipo (hasta {fecha(j.cierre)})
+                    </Link>
+                  )}
+                  {miRonda && !miRonda.rival_id && j.estado !== 'terminada' && <span style={{ fontSize: 12, color: S.MUTED_2, textAlign: 'center' }}>😴 Esta jornada descansas: te llevas los 3 puntos.</span>}
+                </Panel>
+              );
+            })
+          )}
+        </div>
+      )}
+
+      {/* Información de la temporada */}
+      {t && t.estado !== 'inscripcion' && (
+        <Panel style={{ padding: 14, gap: 6 }}>
+          <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 18, color: S.TEXT }}>Temporada</span>
+          <span style={{ fontSize: 13, color: S.MUTED, lineHeight: 1.5 }}>
+            {t.sin_fin ? (
+              <>Liga de pruebas: empieza en la jornada {t.desde} de LaLiga y de momento no tiene final. Si alguien se apunta, entra en la siguiente jornada con 0 puntos.</>
+            ) : (
+              <>
+                De la jornada {t.desde} a la {t.hasta} de LaLiga (más las de Champions que caen entre medias).
+                {t.estado === 'en_juego' ? ` Quedan ${faltan} ${faltan === 1 ? 'jornada' : 'jornadas'} de LaLiga.` : ' Terminada.'}
+              </>
+            )}
+          </span>
+          <span style={{ fontSize: 12, color: S.MUTED_2, lineHeight: 1.5 }}>Ganar 3 · empatar 1 · perder 0. Si no haces equipo, pierdes; si descansas, ganas. Con empate a puntos, desempata la diferencia de puntos.</span>
         </Panel>
       )}
 
       {/* Todas las divisiones y quién está en cada una */}
-      {divs && divs.length > 0 && (
+      {divs && divs.length > 1 && (
         <Panel style={{ padding: 14, gap: 10 }}>
           <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 20, color: S.TEXT }}>Divisiones</span>
           {divs.map((d) => (
@@ -364,69 +389,130 @@ export default function LigaDuelos() {
   );
 }
 
-function MiDuelo({ r }: { r: Ronda }) {
-  const descanso = !r.rival_id;
-  const abierta = r.estado === 'pendiente' && !!r.cierre;
-  return (
-    <div style={{ background: 'linear-gradient(160deg, #15241C 0%, #111614 70%)', border: '1px solid rgba(61,220,132,0.4)', borderRadius: 16, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-        <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: r.tipo === 'champions' ? '#7FB2FF' : VERDE }}>
-          {r.tipo === 'champions' ? '⭐ Jornada extra · ' : ''}
-          {jornadaBonita(r.competicion)}
-        </span>
-        <span style={{ fontSize: 11.5, fontWeight: 700, color: r.estado === 'en_juego' ? VERDE : S.MUTED_2 }}>{r.estado === 'en_juego' ? '● En juego' : r.cierre ? `Cierra ${fecha(r.cierre)}` : 'Sin publicar todavía'}</span>
-      </div>
-
-      {descanso ? (
-        <div style={{ textAlign: 'center', padding: '6px 0' }}>
-          <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 24, color: S.TEXT }}>😴 Esta jornada descansas</span>
-          <div style={{ fontSize: 12.5, color: S.MUTED_2, marginTop: 2 }}>Te llevas los 3 puntos sin jugar.</div>
-        </div>
-      ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', gap: 8 }}>
-          <Lado nombre="Tú" total={r.mio} equipo={r.tengo_equipo} mostrar={r.estado !== 'pendiente'} destacado />
-          <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 20, color: S.MUTED_3 }}>VS</span>
-          <Lado nombre={r.rival_nombre ?? 'Alguien'} total={r.rival} equipo={r.rival_tiene_equipo} mostrar={r.estado !== 'pendiente'} />
-        </div>
-      )}
-
-      {!descanso && abierta && (
-        <Link
-          href={`/v2/liga/${r.ronda_id}/equipo`}
-          style={{ ...S.primaryButton, textDecoration: 'none', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
-        >
-          {r.tengo_equipo ? '✏️ Cambiar mi equipo' : (
-            <>
-              Hacer mi equipo · 1 <IconoCredito size={16} oscuro />
-            </>
-          )}
-        </Link>
-      )}
-      {!descanso && r.estado === 'pendiente' && !r.cierre && <span style={{ fontSize: 12, color: S.MUTED_2, textAlign: 'center' }}>En cuanto se publique la jornada podrás hacer tu equipo.</span>}
-    </div>
-  );
+/** "J9 LaLiga" / "J4 Champions". */
+function etiquetaReal(c: string): string {
+  const n = c.match(/Jornada\s*(\d+)/i)?.[1] ?? '';
+  return /champions/i.test(c) ? `J${n} Champions` : `J${n} LaLiga`;
+}
+function dia(iso: string | null): string {
+  if (!iso) return '';
+  return new Intl.DateTimeFormat('es-ES', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Europe/Madrid' }).format(new Date(iso));
 }
 
-function Lado({ nombre, total, equipo, mostrar, destacado = false }: { nombre: string; total: number | null; equipo: boolean; mostrar: boolean; destacado?: boolean }) {
+// 28/10 (Iñi): diseño "A" — cada duelo en una fila de la lista: círculo de
+// color con la inicial, nombre en letra fina, marcador pequeño en el centro
+// (ganador en verde, perdedor apagado, empate en dorado). Tu fila con fondo
+// verde suave y una línea verde a la izquierda.
+type PartidoJ = JornadaDiv['partidos'][number];
+const COLORES_AVATAR = ['#2F6B4F', '#3B5B8C', '#7A4E8C', '#8C5A3B', '#2E7476', '#7C6A2E', '#8C3B4E', '#4E5A6B'];
+function colorDe(nombre: string): string {
+  let h = 0;
+  for (let i = 0; i < nombre.length; i++) h = (h * 31 + nombre.charCodeAt(i)) >>> 0;
+  return COLORES_AVATAR[h % COLORES_AVATAR.length];
+}
+const LETRA = "'Barlow Condensed', sans-serif";
+
+function TarjetaDuelo({ p, estado, primera }: { p: PartidoJ; estado: JornadaDiv['estado']; primera: boolean }) {
+  const mio = !!(p.local?.soy_yo || p.visitante?.soy_yo);
+  const mostrar = estado !== 'pendiente';
+  const vivo = estado === 'en_juego';
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, minWidth: 0 }}>
-      <span style={{ maxWidth: '100%', fontWeight: 800, fontSize: 15, color: destacado ? VERDE : S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{nombre}</span>
+    <Link
+      href={`/v2/liga/duelo/${p.id}`}
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'minmax(0,1fr) auto minmax(0,1fr)',
+        alignItems: 'center',
+        columnGap: 10,
+        padding: '10px 12px',
+        background: mio ? 'rgba(61,220,132,0.07)' : 'transparent',
+        borderTop: primera ? 'none' : '1px solid rgba(255,255,255,0.045)',
+        boxShadow: mio ? `inset 2px 0 0 ${VERDE}` : 'none',
+        textDecoration: 'none',
+      }}
+    >
+      <Nombre lado={p.local} res={vivo ? null : p.resultado_local} mostrar={mostrar} />
       {mostrar ? (
-        <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 34, lineHeight: 1, color: S.TEXT }}>{equipo ? pts(total) : '–'}</span>
+        <span
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            padding: '2px 7px',
+            borderRadius: 7,
+            background: 'rgba(255,255,255,0.04)',
+            boxShadow: vivo ? 'inset 0 0 0 1px rgba(61,220,132,0.3)' : 'none',
+            fontFamily: LETRA,
+            fontWeight: 700,
+            fontSize: 15,
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          <Num lado={p.local} res={vivo ? null : p.resultado_local} />
+          <i style={{ fontStyle: 'normal', color: '#45524C', fontWeight: 500, fontSize: 12 }}>–</i>
+          <Num lado={p.visitante} res={vivo ? null : p.resultado_visitante} />
+        </span>
       ) : (
-        <span style={{ fontSize: 11.5, fontWeight: 700, color: equipo ? VERDE : S.MUTED_3 }}>{equipo ? '✓ Equipo hecho' : 'Sin equipo'}</span>
+        <span style={{ fontFamily: LETRA, fontWeight: 500, fontSize: 11.5, letterSpacing: '0.12em', color: '#56625C', padding: '0 8px' }}>vs</span>
       )}
-      {mostrar && !equipo && <span style={{ fontSize: 10.5, color: ROJO }}>sin equipo</span>}
-    </div>
+      <Nombre lado={p.visitante} res={vivo ? null : p.resultado_visitante} mostrar={mostrar} derecha />
+    </Link>
   );
 }
 
-function NombreDuelo({ lado, res, derecha = false }: { lado: LadoJ; res: 'G' | 'E' | 'P' | null; derecha?: boolean }) {
-  const color = res === 'G' ? VERDE : res === 'P' ? S.MUTED_2 : S.TEXT;
-  return (
-    <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: derecha ? 'flex-end' : 'flex-start' }}>
-      <span style={{ maxWidth: '100%', fontWeight: res === 'G' || lado?.soy_yo ? 800 : 600, fontSize: 13.5, color: lado?.soy_yo ? VERDE : color, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{lado ? lado.nombre : 'Descanso'}</span>
-      {lado && !lado.equipo && <span style={{ fontSize: 10, color: S.MUTED_3 }}>sin equipo</span>}
+function Nombre({ lado, res, mostrar, derecha = false }: { lado: LadoJ; res: 'G' | 'E' | 'P' | null; mostrar: boolean; derecha?: boolean }) {
+  if (!lado) {
+    return (
+      <span style={{ minWidth: 0, display: 'flex', justifyContent: derecha ? 'flex-end' : 'flex-start' }}>
+        <span style={{ fontSize: 12.5, color: '#56625C', fontStyle: 'italic' }}>descansa</span>
+      </span>
+    );
+  }
+  const gana = res === 'G';
+  const pierde = res === 'P';
+  const avatar = (
+    <span style={{ width: 22, height: 22, flexShrink: 0, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: colorDe(lado.nombre), color: '#EAF2EE', fontSize: 10.5, fontWeight: 700, opacity: pierde ? 0.45 : 1 }}>
+      {lado.nombre.slice(0, 1).toUpperCase()}
     </span>
   );
+  const nombre = (
+    <span
+      style={{
+        minWidth: 0,
+        fontSize: 13,
+        fontWeight: gana || lado.soy_yo ? 700 : 500,
+        letterSpacing: '-0.005em',
+        color: lado.soy_yo ? VERDE : gana ? '#FFFFFF' : pierde ? '#6F7D76' : '#C9D3CE',
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+      }}
+    >
+      {lado.nombre.charAt(0).toUpperCase() + lado.nombre.slice(1)}
+    </span>
+  );
+  const check = !mostrar && lado.equipo ? <span title="Equipo hecho" style={{ flexShrink: 0, color: VERDE, fontSize: 10 }}>✓</span> : null;
+  return (
+    <span style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, justifyContent: derecha ? 'flex-end' : 'flex-start' }}>
+      {derecha ? (
+        <>
+          {check}
+          {nombre}
+          {avatar}
+        </>
+      ) : (
+        <>
+          {avatar}
+          {nombre}
+          {check}
+        </>
+      )}
+    </span>
+  );
+}
+
+function Num({ lado, res }: { lado: LadoJ; res: 'G' | 'E' | 'P' | null }) {
+  const texto = !lado ? '·' : lado.equipo ? pts(lado.total ?? 0) : '–';
+  const color = res === 'G' ? VERDE : res === 'E' ? ORO : res === 'P' ? '#56625C' : S.TEXT;
+  return <span style={{ minWidth: 20, textAlign: 'center', color }}>{texto}</span>;
 }
