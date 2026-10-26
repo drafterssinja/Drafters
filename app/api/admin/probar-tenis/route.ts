@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { crearClienteAdmin } from '@/lib/server/supabaseAdmin';
+import { deportesTenis } from '@/lib/server/oddsApi';
 
 // ============================================================================
 // DIAGNÓSTICO — LIVE TENNIS API (13/10, antes de montar el tenis en directo)
@@ -163,13 +164,22 @@ export async function POST(req: NextRequest) {
   }
   if (!(await esAdmin(req, admin))) return NextResponse.json({ error: 'No autorizado.' }, { status: 401 });
 
-  let body: { ruta?: string; fuente?: 'livetennis' | 'espn' | 'espn-auto' | 'sofascore' | 'cuotas-futbol'; liga?: string } = {};
+  let body: { ruta?: string; fuente?: 'livetennis' | 'espn' | 'espn-auto' | 'sofascore' | 'cuotas-futbol' | 'oddsapi'; liga?: string } = {};
   try {
     body = await req.json();
   } catch {
     // vacío
   }
   // 26/10 (Iñi): probar ESPN, gratis (como en fútbol y golf).
+  // 28/10: The Odds API — torneos de tenis que tiene ahora y créditos que quedan (no gasta créditos).
+  if (body.fuente === 'oddsapi') {
+    try {
+      const r = await deportesTenis();
+      return NextResponse.json({ creditos_restantes: r.restantes, creditos_usados: r.usados, torneos_activos: r.deportes.filter((d) => d.active).map((d) => `${d.key} · ${d.title}${d.has_outrights ? ' · CUOTA AL GANADOR' : ' · cuotas de partidos'}`), otros: r.deportes.filter((d) => !d.active).length });
+    } catch (e) {
+      return NextResponse.json({ error: (e as Error).message }, { status: 500 });
+    }
+  }
   if (body.fuente === 'sofascore') return NextResponse.json(await analizarSofascore());
   if (body.fuente === 'cuotas-futbol') return NextResponse.json(await cuotasFutbol(body.liga === 'uefa.champions' ? 'uefa.champions' : 'esp.1'));
   if (body.fuente === 'espn-auto') return NextResponse.json(await analizarEspn(body.liga === 'wta' ? 'wta' : 'atp'));

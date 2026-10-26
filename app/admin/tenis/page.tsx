@@ -73,7 +73,13 @@ function TorneosTenis() {
   const boton = { ...S.secondaryLinkButton, width: 'auto', padding: '7px 11px', fontSize: 12 } as const;
   return (
     <div style={{ ...S.card, flexDirection: 'column', alignItems: 'stretch', gap: 10 }}>
-      <span style={{ fontWeight: 800, color: S.TEXT }}>Torneos de esta semana (ESPN)</span>
+      <span style={{ fontWeight: 800, color: S.TEXT }}>Torneos de esta semana y próximos (ESPN)</span>
+      <span style={{ fontSize: 12, color: S.ACCENT, lineHeight: 1.5 }}>
+        Automático: cada 15 minutos se crean solos los torneos ATP y WTA en cuanto sale su cuadro (los inscritos), con el precio de cada jugador sacado de su cuota a ganar el torneo (la de las casas de apuestas si la hay; si no, calculada jugando el cuadro 20.000 veces con el ranking).
+      </span>
+      <button type="button" disabled={!!ocupado} onClick={() => accion('auto', { accion: 'auto' }, (r) => (r.resultados as { liga: string; torneo: string; estado: string; detalle: string }[]).map((x) => `${x.liga.toUpperCase()} · ${x.torneo}: ${x.detalle}`).join('  |  ') || 'Nada que crear.')} style={{ ...boton, alignSelf: 'flex-start' }}>
+        {ocupado === 'auto' ? 'Buscando…' : 'Buscar y crear ahora'}
+      </button>
       <span style={{ fontSize: 12, color: S.MUTED_2, lineHeight: 1.5 }}>
         Al crear un torneo se cargan sus jugadores con precio (por ranking), se cierra 5 minutos antes del próximo partido y salen las salas de Drafters. El marcador, el saque, los breaks y los puntos se actualizan solos cada minuto. Cuando ESPN da la final por acabada, el torneo se cierra solo.
       </span>
@@ -183,11 +189,24 @@ export default function AdminTenisPage() {
               <button type="button" onClick={() => probar('', { fuente: 'espn-auto', liga: 'wta' })} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '8px 12px', fontSize: 12 }}>
                 Analizar WTA
               </button>
+              <button type="button" onClick={() => probar('', { fuente: 'oddsapi' })} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '8px 12px', fontSize: 12 }}>
+                The Odds API (créditos)
+              </button>
               <button type="button" onClick={() => probar('', { fuente: 'sofascore' })} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '8px 12px', fontSize: 12 }}>
                 Probar Sofascore (aces)
               </button>
               <button type="button" onClick={() => probar('', { fuente: 'cuotas-futbol', liga: 'esp.1' })} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '8px 12px', fontSize: 12 }}>
                 Cuotas LaLiga (ESPN)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const f = (d: Date) => d.toISOString().slice(0, 10).replace(/-/g, '');
+                  probar(`/atp/scoreboard?dates=${f(new Date())}-${f(new Date(Date.now() + 10 * 86400000))}`, { fuente: 'espn' });
+                }}
+                style={{ ...S.secondaryLinkButton, width: 'auto', padding: '8px 12px', fontSize: 12 }}
+              >
+                Próximos ATP (crudo)
               </button>
               <button type="button" onClick={() => probar('/atp/scoreboard', { fuente: 'espn' })} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '8px 12px', fontSize: 12 }}>
                 Marcador ATP (crudo)

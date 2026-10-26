@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { crearClienteAdmin } from '@/lib/server/supabaseAdmin';
-import { crearTorneoTenis, listarTorneosSemana, sincronizarTenis, type LigaTenis } from '@/lib/server/tenisEspn';
+import { crearTorneoTenis, crearTorneosTenisAutomaticos, listarTorneosSemana, sincronizarTenis, type LigaTenis } from '@/lib/server/tenisEspn';
 
 // Tenis con ESPN (27/10). Solo admin.
 //   listar      → torneos de esta semana en ESPN (ATP y WTA) y si ya están creados.
@@ -48,6 +48,7 @@ export async function POST(req: NextRequest) {
       if (!body.id) return NextResponse.json({ error: 'Falta el torneo.' }, { status: 400 });
       return NextResponse.json(await crearTorneoTenis(admin, liga, body.id));
     }
+    if (body.accion === 'auto') return NextResponse.json({ resultados: await crearTorneosTenisAutomaticos(admin) });
     if (body.accion === 'sincronizar') return NextResponse.json(await sincronizarTenis(admin, body.competicion || undefined));
     if (body.accion === 'finalizar' || body.accion === 'reabrir') {
       if (!body.competicion) return NextResponse.json({ error: 'Falta el torneo.' }, { status: 400 });

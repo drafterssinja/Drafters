@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { crearClienteAdmin } from '@/lib/server/supabaseAdmin';
 import { enviarNotificacionesPush } from '@/lib/server/notificacionesPush';
-import { sincronizarTenis } from '@/lib/server/tenisEspn';
+import { crearTorneosTenisAutomaticos, sincronizarTenis } from '@/lib/server/tenisEspn';
 
 // Notificaciones push (18/10). La llama pg_cron de Supabase cada minuto con la
 // cabecera "x-cron-secret" (= CRON_SECRET), igual que las sincronizaciones.
@@ -23,6 +23,8 @@ async function ejecutar(req: NextRequest) {
     // Tenis en directo (27/10): marcador, saque y breaks de ESPN cada minuto.
     let tenis: unknown = null;
     try {
+      // 28/10: cada 15 minutos, alta automática de los torneos con cuadro publicado.
+      if (new Date().getUTCMinutes() % 15 === 0) await crearTorneosTenisAutomaticos(admin);
       tenis = await sincronizarTenis(admin);
     } catch (e) {
       tenis = { error: (e as Error).message };
