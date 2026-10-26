@@ -99,7 +99,7 @@ function MesasPageInner() {
           .select('id,nombre,competicion,deporte,tipo,aforo,buy_in,estado,fecha_limite_inscripcion')
           .neq('tipo', 'maraton')
           .neq('estado', 'finalizada')
-          .eq('version', 1), // 15/10: las mesas de la liga V2 van aparte
+          .eq('version', 1).neq('nombre', 'Tenis · interna'), // 15/10: las mesas de la liga V2 van aparte
         // inscritos_por_sala() es una función de base de datos (RPC) — hace
         // falta porque equipos/inscripciones tienen RLS que solo deja ver
         // las filas propias de cada usuario, pero el número de inscritos de

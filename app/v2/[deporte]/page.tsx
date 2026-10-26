@@ -34,7 +34,11 @@ const MODOS: Record<DeporteV2, { id: Modo; label: string }[]> = {
     { id: 'liga', label: 'Liga' },
     { id: 'porras', label: 'Porras' },
   ],
-  tenis: [],
+  // 27/10 (Iñi): tenis con ESPN — de momento amistosos; la liga, muy pronto.
+  tenis: [
+    { id: 'amistosos', label: 'Amistosos' },
+    { id: 'liga', label: 'Liga' },
+  ],
 };
 
 export default function V2Deporte() {
@@ -72,21 +76,7 @@ export default function V2Deporte() {
 
   return (
     <MarcoV2 perfil={perfil} estado={estado} deporte={deporte}>
-      {/* 27/10 (Iñi): lo primero de la página, las pestañas (el deporte ya se ve en la cabecera). */}
-      {deporte === 'tenis' && (
-        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 8 }}>
-          <Titulo>{DEPORTE_NOMBRE[deporte]}</Titulo>
-          <EtiquetaBeta />
-        </div>
-      )}
-
-      {deporte === 'tenis' ? (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, padding: '40px 10px', textAlign: 'center' }}>
-          <BolaTenis size={64} />
-          <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 26, color: S.TEXT }}>Muy pronto</span>
-          <span style={{ fontSize: 13.5, color: S.MUTED_2, lineHeight: 1.5, maxWidth: 320 }}>Estamos preparando el tenis en directo: mesas, amistosos y draft, con sus propios créditos.</span>
-        </div>
-      ) : (
+      {(
         <>
           {/* 27/10 (Iñi): arriba del todo, Amistosos y Liga (y Porras en golf), cada
               una con su propia ventana y sus propios equipos. */}
@@ -134,7 +124,14 @@ export default function V2Deporte() {
           )}
           {/* 26/10 (Iñi): en fútbol la liga es de duelos 1 contra 1 por divisiones (SQL 60), con su propia página. */}
           {modo === 'liga' && perfil && deporte === 'futbol' && <LigaDuelos />}
-          {modo === 'liga' && perfil && deporte !== 'futbol' && (
+          {modo === 'liga' && deporte === 'tenis' && (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, padding: '40px 10px', textAlign: 'center' }}>
+              <BolaTenis size={64} />
+              <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 26, color: S.TEXT }}>Muy pronto</span>
+              <span style={{ fontSize: 13.5, color: S.MUTED_2, lineHeight: 1.5, maxWidth: 320 }}>La liga de tenis llega en cuanto tengamos los primeros torneos rodando. De momento, juega amistosos.</span>
+            </div>
+          )}
+          {modo === 'liga' && perfil && deporte !== 'futbol' && deporte !== 'tenis' && (
             <>
               <MisEquiposV2 deporte={deporte} miId={perfil.id} solo="liga" />
               <MesasLiga deporte={deporte} miId={perfil.id} />

@@ -93,7 +93,7 @@ const TARJETAS_GESTION: { href: string; titulo: string; subtitulo: string }[] = 
   // introducir el resultado a mano — ver drafters-schema.sql.
   { href: '/admin/resultados-golf', titulo: 'Resultados de golf en vivo', subtitulo: 'Conectar cada competición con ESPN para la clasificación en directo' },
   // 13/10: diagnóstico de la fuente de tenis en directo (Live Tennis API).
-  { href: '/admin/tenis', titulo: 'Tenis en vivo (pruebas)', subtitulo: 'Probar ESPN (gratis) y Live Tennis API: qué datos trae cada fuente' },
+  { href: '/admin/tenis', titulo: 'Tenis', subtitulo: 'Crear los torneos de la semana (ESPN), actualizarlos y probar fuentes' },
   // Ruta renombrada de /admin/publicidad a /admin/videos (28/09, aviso de
   // Iñi) — la palabra "publicidad" en la URL hacía que algunos
   // bloqueadores de anuncios del navegador (net::ERR_BLOCKED_BY_CLIENT)

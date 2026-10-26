@@ -164,7 +164,7 @@ function SalasPageInner() {
         // abajo), porque las finalizadas se quedan accesibles detrás de un
         // desplegable que empieza cerrado, con el botón "Clasificación
         // final" en vez de "Clasificación en directo".
-        supabase.from('salas').select(`${columnasSalas},circuito`).eq('version', 1), // 15/10: las mesas de la liga V2 van aparte
+        supabase.from('salas').select(`${columnasSalas},circuito`).eq('version', 1).neq('nombre', 'Tenis · interna'), // 15/10: las mesas de la liga V2 van aparte
         // RPC (no una select directa): equipos/inscripciones tienen RLS que
         // solo deja ver las filas propias — el número de inscritos de cada
         // sala es agregado y público. Ver drafters-schema.sql.
@@ -175,7 +175,7 @@ function SalasPageInner() {
       // "circuito" no existe: se vuelve a pedir sin ella para no romper la pantalla.
       let salasData = salasRes.data as SalaFila[] | null;
       if (salasRes.error) {
-        const reintento = await supabase.from('salas').select(columnasSalas).eq('version', 1);
+        const reintento = await supabase.from('salas').select(columnasSalas).eq('version', 1).neq('nombre', 'Tenis · interna');
         salasData = reintento.data as SalaFila[] | null;
       }
 
@@ -210,7 +210,7 @@ function SalasPageInner() {
       const [{ data: inscritosData }, salasRes] = await Promise.all([
         supabase.rpc('inscritos_por_sala'),
         vueltas % 6 === 0
-          ? supabase.from('salas').select('id,nombre,competicion,deporte,tipo,aforo,buy_in,estado,fecha_limite_inscripcion,circuito').eq('version', 1)
+          ? supabase.from('salas').select('id,nombre,competicion,deporte,tipo,aforo,buy_in,estado,fecha_limite_inscripcion,circuito').eq('version', 1).neq('nombre', 'Tenis · interna')
           : Promise.resolve({ data: null, error: null }),
       ]);
       if (!activo) return;

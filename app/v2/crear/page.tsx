@@ -63,7 +63,10 @@ function V2CrearInner() {
 
   const [nombre, setNombre] = useState('');
   // 15/10: se crea desde la página de un deporte, así que ya viene elegido.
-  const deporte: 'futbol' | 'golf' = useSearchParams().get('deporte') === 'golf' ? 'golf' : 'futbol';
+  const depParam = useSearchParams().get('deporte');
+  const deporte: 'futbol' | 'golf' | 'tenis' = depParam === 'golf' ? 'golf' : depParam === 'tenis' ? 'tenis' : 'futbol';
+  // 27/10: golf y tenis se juegan por torneo (no por jornadas).
+  const porTorneo = deporte !== 'futbol';
   const [liga, setLiga] = useState('');
   const [desde, setDesde] = useState('');
   const [hasta, setHasta] = useState('');
@@ -97,7 +100,7 @@ function V2CrearInner() {
   }, [estado, deporte]);
 
   const futbol = useMemo(() => (comps ?? []).filter((c) => c.deporte === 'futbol'), [comps]);
-  const golf = useMemo(() => (comps ?? []).filter((c) => c.deporte === 'golf'), [comps]);
+  const golf = useMemo(() => (comps ?? []).filter((c) => c.deporte === deporte), [comps, deporte]);
   const ligas = useMemo(() => Array.from(new Set(futbol.map((c) => ligaDe(c.competicion)))), [futbol]);
   const publicadasLiga = useMemo(() => futbol.filter((c) => ligaDe(c.competicion) === liga).sort((a, b) => numeroJornada(a.competicion) - numeroJornada(b.competicion)), [futbol, liga]);
   // Publicadas + las que vienen detrás (sin horarios todavía) hasta el final de la competición.
@@ -127,12 +130,12 @@ function V2CrearInner() {
   }, [golf, torneo]);
 
   const seleccion: string[] = useMemo(() => {
-    if (deporte === 'golf') return torneo ? [torneo] : [];
+    if (porTorneo) return torneo ? [torneo] : [];
     const a = jornadasLiga.findIndex((c) => c.competicion === desde);
     const b = jornadasLiga.findIndex((c) => c.competicion === hasta);
     if (a < 0 || b < 0 || b < a) return [];
     return jornadasLiga.slice(a, b + 1).map((c) => c.competicion);
-  }, [deporte, torneo, jornadasLiga, desde, hasta]);
+  }, [porTorneo, torneo, jornadasLiga, desde, hasta]);
 
   // Los partidos se eligen aquí solo para la primera jornada; los de las
   // siguientes, desde la sala cuando se publiquen (15/10, Iñi).
@@ -187,7 +190,7 @@ function V2CrearInner() {
   const todosLosPartidos = partidos.length > 0 && partidosOn.size === partidos.length;
 
   // 17/10 (Iñi): partidos de un solo día (3+ partidos) o una sola ronda de golf.
-  const compTramos = deporte === 'golf' ? torneo : unaJornadaFutbol;
+  const compTramos = porTorneo ? torneo : unaJornadaFutbol;
   const tramosDeSeleccion = useMemo(() => tramosDisp.filter((t) => t.competicion === compTramos).sort((a, b) => ordenTramo(a.tramo).localeCompare(ordenTramo(b.tramo))), [tramosDisp, compTramos]);
   const compElegida = (comps ?? []).find((c) => c.competicion === compTramos);
   const completaDisponible = !!compElegida && !compElegida.soloTramos;
@@ -264,10 +267,10 @@ function V2CrearInner() {
     setError(null);
     if (!nombre.trim()) return setError('Ponle un nombre a la sala.');
     if (deporte === 'futbol' && !liga) return setError('Elige si la sala es de LaLiga o de la Champions.');
-    if (seleccion.length === 0) return setError(deporte === 'golf' ? 'Elige un torneo.' : 'Elige la jornada (o la primera y la última).');
+    if (seleccion.length === 0) return setError(porTorneo ? 'Elige un torneo.' : 'Elige la jornada (o la primera y la última).');
     if (privada && contrasena.trim().length < 3) return setError('Pon una contraseña de al menos 3 caracteres.');
     if (unaJornadaFutbol && partidos.length > 0 && partidosOn.size === 0) return setError('Elige al menos un partido.');
-    if (!tramo && compTramos && !completaDisponible) return setError(deporte === 'golf' ? 'El torneo ya ha empezado: elige una ronda.' : 'La jornada ya ha empezado: elige los partidos de un día.');
+    if (!tramo && compTramos && !completaDisponible) return setError(porTorneo ? 'El torneo ya ha empezado: elige una ronda.' : 'La jornada ya ha empezado: elige los partidos de un día.');
     if (tramo && seleccion.length > 1) return setError('Los partidos de un solo día solo se pueden elegir en salas de una jornada.');
     if (avisoDraft) return setError(avisoDraft);
     const premioFinal = privada ? premio : PREMIO_VACIO;
@@ -304,8 +307,8 @@ function V2CrearInner() {
   const hayPasoPartidos = (!!compTramos && (tramosDeSeleccion.length > 0 || !completaDisponible)) || (!!unaJornadaFutbol && partidos.length > 0);
   const okPaso: Record<number, string | null> = {
     1: nombre.trim() ? null : 'Ponle un nombre a la sala.',
-    2: deporte === 'futbol' && !liga ? 'Elige si la sala es de LaLiga o de la Champions.' : seleccion.length === 0 ? (deporte === 'golf' ? 'Elige un torneo.' : 'Elige la jornada.') : null,
-    3: unaJornadaFutbol && partidos.length > 0 && partidosOn.size === 0 ? 'Elige al menos un partido.' : !tramo && compTramos && !completaDisponible ? (deporte === 'golf' ? 'El torneo ya ha empezado: elige una ronda.' : 'La jornada ya ha empezado: elige los partidos de un día.') : null,
+    2: deporte === 'futbol' && !liga ? 'Elige si la sala es de LaLiga o de la Champions.' : seleccion.length === 0 ? (porTorneo ? 'Elige un torneo.' : 'Elige la jornada.') : null,
+    3: unaJornadaFutbol && partidos.length > 0 && partidosOn.size === 0 ? 'Elige al menos un partido.' : !tramo && compTramos && !completaDisponible ? (porTorneo ? 'El torneo ya ha empezado: elige una ronda.' : 'La jornada ya ha empezado: elige los partidos de un día.') : null,
     4: null,
     5: avisoDraft,
   };
@@ -313,7 +316,7 @@ function V2CrearInner() {
     const problema = okPaso[n];
     if (problema) return setError(problema);
     setError(null);
-    const siguiente = n === 2 && deporte === 'golf' && !hayPasoPartidos ? 4 : n + 1;
+    const siguiente = n === 2 && porTorneo && !hayPasoPartidos ? 4 : n + 1;
     setPaso((p) => Math.max(p, siguiente));
     window.setTimeout(() => document.getElementById(`paso-${siguiente}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
   }
@@ -326,7 +329,7 @@ function V2CrearInner() {
 
   // 19/10 (Iñi): "que vaya poniendo 1 de 6, 2 de 6… así se ve que hay más
   // cosas luego que completar". En golf sin rondas que elegir son 5 pasos.
-  const totalPasos = deporte === 'golf' && !hayPasoPartidos ? 5 : 6;
+  const totalPasos = porTorneo && !hayPasoPartidos ? 5 : 6;
   const cabeceraPaso = (n: number) => {
     const num = totalPasos === 5 && n > 3 ? n - 1 : n;
     return (
@@ -355,7 +358,7 @@ function V2CrearInner() {
     <MarcoV2 perfil={perfil} estado={estado} deporte={deporte} volverA={`/v2/${deporte}?modo=amistosos`}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <EtiquetaBeta />
-        <Titulo>Nueva sala privada de {deporte === 'golf' ? 'golf' : 'fútbol'}</Titulo>
+        <Titulo>Nueva sala privada de {deporte === 'golf' ? 'golf' : deporte === 'tenis' ? 'tenis' : 'fútbol'}</Titulo>
       </div>
 
       {cabeceraPaso(1)}
@@ -473,7 +476,7 @@ function V2CrearInner() {
           'Desde la próxima jornada publicada hasta la que quieras de la misma competición.'
         )}
 
-      {paso >= 2 && comps !== null && deporte === 'golf' &&
+      {paso >= 2 && comps !== null && porTorneo &&
         bloque(
           'Torneo',
           golf.length === 0 ? (
@@ -493,7 +496,7 @@ function V2CrearInner() {
       {continuar(2)}
 
       {paso >= 3 && <div id="paso-3" />}
-      {paso >= 3 && (deporte !== 'golf' || hayPasoPartidos) && cabeceraPaso(3)}
+      {paso >= 3 && (!porTorneo || hayPasoPartidos) && cabeceraPaso(3)}
       {/* 17/10 (Iñi): jornada/torneo completo, solo los partidos de un día o una sola ronda. */}
       {paso >= 3 && compTramos &&
         (tramosDeSeleccion.length > 0 || !completaDisponible) &&

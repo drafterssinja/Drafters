@@ -8,7 +8,7 @@ import { crearClienteAdmin } from '@/lib/server/supabaseAdmin';
 // LIVE_TENNIS_API_KEY y devuelve la respuesta CRUDA, para ver qué campos trae
 // de verdad cada plan antes de construir la puntuación. Solo admin. La clave
 // nunca sale al navegador.
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 const BASE = 'https://api.livetennisapi.com/api/public/v1';
 const ESPN_SITE = 'https://site.api.espn.com/apis/site/v2/sports/tennis';
@@ -102,6 +102,49 @@ async function analizarEspn(liga: 'atp' | 'wta') {
   return informe;
 }
 
+// 27/10: Sofascore (sin clave). Mira si responde desde Vercel y si trae aces y
+// dobles faltas de un partido en juego.
+async function analizarSofascore() {
+  const SF = 'https://api.sofascore.com/api/v1';
+  const vivos = await pedir(`${SF}/sport/tennis/events/live`);
+  const eventos = ((vivos.json as { events?: { id?: number; homeTeam?: { name?: string }; awayTeam?: { name?: string }; tournament?: { name?: string } }[] })?.events ?? []);
+  const informe: Record<string, unknown> = { en_juego: { status: vivos.status, partidos: eventos.length, muestra: eventos.length ? undefined : vivos.texto.slice(0, 500) } };
+  const ev = eventos[0];
+  if (!ev?.id) return { ...informe, conclusion: vivos.status === 403 ? 'Sofascore bloquea las peticiones desde el servidor (403).' : 'No hay partidos en juego ahora o no responde.' };
+  informe.partido = `${ev.homeTeam?.name} vs ${ev.awayTeam?.name} · ${ev.tournament?.name}`;
+  const st = await pedir(`${SF}/event/${ev.id}/statistics`);
+  const c: { ruta: string; valor: unknown }[] = [];
+  buscar(st.json, '', c);
+  const texto = JSON.stringify(st.json ?? '');
+  informe.estadisticas = { status: st.status, trae_aces: /aces/i.test(texto), trae_dobles_faltas: /double ?faults/i.test(texto), campos_utiles: c.slice(0, 40) };
+  return informe;
+}
+
+// 27/10: cuotas de fútbol que ve ESPN en los próximos días (para saber por qué
+// una jornada no se crea todavía).
+async function cuotasFutbol(slug: string) {
+  const site = `https://site.api.espn.com/apis/site/v2/sports/soccer/${slug}`;
+  const hoy = new Date();
+  const fin = new Date(hoy.getTime() + 16 * 86400000);
+  const f = (d: Date) => d.toISOString().slice(0, 10).replace(/-/g, '');
+  const sb = await pedir(`${site}/scoreboard?dates=${f(hoy)}-${f(fin)}&limit=100`);
+  const evs = ((sb.json as { events?: any[] })?.events ?? []).slice(0, 25);
+  const filas: unknown[] = [];
+  for (const e of evs) {
+    const comp = e.competitions?.[0] ?? {};
+    const sm = await pedir(`${site}/summary?event=${e.id}`);
+    const core = await pedir(`https://sports.core.api.espn.com/v2/sports/soccer/leagues/${slug}/events/${e.id}/competitions/${e.id}/odds`);
+    const items = ((core.json as { items?: any[] })?.items ?? []);
+    filas.push({
+      partido: e.name, fecha: e.date, hora_confirmada: comp.timeValid !== false,
+      cuotas_calendario: (comp.odds ?? []).length,
+      cuotas_resumen: ((sm.json as any)?.odds ?? []).length, pickcenter: ((sm.json as any)?.pickcenter ?? []).length,
+      cuotas_core: { status: core.status, casas: items.length, primera: items[0] ? JSON.stringify(items[0]).slice(0, 400) : null },
+    });
+  }
+  return { status: sb.status, partidos: evs.length, filas };
+}
+
 async function esAdmin(req: NextRequest, admin: ReturnType<typeof crearClienteAdmin>) {
   const token = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '');
   if (!token) return false;
@@ -120,13 +163,15 @@ export async function POST(req: NextRequest) {
   }
   if (!(await esAdmin(req, admin))) return NextResponse.json({ error: 'No autorizado.' }, { status: 401 });
 
-  let body: { ruta?: string; fuente?: 'livetennis' | 'espn' | 'espn-auto'; liga?: string } = {};
+  let body: { ruta?: string; fuente?: 'livetennis' | 'espn' | 'espn-auto' | 'sofascore' | 'cuotas-futbol'; liga?: string } = {};
   try {
     body = await req.json();
   } catch {
     // vacío
   }
   // 26/10 (Iñi): probar ESPN, gratis (como en fútbol y golf).
+  if (body.fuente === 'sofascore') return NextResponse.json(await analizarSofascore());
+  if (body.fuente === 'cuotas-futbol') return NextResponse.json(await cuotasFutbol(body.liga === 'uefa.champions' ? 'uefa.champions' : 'esp.1'));
   if (body.fuente === 'espn-auto') return NextResponse.json(await analizarEspn(body.liga === 'wta' ? 'wta' : 'atp'));
   if (body.fuente === 'espn') {
     const r0 = (body.ruta ?? '/atp/scoreboard').trim();

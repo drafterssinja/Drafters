@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { crearClienteAdmin } from '@/lib/server/supabaseAdmin';
 import { enviarNotificacionesPush } from '@/lib/server/notificacionesPush';
+import { sincronizarTenis } from '@/lib/server/tenisEspn';
 
 // Notificaciones push (18/10). La llama pg_cron de Supabase cada minuto con la
 // cabecera "x-cron-secret" (= CRON_SECRET), igual que las sincronizaciones.
@@ -17,8 +18,15 @@ async function ejecutar(req: NextRequest) {
     const admin = crearClienteAdmin();
     // De paso, los sorteos de las mesas de la liga que ya han cerrado.
     await admin.rpc('v2_sortear_pendientes');
+    // Tenis en directo (27/10): marcador, saque y breaks de ESPN cada minuto.
+    let tenis: unknown = null;
+    try {
+      tenis = await sincronizarTenis(admin);
+    } catch (e) {
+      tenis = { error: (e as Error).message };
+    }
     const r = await enviarNotificacionesPush(admin);
-    return NextResponse.json(r);
+    return NextResponse.json({ ...r, tenis });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }
