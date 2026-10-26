@@ -85,6 +85,7 @@ const TARJETAS_GESTION: { href: string; titulo: string; subtitulo: string }[] = 
   { href: '/admin/rankings', titulo: 'Ranking de jugadores', subtitulo: 'Ranking mundial de golf y tenis' },
   // Nueva (29/09, pedido de Iñi): "diseña lo que haga falta para que esos
   // pagos... queden hechos" — ver app/admin/pagos-pendientes.
+  { href: '/admin/liga-duelos', titulo: 'Liga de duelos (fútbol V2)', subtitulo: 'Crear temporadas, formar divisiones y calendario 1 contra 1, cerrar con ascensos y descensos' },
   { href: '/admin/ligas', titulo: 'Ligas y temporadas (V2)', subtitulo: 'Crear las ligas de cada deporte, sus temporadas (inicio y fin) y sus divisiones' },
   { href: '/admin/pagos-pendientes', titulo: 'Pagos pendientes', subtitulo: 'Revisar y confirmar el reparto de premios de salas y porras acabadas' },
   // Nueva (28/09, pedido de Iñi): conectar cada competición con su torneo
@@ -92,7 +93,7 @@ const TARJETAS_GESTION: { href: string; titulo: string; subtitulo: string }[] = 
   // introducir el resultado a mano — ver drafters-schema.sql.
   { href: '/admin/resultados-golf', titulo: 'Resultados de golf en vivo', subtitulo: 'Conectar cada competición con ESPN para la clasificación en directo' },
   // 13/10: diagnóstico de la fuente de tenis en directo (Live Tennis API).
-  { href: '/admin/tenis', titulo: 'Tenis en vivo (pruebas)', subtitulo: 'Probar Live Tennis API: qué datos trae cada plan' },
+  { href: '/admin/tenis', titulo: 'Tenis en vivo (pruebas)', subtitulo: 'Probar ESPN (gratis) y Live Tennis API: qué datos trae cada fuente' },
   // Ruta renombrada de /admin/publicidad a /admin/videos (28/09, aviso de
   // Iñi) — la palabra "publicidad" en la URL hacía que algunos
   // bloqueadores de anuncios del navegador (net::ERR_BLOCKED_BY_CLIENT)

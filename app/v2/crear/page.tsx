@@ -73,7 +73,8 @@ function V2CrearInner() {
   const [jugadoresPorEquipo, setJugadoresPorEquipo] = useState<Map<string, Record<string, number>>>(new Map());
   const [numJugadores, setNumJugadores] = useState(4);
   const [modalidad, setModalidad] = useState<Modalidad>('presupuesto');
-  const [privada, setPrivada] = useState(true);
+  // 26/10 (Iñi): crear es solo para salas privadas; las públicas ya están creadas de serie (salas de Drafters).
+  const privada = true;
   const [contrasena, setContrasena] = useState('');
   const [premio, setPremio] = useState<Premio>(PREMIO_VACIO);
   const [equipoFijo, setEquipoFijo] = useState(false);
@@ -354,7 +355,7 @@ function V2CrearInner() {
     <MarcoV2 perfil={perfil} estado={estado} deporte={deporte} volverA={`/v2/${deporte}?modo=amistosos`}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <EtiquetaBeta />
-        <Titulo>Nuevo amistoso de {deporte === 'golf' ? 'golf' : 'fútbol'}</Titulo>
+        <Titulo>Nueva sala privada de {deporte === 'golf' ? 'golf' : 'fútbol'}</Titulo>
       </div>
 
       {cabeceraPaso(1)}
@@ -625,21 +626,10 @@ function V2CrearInner() {
       {paso >= 6 && <div id="paso-6" />}
       {paso >= 6 && cabeceraPaso(6)}
       {paso >= 6 && bloque(
-        'Privacidad',
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button type="button" style={S.pill(privada)} onClick={() => setPrivada(true)}>
-              🔒 Privada
-            </button>
-            <button type="button" style={S.pill(!privada)} onClick={() => setPrivada(false)}>
-              🌍 Pública
-            </button>
-          </div>
-          {privada ? (
-            <input value={contrasena} onChange={(e) => setContrasena(e.target.value)} placeholder="Contraseña para entrar" style={S.input} autoComplete="off" />
-          ) : (
-            <span style={{ fontSize: 12, color: S.MUTED_2, lineHeight: 1.5 }}>Cualquiera con Drafters V2 la verá y podrá entrar. En las públicas no se juega nada de inicio; en el chat se puede proponer jugarse algo y, si lo aceptan todos, queda fijado.</span>
-          )}
+        '🔒 Contraseña',
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <input value={contrasena} onChange={(e) => setContrasena(e.target.value)} placeholder="Contraseña para entrar" style={S.input} autoComplete="off" />
+          <span style={{ fontSize: 12, color: S.MUTED_2, lineHeight: 1.5 }}>Solo entra quien tenga el enlace o el código y la contraseña. Para jugar con cualquiera, entra en una de las salas abiertas de Drafters.</span>
         </div>
       )}
 

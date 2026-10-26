@@ -8,6 +8,7 @@ import MarcoV2, { EtiquetaBeta, Titulo, V2_COLOR } from '@/components/v2/MarcoV2
 import { useSesionV2 } from '@/components/v2/useSesionV2';
 import { BolaTenis, DEPORTE_NOMBRE, esDeporteV2, type DeporteV2 } from '@/components/v2/IconosV2';
 import MesasLiga from '@/components/v2/MesasLiga';
+import LigaDuelos from '@/components/v2/LigaDuelos';
 import ListaAmistosos from '@/components/v2/ListaAmistosos';
 import PorrasGolf from '@/components/v2/PorrasGolf';
 import MisEquiposV2 from '@/components/v2/MisEquiposV2';
@@ -71,10 +72,13 @@ export default function V2Deporte() {
 
   return (
     <MarcoV2 perfil={perfil} estado={estado} deporte={deporte}>
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 8 }}>
-        <Titulo>{DEPORTE_NOMBRE[deporte]}</Titulo>
-        <EtiquetaBeta />
-      </div>
+      {/* 27/10 (Iñi): lo primero de la página, las pestañas (el deporte ya se ve en la cabecera). */}
+      {deporte === 'tenis' && (
+        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 8 }}>
+          <Titulo>{DEPORTE_NOMBRE[deporte]}</Titulo>
+          <EtiquetaBeta />
+        </div>
+      )}
 
       {deporte === 'tenis' ? (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, padding: '40px 10px', textAlign: 'center' }}>
@@ -84,13 +88,8 @@ export default function V2Deporte() {
         </div>
       ) : (
         <>
-          {/* 16/10 (Iñi): "mis equipos" como en la V1, encima de Amistosos / Liga. */}
-          {perfil && <MisEquiposV2 deporte={deporte} miId={perfil.id} />}
-          {/* 18/10 (Iñi): que se distinga bien "mis equipos" de las salas para jugar. */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6 }}>
-            <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 19, textTransform: 'uppercase', letterSpacing: '0.03em', color: S.TEXT, whiteSpace: 'nowrap' }}>🏟️ Salas para jugar</span>
-            <span style={{ flex: 1, height: 1, background: S.CARD_BORDER }} />
-          </div>
+          {/* 27/10 (Iñi): arriba del todo, Amistosos y Liga (y Porras en golf), cada
+              una con su propia ventana y sus propios equipos. */}
           <div style={{ display: 'flex', background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: 4, gap: 4 }}>
             {modos.map((m) => {
               const activo = m.id === modo;
@@ -102,7 +101,7 @@ export default function V2Deporte() {
                   onClick={() => elegir(m.id)}
                   style={{
                     flex: 1,
-                    padding: '10px 6px',
+                    padding: '13px 6px',
                     borderRadius: 9,
                     border: 'none',
                     cursor: 'pointer',
@@ -110,7 +109,7 @@ export default function V2Deporte() {
                     color: activo ? '#0B0F0E' : S.MUTED,
                     fontFamily: "'Barlow Condensed', sans-serif",
                     fontWeight: 800,
-                    fontSize: 16,
+                    fontSize: 18,
                     textTransform: 'uppercase',
                     letterSpacing: '0.03em',
                     transition: 'all 0.15s',
@@ -122,8 +121,25 @@ export default function V2Deporte() {
             })}
           </div>
 
-          {modo === 'liga' && perfil && <MesasLiga deporte={deporte} miId={perfil.id} />}
-          {modo === 'amistosos' && <ListaAmistosos deporte={deporte} />}
+
+          {modo === 'amistosos' && (
+            <>
+              {perfil && <MisEquiposV2 deporte={deporte} miId={perfil.id} solo="amistosos" />}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6 }}>
+                <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 19, textTransform: 'uppercase', letterSpacing: '0.03em', color: S.TEXT, whiteSpace: 'nowrap' }}>🏟️ Salas para jugar</span>
+                <span style={{ flex: 1, height: 1, background: S.CARD_BORDER }} />
+              </div>
+              <ListaAmistosos deporte={deporte} />
+            </>
+          )}
+          {/* 26/10 (Iñi): en fútbol la liga es de duelos 1 contra 1 por divisiones (SQL 60), con su propia página. */}
+          {modo === 'liga' && perfil && deporte === 'futbol' && <LigaDuelos />}
+          {modo === 'liga' && perfil && deporte !== 'futbol' && (
+            <>
+              <MisEquiposV2 deporte={deporte} miId={perfil.id} solo="liga" />
+              <MesasLiga deporte={deporte} miId={perfil.id} />
+            </>
+          )}
           {modo === 'porras' && deporte === 'golf' && <PorrasGolf />}
         </>
       )}

@@ -34,8 +34,8 @@ export default function AdminTenisPage() {
     })();
   }, [router]);
 
-  async function probar(r: string) {
-    setRuta(r);
+  async function probar(r: string, extra: Record<string, string> = {}) {
+    if (!extra.fuente) setRuta(r);
     setCargando(true);
     setSalida('');
     const { data: { session } } = await supabase.auth.getSession();
@@ -44,7 +44,7 @@ export default function AdminTenisPage() {
       const res = await fetch('/api/admin/probar-tenis', {
         method: 'POST',
         headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ruta: r }),
+        body: JSON.stringify({ ruta: r, ...extra }),
       });
       setSalida(JSON.stringify(await res.json(), null, 2));
     } catch (e) {
@@ -61,7 +61,24 @@ export default function AdminTenisPage() {
         <DraftersHeader sinVolver />
         <div style={{ ...S.accountSection, gap: 12 }}>
           <Link href="/admin" style={{ fontSize: 12, color: S.MUTED_2, textDecoration: 'none' }}>← Panel de administración</Link>
-          <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT, fontFamily: "'Barlow Condensed', sans-serif", margin: 0 }}>Probar Live Tennis API</h1>
+          <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT, fontFamily: "'Barlow Condensed', sans-serif", margin: 0 }}>Probar fuentes de tenis</h1>
+          {/* 26/10 (Iñi): ESPN, gratis. El análisis busca un partido en juego (o acabado) y mira qué trae: quién saca, juegos por set, aces, dobles faltas, breaks. */}
+          <div style={{ ...S.card, flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+            <span style={{ fontWeight: 800, color: S.TEXT }}>ESPN (gratis)</span>
+            <span style={{ fontSize: 12, color: S.MUTED_2 }}>Pulsa &quot;Analizar ATP&quot; mejor cuando haya partidos en juego y pásale la respuesta a Claude.</span>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              <button type="button" onClick={() => probar('', { fuente: 'espn-auto', liga: 'atp' })} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '8px 12px', fontSize: 12 }}>
+                Analizar ATP
+              </button>
+              <button type="button" onClick={() => probar('', { fuente: 'espn-auto', liga: 'wta' })} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '8px 12px', fontSize: 12 }}>
+                Analizar WTA
+              </button>
+              <button type="button" onClick={() => probar('/atp/scoreboard', { fuente: 'espn' })} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '8px 12px', fontSize: 12 }}>
+                Marcador ATP (crudo)
+              </button>
+            </div>
+          </div>
+          <span style={{ fontWeight: 800, color: S.TEXT }}>Live Tennis API</span>
           <p style={{ fontSize: 12.5, color: S.MUTED_2, margin: 0 }}>
             Pulsa un botón y copia la respuesta. Para ver un partido concreto, escribe su ruta (p. ej. /matches/ID/score, /matches/ID/events, /matches/ID/statistics).
           </p>
