@@ -20,9 +20,9 @@ export default function ResumenClasificacionAmistoso({ amistosoId, deporte, resu
   const [abierto, setAbierto] = useState(false);
 
   useEffect(() => {
-    if (deporte !== 'futbol' && deporte !== 'golf') return;
+    if (deporte !== 'futbol' && deporte !== 'golf' && deporte !== 'tenis') return;
     let activo = true;
-    const tabla = deporte === 'golf' ? 'golf_puntos_jugador' : 'futbol_puntos_jugador';
+    const tabla = deporte === 'golf' ? 'golf_puntos_jugador' : deporte === 'tenis' ? 'tenis_puntos_jugador' : 'futbol_puntos_jugador';
     async function cargar() {
       const { data } = await supabase.rpc('amistoso_equipos_clasificacion', { p_amistoso: amistosoId });
       const eqs = (data as { competicion: string; usuario_id: string; jugadores: string[] }[]) ?? [];

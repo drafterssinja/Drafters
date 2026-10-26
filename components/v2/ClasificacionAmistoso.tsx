@@ -118,7 +118,9 @@ function ListaClasificacionAmistoso({ amistoso, jornadas, resumen, miId, vistaIn
   const empezadas = resumen.jornadas.filter((j) => j.empezada).map((j) => j.competicion);
   const todasTerminadas = resumen.jornadas.length > 0 && resumen.jornadas.every((j) => j.terminada);
   const hayAlgoEnJuego = empezadas.length > 0 && !todasTerminadas;
-  const tabla = amistoso.deporte === 'golf' ? 'golf_puntos_jugador' : 'futbol_puntos_jugador';
+  const tabla = amistoso.deporte === 'golf' ? 'golf_puntos_jugador' : amistoso.deporte === 'tenis' ? 'tenis_puntos_jugador' : 'futbol_puntos_jugador';
+  // 27/10: tenis — cómo va cada jugador ("● vs X · 6-4 3-2 · al saque").
+  const [estadoTenis, setEstadoTenis] = useState<Map<string, string>>(new Map());
 
   useEffect(() => {
     let activo = true;
@@ -136,15 +138,20 @@ function ListaClasificacionAmistoso({ amistoso, jornadas, resumen, miId, vistaIn
         nuevos.push(...(((js as Jug[]) ?? [])));
       }
       const pts = new Map<string, number>();
+      const est = new Map<string, string>();
       for (const comp of Array.from(new Set(eqs.map((e) => e.competicion)))) {
         const idsComp = Array.from(new Set(eqs.filter((e) => e.competicion === comp).flatMap((e) => e.jugadores)));
         for (let i = 0; i < idsComp.length; i += 200) {
           // 17/10: en una ronda suelta de golf solo cuentan sus puntos.
-          const { data: ps } = await supabase.from(tabla).select(tabla === 'golf_puntos_jugador' ? 'jugador_id,puntos_total,por_ronda' : 'jugador_id,puntos_total').eq('competicion', comp).in('jugador_id', idsComp.slice(i, i + 200));
-          ((ps as unknown as { jugador_id: string; puntos_total: number; por_ronda?: PorRonda }[]) ?? []).forEach((p) => pts.set(`${comp}|${p.jugador_id}`, puntosGolfTramo(p, tabla === 'golf_puntos_jugador' ? resumen.jornadas.find((j) => j.competicion === comp)?.tramo ?? null : null).total));
+          const { data: ps } = await supabase.from(tabla).select(tabla === 'golf_puntos_jugador' ? 'jugador_id,puntos_total,por_ronda' : tabla === 'tenis_puntos_jugador' ? 'jugador_id,puntos_total,estado_texto' : 'jugador_id,puntos_total').eq('competicion', comp).in('jugador_id', idsComp.slice(i, i + 200));
+          ((ps as unknown as { jugador_id: string; puntos_total: number; por_ronda?: PorRonda; estado_texto?: string | null }[]) ?? []).forEach((p) => {
+            pts.set(`${comp}|${p.jugador_id}`, puntosGolfTramo(p, tabla === 'golf_puntos_jugador' ? resumen.jornadas.find((j) => j.competicion === comp)?.tramo ?? null : null).total);
+            if (p.estado_texto) est.set(`${comp}|${p.jugador_id}`, p.estado_texto);
+          });
         }
       }
       if (!activo) return;
+      setEstadoTenis(est);
       nombresCargados = new Set([...Array.from(nombresCargados), ...nuevos.map((n) => n.id)]);
       setEquipos(eqs);
       setJugs((prev) => {
@@ -243,6 +250,9 @@ function ListaClasificacionAmistoso({ amistoso, jornadas, resumen, miId, vistaIn
                               <span style={{ flex: 1, color: S.TEXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                 {j?.nombre ?? '...'}
                                 {j?.equipo_real && amistoso.deporte === 'futbol' ? <span style={{ color: S.MUTED_3 }}> · {j.equipo_real}</span> : null}
+                                {amistoso.deporte === 'tenis' && estadoTenis.get(`${e.competicion}|${id}`) ? (
+                                  <span style={{ display: 'block', fontSize: 10.5, color: estadoTenis.get(`${e.competicion}|${id}`)!.startsWith('●') ? '#FF5C5C' : S.MUTED_3 }}>{estadoTenis.get(`${e.competicion}|${id}`)}</span>
+                                ) : null}
                               </span>
                               <span style={{ fontWeight: 700, color: p === undefined ? S.FAINT : S.TEXT }}>{p === undefined ? '–' : formatPuntos(p)}</span>
                             </div>
@@ -257,7 +267,7 @@ function ListaClasificacionAmistoso({ amistoso, jornadas, resumen, miId, vistaIn
           );
         })}
       </div>
-      <span style={{ fontSize: 11, color: S.MUTED_3 }}>Puntos con las mismas reglas que las mesas de siempre. Drafters no cobra ni paga nada en los amistosos.</span>
+      <span style={{ fontSize: 11, color: S.MUTED_3 }}>Puntos con las mismas reglas que las mesas de siempre. Drafters no cobra ni paga nada en los amistosos.{amistoso.deporte === 'tenis' ? ' Aces y dobles faltas: próximamente.' : ''}</span>
     </div>
   );
 }
