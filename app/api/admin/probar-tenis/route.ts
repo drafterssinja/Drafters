@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { crearClienteAdmin } from '@/lib/server/supabaseAdmin';
 import { deportesTenis } from '@/lib/server/oddsApi';
+import { rankingEspn } from '@/lib/server/tenisEspn';
 
 // ============================================================================
 // DIAGNÓSTICO — LIVE TENNIS API (13/10, antes de montar el tenis en directo)
@@ -164,7 +165,7 @@ export async function POST(req: NextRequest) {
   }
   if (!(await esAdmin(req, admin))) return NextResponse.json({ error: 'No autorizado.' }, { status: 401 });
 
-  let body: { ruta?: string; fuente?: 'livetennis' | 'espn' | 'espn-auto' | 'sofascore' | 'cuotas-futbol' | 'oddsapi'; liga?: string } = {};
+  let body: { ruta?: string; fuente?: 'livetennis' | 'espn' | 'espn-auto' | 'sofascore' | 'cuotas-futbol' | 'oddsapi' | 'ranking'; liga?: string } = {};
   try {
     body = await req.json();
   } catch {
@@ -179,6 +180,13 @@ export async function POST(req: NextRequest) {
     } catch (e) {
       return NextResponse.json({ error: (e as Error).message }, { status: 500 });
     }
+  }
+  // 28/10: ¿saca la app sola el ranking de ESPN?
+  if (body.fuente === 'ranking') {
+    const liga = body.liga === 'wta' ? 'wta' : 'atp';
+    const r = await rankingEspn(liga);
+    const lista = Array.from(r.values()).sort((x, y) => x.puesto - y.puesto);
+    return NextResponse.json({ liga, jugadores_con_ranking: lista.length, conclusion: lista.length >= 20 ? 'OK: la app coge el ranking sola de ESPN.' : 'ESPN no da el ranking: habría que cargarlo en Admin → Rankings.', primeros: lista.slice(0, 15).map((x) => `${x.puesto}. ${x.nombre}`) });
   }
   if (body.fuente === 'sofascore') return NextResponse.json(await analizarSofascore());
   if (body.fuente === 'cuotas-futbol') return NextResponse.json(await cuotasFutbol(body.liga === 'uefa.champions' ? 'uefa.champions' : 'esp.1'));

@@ -189,6 +189,12 @@ export default function AdminTenisPage() {
               <button type="button" onClick={() => probar('', { fuente: 'espn-auto', liga: 'wta' })} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '8px 12px', fontSize: 12 }}>
                 Analizar WTA
               </button>
+              <button type="button" onClick={() => probar('', { fuente: 'ranking', liga: 'atp' })} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '8px 12px', fontSize: 12 }}>
+                Ranking ATP
+              </button>
+              <button type="button" onClick={() => probar('', { fuente: 'ranking', liga: 'wta' })} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '8px 12px', fontSize: 12 }}>
+                Ranking WTA
+              </button>
               <button type="button" onClick={() => probar('', { fuente: 'oddsapi' })} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '8px 12px', fontSize: 12 }}>
                 The Odds API (créditos)
               </button>
