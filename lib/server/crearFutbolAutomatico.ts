@@ -58,7 +58,8 @@ const LIGAS_AUTO: { slug: string; prefijo: string; partidosPorJornada: number }[
 
 const HORIZONTE_DIAS = 25;
 const MARGEN_MINIMO_MIN = 30;
-const HORAS_SIN_CUOTAS = 72;
+const HORAS_SIN_CUOTAS = 120; // 5 días
+const MAX_SIN_CUOTAS = 2;
 const TOLERANCIA_ANCLA_H = 36;
 const CUOTAS_NEUTRAS = { c1: 2.9, cx: 3.2, c2: 2.9 };
 
@@ -76,6 +77,7 @@ type EventoLiga = {
   programado: boolean; // todavía no ha empezado ni está aplazado
   local: string;
   visitante: string;
+  oddsScoreboard: unknown[]; // competitions[0].odds del calendario (si ESPN ya las trae)
 };
 
 type Ventana = { eventos: EventoLiga[]; inicio: Date };
@@ -122,6 +124,7 @@ async function eventosDelDia(slug: string, dia: Date): Promise<EventoLiga[]> {
       programado: tipo.state === 'pre' && !aplazado,
       local: local.team?.displayName ?? '',
       visitante: visit.team?.displayName ?? '',
+      oddsScoreboard: Array.isArray(comp?.odds) ? comp.odds : [],
     });
   }
   return salida;
@@ -159,26 +162,86 @@ function inicioTemporada(hoy: Date): Date {
   return new Date(Date.UTC(anio, 7, 1));
 }
 
-/** Cuota decimal a partir de una cuota americana ("moneyline"). */
+/** Cuota decimal a partir de una cuota americana ("moneyline"): -150, "+120", "EVEN". */
 function americanaADecimal(ml: unknown): number | null {
-  const n = typeof ml === 'number' ? ml : Number(ml);
-  if (!Number.isFinite(n) || n === 0) return null;
+  if (typeof ml === 'string' && /^even$/i.test(ml.trim())) return 2;
+  const n = typeof ml === 'number' ? ml : Number(String(ml ?? '').replace(/[^0-9.+-]/g, ''));
+  if (!Number.isFinite(n) || n === 0 || (n > -100 && n < 100)) return null;
   return n > 0 ? 1 + n / 100 : 1 + 100 / Math.abs(n);
 }
 
-async function cuotasDelPartido(slug: string, eventoId: string): Promise<{ c1: number; cx: number; c2: number } | null> {
-  try {
-    const json = await jsonEspn(`${BASE_ESPN}/${slug}/summary?event=${eventoId}`);
-    const o = (json.odds ?? [])[0];
-    if (!o) return null;
-    const c1 = americanaADecimal(o.homeTeamOdds?.moneyLine);
-    const cx = americanaADecimal(o.drawOdds?.moneyLine);
-    const c2 = americanaADecimal(o.awayTeamOdds?.moneyLine);
-    if (c1 && cx && c2 && c1 > 1 && cx > 1 && c2 > 1) return { c1, cx, c2 };
-    return null;
-  } catch {
-    return null;
+/** Cuota decimal de un lado ("homeTeamOdds", "drawOdds"...), venga en el formato que venga. */
+function cuotaDeLado(lado: any): number | null {
+  if (!lado || typeof lado !== 'object') return null;
+  const directa = americanaADecimal(lado.moneyLine);
+  if (directa) return directa;
+  for (const k of ['current', 'close', 'open']) {
+    const ml = lado[k]?.moneyLine;
+    if (!ml) continue;
+    const dec = Number(ml.decimal);
+    if (Number.isFinite(dec) && dec > 1) return dec;
+    const am = americanaADecimal(ml.american ?? ml.value ?? ml.displayValue);
+    if (am) return am;
   }
+  const dec = Number(lado.odds?.value ?? lado.decimal);
+  if (Number.isFinite(dec) && dec > 1) return dec;
+  return null;
+}
+
+export function cuotasDeObjeto(o: any): { c1: number; cx: number; c2: number } | null {
+  if (!o || typeof o !== 'object') return null;
+  const c1 = cuotaDeLado(o.homeTeamOdds);
+  const cx = cuotaDeLado(o.drawOdds) ?? americanaADecimal(o.drawOdds?.moneyLine);
+  const c2 = cuotaDeLado(o.awayTeamOdds);
+  if (c1 && cx && c2 && c1 > 1 && cx > 1 && c2 > 1) return { c1, cx, c2 };
+  return null;
+}
+
+function primeraValida(lista: unknown): { c1: number; cx: number; c2: number } | null {
+  if (!Array.isArray(lista)) return null;
+  for (const o of lista) {
+    const c = cuotasDeObjeto(o);
+    if (c) return c;
+  }
+  return null;
+}
+
+/**
+ * Cuotas 1X2 de un partido. ESPN las da en varios sitios y no siempre a la vez
+ * (27/10: las casas las tienen 10-14 días antes y el resumen a veces tarda):
+ * 1) el calendario, 2) el resumen del partido (odds y pickcenter), 3) la API
+ * "core" con todas las casas de apuestas que tenga.
+ */
+async function cuotasDelPartido(slug: string, ev: EventoLiga): Promise<{ c1: number; cx: number; c2: number } | null> {
+  const delCalendario = primeraValida(ev.oddsScoreboard);
+  if (delCalendario) return delCalendario;
+  try {
+    const json = await jsonEspn(`${BASE_ESPN}/${slug}/summary?event=${ev.id}`);
+    const c = primeraValida(json.odds) ?? primeraValida(json.pickcenter);
+    if (c) return c;
+  } catch {
+    /* sigue */
+  }
+  try {
+    const base = `https://sports.core.api.espn.com/v2/sports/soccer/leagues/${slug}/events/${ev.id}/competitions/${ev.id}/odds`;
+    const json = await jsonEspn(base);
+    const items: any[] = Array.isArray(json.items) ? json.items : [];
+    for (const it of items.slice(0, 8)) {
+      let o = it;
+      if (o && o.$ref && !o.homeTeamOdds) {
+        try {
+          o = await jsonEspn(String(o.$ref).replace(/^http:/, 'https:'));
+        } catch {
+          continue;
+        }
+      }
+      const c = cuotasDeObjeto(o);
+      if (c) return c;
+    }
+  } catch {
+    /* sin cuotas */
+  }
+  return null;
 }
 
 export type FichaJugador = {
@@ -379,11 +442,14 @@ async function crearUnaLiga(admin: Admin, liga: (typeof LIGAS_AUTO)[number], aho
     }
 
     // 3. Cuotas 1X2.
-    const cuotas = await enParalelo(v.eventos, 6, (e) => cuotasDelPartido(liga.slug, e.id));
+    const cuotas = await enParalelo(v.eventos, 6, (e) => cuotasDelPartido(liga.slug, e));
     const sinCuotas = cuotas.filter((c) => c === null).length;
     const horasHastaPrimero = (primerPartido.getTime() - ahora.getTime()) / 3600000;
-    if (sinCuotas > 0 && horasHastaPrimero > HORAS_SIN_CUOTAS) {
-      resultados.push({ liga: nombreLiga, jornada: numero, estado: 'esperando', detalle: `Horarios confirmados; esperando las cuotas de ${sinCuotas} partido(s) (se crea sola cuando salgan, o a 72 h del primer partido).` });
+    // Se crea en cuanto hay cuotas de casi todos (como mucho 2 sin ellas, con
+    // precio neutro) o, en todo caso, a 5 días del primer partido.
+    if (sinCuotas > MAX_SIN_CUOTAS && horasHastaPrimero > HORAS_SIN_CUOTAS) {
+      const faltan = v.eventos.filter((_, k) => cuotas[k] === null).map((e) => `${e.local}-${e.visitante}`).join(', ');
+      resultados.push({ liga: nombreLiga, jornada: numero, estado: 'esperando', detalle: `Horarios confirmados; esperando las cuotas de ${sinCuotas} partido(s): ${faltan}. Se crea sola cuando falten 2 o menos, o a 5 días del primer partido.` });
       continue;
     }
 

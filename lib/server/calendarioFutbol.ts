@@ -27,13 +27,9 @@ function diaUtc(d: Date): number {
   return Math.floor(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) / 86400000);
 }
 
-async function eventosRango(slug: string, desde: Date, hasta: Date): Promise<Evento[]> {
-  let json: any;
-  try {
-    json = await jsonEspn(`${BASE_ESPN}/${slug}/scoreboard?dates=${yyyymmdd(desde)}-${yyyymmdd(hasta)}&limit=1000`, 20000);
-  } catch {
-    return [];
-  }
+let ultimoError: string | null = null;
+
+function parsear(json: any): Evento[] {
   const salida: Evento[] = [];
   for (const ev of json?.events ?? []) {
     const comp = ev.competitions?.[0];
@@ -43,6 +39,34 @@ async function eventosRango(slug: string, desde: Date, hasta: Date): Promise<Eve
     salida.push({ id: String(ev.id), kickoff: new Date(ev.date), local: local.team?.displayName ?? '', visitante: visit.team?.displayName ?? '' });
   }
   return salida;
+}
+
+async function pedirRango(slug: string, desde: Date, hasta: Date, limite: string): Promise<Evento[] | null> {
+  try {
+    const json = await jsonEspn(`${BASE_ESPN}/${slug}/scoreboard?dates=${yyyymmdd(desde)}-${yyyymmdd(hasta)}${limite}`, 20000);
+    return parsear(json);
+  } catch (e) {
+    ultimoError = (e as Error).message;
+    return null;
+  }
+}
+
+/**
+ * Partidos de un rango de fechas. 27/10: si ESPN no devuelve nada para el mes
+ * entero (le ha pasado a Iñi: "ESPN no ha devuelto partidos"), se pide de
+ * otras formas: sin "limit" y, si tampoco, semana a semana.
+ */
+async function eventosRango(slug: string, desde: Date, hasta: Date): Promise<Evento[]> {
+  const a = await pedirRango(slug, desde, hasta, '&limit=300');
+  if (a && a.length > 0) return a;
+  const b = await pedirRango(slug, desde, hasta, '');
+  if (b && b.length > 0) return b;
+  const semanas: [Date, Date][] = [];
+  for (let t = desde.getTime(); t <= hasta.getTime(); t += 7 * 86400000) {
+    semanas.push([new Date(t), new Date(Math.min(t + 6 * 86400000, hasta.getTime()))]);
+  }
+  const porSemana = await Promise.all(semanas.map(([x, y]) => pedirRango(slug, x, y, '')));
+  return porSemana.flatMap((x) => x ?? []);
 }
 
 /** Toda la temporada (agosto → junio), pedida mes a mes en paralelo. */
@@ -114,6 +138,7 @@ function jornadasDe(eventos: Evento[], prefijo: string, esperados: number): Jorn
 
 export async function actualizarCalendarioFutbol(admin: Admin): Promise<{ jornadas: number; porLiga: Record<string, number>; error?: string }> {
   const ahora = new Date();
+  ultimoError = null;
   const porLiga: Record<string, number> = {};
   const todas: JornadaCalendario[] = [];
   const resultados = await Promise.all(LIGAS.map(async (l) => jornadasDe(await eventosTemporada(l.slug, ahora), l.prefijo, l.partidosPorJornada)));
@@ -121,7 +146,7 @@ export async function actualizarCalendarioFutbol(admin: Admin): Promise<{ jornad
     porLiga[LIGAS[i].prefijo] = js.length;
     todas.push(...js);
   });
-  if (todas.length === 0) return { jornadas: 0, porLiga, error: 'ESPN no ha devuelto partidos. Prueba otra vez en un rato.' };
+  if (todas.length === 0) return { jornadas: 0, porLiga, error: `ESPN no ha devuelto partidos. Prueba otra vez en un rato.${ultimoError ? ` (Detalle: ${ultimoError})` : ''}` };
   const { error } = await admin.from('futbol_calendario').upsert(
     todas.map((j) => ({ ...j, actualizado_en: ahora.toISOString() })),
     { onConflict: 'liga,numero' }
