@@ -47,6 +47,10 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
   // 16/10 (Iñi): las privadas, de momento, siempre arriba; con una casilla
   // pequeñita encima de la lista para ocultarlas.
   const [ocultarPrivadas, setOcultarPrivadas] = useState(false);
+  // 28/10 (Iñi): en tenis, pestañas arriba para elegir el torneo (Viena, Basilea…)
+  // y ver solo sus salas, en vez de todos los torneos juntos.
+  const porTorneo = deporte === 'tenis';
+  const [torneo, setTorneo] = useState<string | null>(null);
 
   const cargar = useCallback(async () => {
     const { data } = await supabase.rpc('amistosos_v2_lista');
@@ -78,23 +82,51 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
       .replace(/[\u0300-\u036f]/g, '')
       .toLowerCase()
       .includes(q);
-  const mias = (lista ?? []).filter((l) => l.soy_participante && coincide(l));
+  // Torneos con salas abiertas (o en las que estoy), el que antes cierra primero.
+  const torneos = porTorneo
+    ? Array.from(
+        (lista ?? [])
+          .filter((l) => (!l.empezada && l.estado !== 'finalizado') || l.soy_participante)
+          .reduce((m, l) => {
+            for (const c of l.competiciones) {
+              const t = l.cierre ? new Date(l.cierre).getTime() : Infinity;
+              if (!m.has(c) || t < (m.get(c) as number)) m.set(c, t);
+            }
+            return m;
+          }, new Map<string, number>())
+          .entries()
+      )
+        .sort((a, b) => a[1] - b[1])
+        .map(([c]) => c)
+    : [];
+  const torneoVisto = porTorneo ? (torneo && torneos.includes(torneo) ? torneo : torneos[0] ?? null) : null;
+  const delTorneo = (a: FilaLista) => !torneoVisto || a.competiciones.includes(torneoVisto);
+  const mias = (lista ?? []).filter((l) => l.soy_participante && coincide(l) && delTorneo(l));
   // 16/10 (Iñi): en "Abiertos" salen TODAS las salas que no han empezado, también
   // aquellas en las que ya estás; las completas solo con la casilla marcada.
   const abiertaDeVerdad = (a: FilaLista) => !a.empezada && a.estado !== 'finalizado';
   const completa = (a: FilaLista) => a.estado === 'completo' || a.inscritos >= a.num_jugadores;
   const publicas = (lista ?? [])
-    .filter((l) => abiertaDeVerdad(l) && (verCompletas || !completa(l)) && (!ocultarPrivadas || !l.privada) && coincide(l))
+    .filter((l) => abiertaDeVerdad(l) && (verCompletas || !completa(l)) && (!ocultarPrivadas || !l.privada) && coincide(l) && delTorneo(l))
     .sort((a, b) => Number(b.privada) - Number(a.privada) || Number(completa(a)) - Number(completa(b)) || b.inscritos / b.num_jugadores - a.inscritos / a.num_jugadores);
-  const numCompletas = (lista ?? []).filter((l) => abiertaDeVerdad(l) && completa(l) && coincide(l)).length;
+  const numCompletas = (lista ?? []).filter((l) => abiertaDeVerdad(l) && completa(l) && coincide(l) && delTorneo(l)).length;
   const vista = pestana;
   const mostradas = vista === 'mias' ? [...mias].sort((a, b) => Number(b.privada) - Number(a.privada)).filter((l) => !ocultarPrivadas || !l.privada) : publicas;
 
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {porTorneo && torneos.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 2 }}>
+          {torneos.map((c) => (
+            <button key={c} type="button" onClick={() => setTorneo(c)} style={{ ...S.pill(torneoVisto === c), width: 'auto', flexShrink: 0, whiteSpace: 'nowrap' }}>
+              🎾 {nombreTorneoCorto(c)}
+            </button>
+          ))}
+        </div>
+      )}
       <input value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="🔍 Buscar sala por nombre, creador o jornada" style={S.input} />
-      <Link href={`/v2/crear?deporte=${deporte}`} style={{ ...S.primaryButton, background: V2_COLOR, textAlign: 'center', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 0 }}>
+      <Link href={`/v2/crear?deporte=${deporte}${torneoVisto ? `&torneo=${encodeURIComponent(torneoVisto)}` : ''}`} style={{ ...S.primaryButton, background: V2_COLOR, textAlign: 'center', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 0 }}>
         🔒 Crear sala privada
       </Link>
 
@@ -164,4 +196,9 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
       </div>
     </div>
   );
+}
+
+/** "ATP · Erste Bank Open 2026" → "Erste Bank Open". */
+function nombreTorneoCorto(c: string): string {
+  return c.replace(/^(ATP|WTA)\s*·\s*/i, '').replace(/\s+\d{4}$/, '');
 }
