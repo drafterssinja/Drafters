@@ -46,6 +46,16 @@ const GOLF_UNA_HORA: Frase[] = [
   ['🕐 Queda 1 hora', 'A las {h} sale el {torneo}. Que no te pille sin equipo.'],
 ];
 
+// 28/10: tenis ({torneo} sin "ATP · " ni el año).
+const TENIS_DIA_ANTES: Frase[] = [
+  ['🎾 Mañana empieza el torneo', 'El {torneo} arranca a las {h}. Elige a tus tenistas antes.'],
+  ['🎾 Vuelve el tenis', 'Primer partido del {torneo} a las {h}. Haz tu equipo antes.'],
+];
+const TENIS_UNA_HORA: Frase[] = [
+  ['🎾 Queda 1 hora', 'A las {h} empieza el {torneo}. Que no te pille sin equipo.'],
+  ['🕐 En 1 hora, a la pista', 'El {torneo} arranca a las {h}. Elige a tus tenistas ya.'],
+];
+
 function numeroJornada(competicion: string): number | null {
   const n = competicion.match(/Jornada\s*(\d+)/i)?.[1];
   return n ? Number(n) : null;
@@ -61,7 +71,7 @@ function elegir(lista: Frase[], competicion: string): Frase {
 }
 function rellenar(texto: string, competicion: string, hora: string): string {
   const n = numeroJornada(competicion);
-  const torneo = competicion.replace(/\s*-\s*Jornada\s*\d+/i, '').trim();
+  const torneo = competicion.replace(/\s*-\s*Jornada\s*\d+/i, '').replace(/^(ATP|WTA)\s*·\s*/i, '').replace(/\s+\d{4}$/, '').trim();
   return texto
     .replace(/\{h\}/g, hora)
     .replace(/\{n\}/g, n ? String(n) : '')
@@ -71,6 +81,7 @@ function rellenar(texto: string, competicion: string, hora: string): string {
 }
 function lista(deporte: string, competicion: string, cuando: 'dia_antes' | 'una_hora'): Frase[] {
   if (deporte === 'golf') return cuando === 'dia_antes' ? GOLF_DIA_ANTES : GOLF_UNA_HORA;
+  if (deporte === 'tenis') return cuando === 'dia_antes' ? TENIS_DIA_ANTES : TENIS_UNA_HORA;
   if (/champions/i.test(competicion)) return cuando === 'dia_antes' ? CHAMPIONS_DIA_ANTES : CHAMPIONS_UNA_HORA;
   return cuando === 'dia_antes' ? LALIGA_DIA_ANTES : LALIGA_UNA_HORA;
 }

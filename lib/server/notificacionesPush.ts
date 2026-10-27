@@ -66,7 +66,7 @@ async function recordatorios(admin: Admin, usuarios: string[]): Promise<Aviso[]>
     admin
       .from('salas')
       .select('competicion,deporte,fecha_limite_inscripcion')
-      .in('deporte', ['futbol', 'golf'])
+      .in('deporte', ['futbol', 'golf', 'tenis'])
       .is('tramo', null)
       .gt('fecha_limite_inscripcion', ahora.toISOString())
       .lte('fecha_limite_inscripcion', hasta)
@@ -228,6 +228,29 @@ async function notificacionesApp(admin: Admin): Promise<Aviso[]> {
 }
 
 // ---------------------------------------------------------------------------
+// 28/10 (Iñi): tenis — los torneos se abren 6 días antes, sin jugadores; en
+// cuanto sale el cuadro, aviso a los que están en sus salas para que hagan el
+// equipo. Va con el tipo "recordatorio_dia_antes" (de serie, encendido).
+// ---------------------------------------------------------------------------
+async function cuadrosDeTenis(admin: Admin): Promise<Aviso[]> {
+  const desde = new Date(Date.now() - 6 * 3600e3).toISOString();
+  const { data } = await admin.from('tenis_torneos').select('competicion,cuadro_en,desde').gte('cuadro_en', desde);
+  const torneos = ((data as { competicion: string; cuadro_en: string; desde: string | null }[] | null) ?? []).filter((t) => !t.desde || new Date(t.desde).getTime() > Date.now());
+  const avisos: Aviso[] = [];
+  for (const t of torneos) {
+    const { data: js } = await admin.from('amistoso_jornadas').select('amistoso_id').eq('competicion', t.competicion);
+    const ids = Array.from(new Set(((js as { amistoso_id: string }[] | null) ?? []).map((j) => j.amistoso_id)));
+    if (ids.length === 0) continue;
+    const parts = await todas<{ usuario_id: string; amistoso_id: string }>((d, h) => admin.from('amistoso_participantes').select('usuario_id,amistoso_id').in('amistoso_id', ids).range(d, h));
+    const nombre = t.competicion.replace(/^ATP · |^WTA · /, '');
+    for (const u of Array.from(new Set(parts.map((p) => p.usuario_id)))) {
+      avisos.push({ clave: `cuadro:${t.competicion}:${u}`, usuarioId: u, tipo: 'recordatorio_dia_antes', titulo: '🎾 Ya ha salido el cuadro', cuerpo: `Ya puedes hacer tu equipo de ${nombre}.`, url: '/v2/tenis?modo=amistosos' });
+    }
+  }
+  return avisos;
+}
+
+// ---------------------------------------------------------------------------
 export async function enviarNotificacionesPush(admin: Admin): Promise<{ avisos: number; enviados: number; fallidos: number; error?: string }> {
   const publica = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
   const privada = process.env.VAPID_PRIVATE_KEY;
@@ -248,7 +271,7 @@ export async function enviarNotificacionesPush(admin: Admin): Promise<{ avisos: 
   };
   const usuarios = Array.from(subsDe.keys());
 
-  const lotes = await Promise.all([recordatorios(admin, usuarios), goles(admin), finalesDePartido(admin), notificacionesApp(admin)]);
+  const lotes = await Promise.all([recordatorios(admin, usuarios), goles(admin), finalesDePartido(admin), notificacionesApp(admin), cuadrosDeTenis(admin).catch(() => [] as Aviso[])]);
   const avisos = lotes.flat().filter((a) => quiere(a.usuarioId, a.tipo));
   if (avisos.length === 0) return { avisos: 0, enviados: 0, fallidos: 0 };
 

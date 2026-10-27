@@ -19,6 +19,8 @@ import { cuotasGanadorSimuladas, type PartidoSim } from '@/lib/tenisSimulacion';
 type Admin = ReturnType<typeof crearClienteAdmin>;
 export type LigaTenis = 'atp' | 'wta';
 const BASE = 'https://site.api.espn.com/apis/site/v2/sports/tennis';
+// 28/10 (Iñi): de momento solo ATP (la WTA, más adelante: añadir 'wta' aquí).
+export const LIGAS_ACTIVAS: LigaTenis[] = ['atp'];
 
 export type JugadorEspn = { espn: string; nombre: string; pais: string | null };
 export type PartidoEspn = {
@@ -85,6 +87,8 @@ function cuotasPartido(c: any): { c1: number | null; c2: number | null } {
 function partido(c: any): PartidoEspn | null {
   const slug = String(c?.type?.slug ?? '');
   if (!slug.endsWith('singles')) return null;
+  // 28/10: la previa (Qualifying) no cuenta: ni jugadores, ni puntos, ni cierre.
+  if (/qualif/i.test(String(c?.round?.displayName ?? ''))) return null;
   const comps: any[] = Array.isArray(c?.competitors) ? c.competitors : [];
   if (comps.length < 2) return null;
   const home = comps.find((x) => x.homeAway === 'home') ?? comps[0];
@@ -214,13 +218,46 @@ function jugadoresVivos(ev: EventoEspn): JugadorEspn[] {
   return Array.from(todos.values()).filter((j) => !fuera.has(j.espn));
 }
 
+// 28/10 (Iñi): solo se abren (mesas, amistosos y liga) los torneos que empiezan
+// en los próximos 6 días: si el cuadro empieza un lunes, desde el martes anterior.
+export const DIAS_ANTES_APERTURA = 6;
+
+/** Cuándo empieza el cuadro principal (el primer partido que no es de la previa). */
+export function inicioCuadro(ev: EventoEspn): Date | null {
+  const fechas = ev.partidos.map((p) => (p.inicio ? new Date(p.inicio).getTime() : NaN)).filter((x) => Number.isFinite(x));
+  if (fechas.length > 0) return new Date(Math.min(...fechas));
+  return inicioEstimado(ev);
+}
+
+/** Sin partidos todavía: la fecha del evento (suele ser el sábado de la previa) → el lunes a las 10:00 UTC. */
+function inicioEstimado(ev: EventoEspn): Date | null {
+  if (!ev.inicio) return null;
+  const d = new Date(ev.inicio);
+  const sumar = d.getUTCDay() === 6 ? 2 : d.getUTCDay() === 0 ? 1 : 0;
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + sumar, 10, 0));
+}
+
+/** ¿Ha salido ya el cuadro (hay jugadores en los partidos)? */
+export function hayCuadro(ev: EventoEspn): boolean {
+  return ev.partidos.some((p) => !!(p.j1 || p.j2));
+}
+
+/** ¿Está ya en su ventana (6 días antes de empezar) y todavía no ha terminado? */
+export function enVentana(ev: EventoEspn, ahora = Date.now()): boolean {
+  const ini = inicioCuadro(ev);
+  if (!ini) return false;
+  const abre = Date.UTC(ini.getUTCFullYear(), ini.getUTCMonth(), ini.getUTCDate()) - DIAS_ANTES_APERTURA * 86400000;
+  const terminado = ev.fin ? new Date(ev.fin).getTime() < ahora : false;
+  return ahora >= abre && !terminado;
+}
+
 export type TorneoSemana = { liga: LigaTenis; id: string; nombre: string; inicio: string | null; fin: string | null; jugadores: number; vivos: number; pre: number; en_juego: number; terminados: number; competicion: string | null };
 
 export async function listarTorneosSemana(admin: Admin): Promise<TorneoSemana[]> {
   const { data } = await admin.from('tenis_torneos').select('competicion,espn_event_id');
   const creados = new Map(((data as { competicion: string; espn_event_id: string }[] | null) ?? []).map((t) => [t.espn_event_id, t.competicion]));
   const out: TorneoSemana[] = [];
-  for (const liga of ['atp', 'wta'] as LigaTenis[]) {
+  for (const liga of LIGAS_ACTIVAS) {
     let evs: EventoEspn[] = [];
     try {
       evs = await leerEventosProximos(liga);
@@ -228,7 +265,7 @@ export async function listarTorneosSemana(admin: Admin): Promise<TorneoSemana[]>
       continue;
     }
     for (const e of evs) {
-      if (e.partidos.length === 0) continue;
+      if (!enVentana(e)) continue; // 28/10: también sin cuadro todavía
       const nombres = new Set<string>();
       e.partidos.forEach((p) => [p.j1, p.j2].forEach((j) => j && nombres.add(j.espn)));
       out.push({
@@ -325,15 +362,26 @@ async function anadirJugadores(admin: Admin, competicion: string, liga: LigaTeni
 export async function crearTorneoTenis(admin: Admin, liga: LigaTenis, eventId: string): Promise<{ competicion: string; jugadores: number; cierre: string }> {
   const ev = (await leerEventosProximos(liga)).find((e) => e.id === eventId);
   if (!ev) throw new Error('ESPN ya no devuelve ese torneo.');
+  if (!enVentana(ev)) throw new Error(`Todavía no: los torneos se abren ${DIAS_ANTES_APERTURA} días antes de empezar el cuadro.`);
   const { data: ya } = await admin.from('tenis_torneos').select('competicion').eq('espn_event_id', eventId).maybeSingle();
   if (ya) throw new Error('Este torneo ya está creado.');
   const ahora = Date.now();
-  const proximos = ev.partidos.filter((p) => p.estado === 'pre' && p.inicio && new Date(p.inicio).getTime() > ahora + 5 * 60000);
-  if (proximos.length === 0) throw new Error('No quedan partidos por empezar en este torneo.');
-  const cierre = new Date(Math.min(...proximos.map((p) => new Date(p.inicio as string).getTime())) - 5 * 60000).toISOString();
   const competicion = nombreCompeticionTenis(ev);
-  const vivos = jugadoresVivos(ev);
-  if (vivos.length < 6) throw new Error('Quedan muy pocos jugadores en el torneo.');
+  let cierre: string;
+  let vivos: JugadorEspn[] = [];
+  if (hayCuadro(ev)) {
+    const proximos = ev.partidos.filter((p) => p.estado === 'pre' && p.inicio && new Date(p.inicio).getTime() > ahora + 5 * 60000);
+    if (proximos.length === 0) throw new Error('No quedan partidos por empezar en este torneo.');
+    cierre = new Date(Math.min(...proximos.map((p) => new Date(p.inicio as string).getTime())) - 5 * 60000).toISOString();
+    vivos = jugadoresVivos(ev);
+    if (vivos.length < 6) throw new Error('Quedan muy pocos jugadores en el torneo.');
+  } else {
+    // 28/10 (Iñi): se abre 6 días antes aunque no haya cuadro. Cierre provisional
+    // (el lunes del cuadro); se corrige solo en cuanto ESPN publique los partidos.
+    const est = inicioEstimado(ev);
+    if (!est || est.getTime() - 5 * 60000 < ahora + 3600000) throw new Error('No se sabe cuándo empieza el cuadro.');
+    cierre = new Date(est.getTime() - 5 * 60000).toISOString();
+  }
 
   const { error: e1 } = await admin.from('tenis_torneos').insert({ competicion, liga, espn_event_id: ev.id, nombre_espn: ev.nombre, desde: cierre });
   if (e1) throw new Error(`No se ha podido crear el torneo: ${e1.message}`);
@@ -367,11 +415,11 @@ export async function crearTorneoTenis(admin: Admin, liga: LigaTenis, eventId: s
 }
 
 type FilaPartido = { espn_id: string; estado: string; juegos1: number[]; juegos2: number[]; sirve: number | null; breaks1: number; breaks2: number };
-type Torneo = { competicion: string; liga: LigaTenis; espn_event_id: string; desde: string | null; finalizado_en: string | null };
+type Torneo = { competicion: string; liga: LigaTenis; espn_event_id: string; desde: string | null; finalizado_en: string | null; cuadro_en: string | null };
 
 /** Sincroniza los torneos de tenis activos (o solo uno). Rápido si no hay ninguno. */
 export async function sincronizarTenis(admin: Admin, soloCompeticion?: string): Promise<{ torneos: number; partidos: number; jugadores: number; finalizados: string[] }> {
-  let q = admin.from('tenis_torneos').select('competicion,liga,espn_event_id,desde,finalizado_en').eq('activo', true).is('finalizado_en', null);
+  let q = admin.from('tenis_torneos').select('competicion,liga,espn_event_id,desde,finalizado_en,cuadro_en').eq('activo', true).is('finalizado_en', null);
   if (soloCompeticion) q = q.eq('competicion', soloCompeticion);
   const { data: tds } = await q;
   const torneos = (tds as Torneo[] | null) ?? [];
@@ -394,9 +442,24 @@ export async function sincronizarTenis(admin: Admin, soloCompeticion?: string): 
     // Jugadores que aparecen nuevos (p. ej. los que entraban con bye) mientras la inscripción sigue abierta.
     if (!t.desde || new Date(t.desde).getTime() > Date.now()) {
       try {
-        res.jugadores += await anadirJugadores(admin, t.competicion, t.liga, jugadoresVivos(ev), ev);
+        const n = await anadirJugadores(admin, t.competicion, t.liga, jugadoresVivos(ev), ev);
+        res.jugadores += n;
+        // 28/10: el cuadro acaba de salir → aviso a los de las salas (notificacionesPush).
+        if (n > 0 && !t.cuadro_en) await admin.from('tenis_torneos').update({ cuadro_en: new Date().toISOString() }).eq('competicion', t.competicion);
       } catch {
         // no bloquea la sincronización
+      }
+      // Hora de cierre de verdad: 5 minutos antes del primer partido del cuadro.
+      if (hayCuadro(ev)) {
+        const proximos = ev.partidos.filter((p) => p.estado === 'pre' && (p.j1 || p.j2) && p.inicio && new Date(p.inicio).getTime() > Date.now() + 5 * 60000);
+        if (proximos.length > 0) {
+          const real = new Date(Math.min(...proximos.map((p) => new Date(p.inicio as string).getTime())) - 5 * 60000).toISOString();
+          if (!t.desde || Math.abs(new Date(real).getTime() - new Date(t.desde).getTime()) > 60000) {
+            await admin.from('tenis_torneos').update({ desde: real }).eq('competicion', t.competicion);
+            await admin.from('salas').update({ fecha_limite_inscripcion: real }).eq('competicion', t.competicion).eq('deporte', 'tenis').is('tramo', null);
+            t.desde = real;
+          }
+        }
       }
     }
 
@@ -523,7 +586,7 @@ export async function crearTorneosTenisAutomaticos(admin: Admin): Promise<Result
   const { data } = await admin.from('tenis_torneos').select('espn_event_id');
   const ya = new Set(((data as { espn_event_id: string }[] | null) ?? []).map((t) => t.espn_event_id));
   const out: ResultadoTenisAuto[] = [];
-  for (const liga of ['atp', 'wta'] as LigaTenis[]) {
+  for (const liga of LIGAS_ACTIVAS) {
     let evs: EventoEspn[] = [];
     try {
       evs = await leerEventosProximos(liga);
@@ -536,15 +599,21 @@ export async function crearTorneosTenisAutomaticos(admin: Admin): Promise<Result
         out.push({ liga, torneo: ev.nombre, estado: 'ya_existe', detalle: 'Ya está en Drafters.' });
         continue;
       }
+      if (!enVentana(ev)) {
+        const ini = inicioCuadro(ev);
+        if (ini && ini.getTime() > Date.now()) out.push({ liga, torneo: ev.nombre, estado: 'esperando', detalle: `Empieza el ${ini.toISOString().slice(0, 10)}: se abre ${DIAS_ANTES_APERTURA} días antes.` });
+        continue;
+      }
       const jugadores = new Set<string>();
       ev.partidos.forEach((p) => [p.j1, p.j2].forEach((j) => j && jugadores.add(j.espn)));
       const pre = ev.partidos.filter((p) => p.estado === 'pre' && p.inicio && new Date(p.inicio).getTime() > Date.now() + 30 * 60000).length;
       const jugados = ev.partidos.filter((p) => p.estado === 'post').length;
-      if (jugadores.size < 8) {
-        out.push({ liga, torneo: ev.nombre, estado: 'esperando', detalle: jugadores.size === 0 ? 'Todavía no hay cuadro.' : `Solo ${jugadores.size} jugadores en el cuadro.` });
+      if (jugadores.size > 0 && jugadores.size < 8) {
+        out.push({ liga, torneo: ev.nombre, estado: 'esperando', detalle: `Solo ${jugadores.size} jugadores en el cuadro.` });
         continue;
       }
-      if (pre === 0 || jugados > ev.partidos.length / 2) {
+      // Sin cuadro todavía también se abre (los jugadores llegan cuando salga).
+      if (jugadores.size > 0 && (pre === 0 || jugados > ev.partidos.length / 2)) {
         out.push({ liga, torneo: ev.nombre, estado: 'esperando', detalle: 'Ya va muy avanzado: no se crea.' });
         continue;
       }
