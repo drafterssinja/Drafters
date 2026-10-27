@@ -67,6 +67,7 @@ function V2CrearInner() {
   const depParam = params.get('deporte');
   // 28/10: desde la pestaña de un torneo de tenis, ese torneo ya viene elegido.
   const torneoParam = params.get('torneo');
+  const ligaParam = params.get('liga');
   const deporte: 'futbol' | 'golf' | 'tenis' = depParam === 'golf' ? 'golf' : depParam === 'tenis' ? 'tenis' : 'futbol';
   // 27/10: golf y tenis se juegan por torneo (no por jornadas).
   const porTorneo = deporte !== 'futbol';
@@ -120,8 +121,9 @@ function V2CrearInner() {
   useEffect(() => {
     // 16/10 (Iñi): la competición (LaLiga o Champions) la elige siempre el usuario;
     // solo se marca sola si no hay más que una con jornada abierta.
+    if (!liga && ligaParam && ligas.includes(ligaParam)) return setLiga(ligaParam);
     if (!liga && ligas.length === 1 && COMPETICIONES_FUTBOL.length <= 1) setLiga(ligas[0]);
-  }, [ligas, liga]);
+  }, [ligas, liga, ligaParam]);
   useEffect(() => {
     if (publicadasLiga.length) {
       setDesde(publicadasLiga[0].competicion);
