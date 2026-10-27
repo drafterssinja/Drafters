@@ -63,7 +63,10 @@ function V2CrearInner() {
 
   const [nombre, setNombre] = useState('');
   // 15/10: se crea desde la página de un deporte, así que ya viene elegido.
-  const depParam = useSearchParams().get('deporte');
+  const params = useSearchParams();
+  const depParam = params.get('deporte');
+  // 28/10: desde la pestaña de un torneo de tenis, ese torneo ya viene elegido.
+  const torneoParam = params.get('torneo');
   const deporte: 'futbol' | 'golf' | 'tenis' = depParam === 'golf' ? 'golf' : depParam === 'tenis' ? 'tenis' : 'futbol';
   // 27/10: golf y tenis se juegan por torneo (no por jornadas).
   const porTorneo = deporte !== 'futbol';
@@ -126,8 +129,8 @@ function V2CrearInner() {
     }
   }, [publicadasLiga]);
   useEffect(() => {
-    if (!torneo && golf.length) setTorneo(golf[0].competicion);
-  }, [golf, torneo]);
+    if (!torneo && golf.length) setTorneo(torneoParam && golf.some((g) => g.competicion === torneoParam) ? torneoParam : golf[0].competicion);
+  }, [golf, torneo, torneoParam]);
 
   const seleccion: string[] = useMemo(() => {
     if (porTorneo) return torneo ? [torneo] : [];

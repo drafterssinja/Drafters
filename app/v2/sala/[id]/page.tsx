@@ -39,6 +39,8 @@ export default function V2Sala() {
   const { perfil, estado } = useSesionV2();
   const [amistoso, setAmistoso] = useState<Amistoso | null | undefined>(undefined);
   const [jornadas, setJornadas] = useState<AmistosoJornada[]>([]);
+  // 28/10 (Iñi): torneos de tenis abiertos antes de que salga el cuadro (sin jugadores todavía).
+  const [sinCuadro, setSinCuadro] = useState<Set<string>>(new Set());
   const [resumen, setResumen] = useState<Resumen | null>(null);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [mensajes, setMensajes] = useState<Mensaje[]>([]);
@@ -115,6 +117,20 @@ export default function V2Sala() {
   }, [pestana, ultimoId, id]);
   const sinLeer = mensajes.filter((m) => m.id > vistosHasta && m.usuario_id !== miId && m.tipo !== 'sistema').length;
 
+  useEffect(() => {
+    if (!amistoso || amistoso.deporte !== 'tenis' || jornadas.length === 0) return setSinCuadro(new Set());
+    let activo = true;
+    void Promise.all(
+      jornadas.map(async (j) => {
+        const { count } = await supabase.from('jugadores').select('id', { count: 'exact', head: true }).eq('deporte', 'tenis').eq('competicion', j.competicion);
+        return (count ?? 0) === 0 ? j.competicion : null;
+      })
+    ).then((r) => activo && setSinCuadro(new Set(r.filter((x): x is string => !!x))));
+    return () => {
+      activo = false;
+    };
+  }, [amistoso, jornadas]);
+
   async function unirse() {
     setError(null);
     const { error: e } = await supabase.rpc('amistoso_unirse', { p_amistoso: id, p_contrasena: contrasena.trim() || null });
@@ -139,7 +155,8 @@ export default function V2Sala() {
 
   async function unirseOHacerEquipo() {
     setError(null);
-    if (!jornadaParaEquipo) return unirse();
+    // Sin cuadro todavía: se entra en la sala y el equipo se hace cuando salga.
+    if (!jornadaParaEquipo || sinCuadro.has(jornadaParaEquipo.competicion)) return unirse();
     if (amistoso?.privada) {
       const { data: ok, error: e } = await supabase.rpc('amistoso_comprobar_clave', { p_amistoso: id, p_contrasena: contrasena.trim() });
       if (e) return setError(mensajeError(e));
@@ -479,7 +496,12 @@ export default function V2Sala() {
                             <>
                               {/* 16/10 (Iñi): tu equipo en el campo, en vez de "equipos hechos 2 de 3". */}
                               {tengo && <MiEquipoAmistoso amistosoId={id} competicion={j.competicion} deporte={amistoso.deporte} miId={miId} />}
-                              {!cerrada && (
+                              {!cerrada && sinCuadro.has(j.competicion) && (
+                                <span style={{ fontSize: 12.5, color: S.MUTED_2, lineHeight: 1.45, padding: '8px 10px', borderRadius: 10, background: 'rgba(240,185,77,0.08)', border: '1px solid rgba(240,185,77,0.3)' }}>
+                                  🎾 Los jugadores y sus precios se publican en cuanto salga el cuadro (normalmente el viernes o el sábado). Te avisaremos para que hagas tu equipo.
+                                </span>
+                              )}
+                              {!cerrada && !sinCuadro.has(j.competicion) && (
                                 <Link href={`/v2/sala/${id}/equipo?c=${encodeURIComponent(j.competicion)}`} style={{ ...(tengo ? S.secondaryLinkButton : { ...S.primaryButton, marginTop: 0 }), textAlign: 'center', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                   {tengo ? 'Cambiar mi equipo' : 'Hacer mi equipo'}
                                 </Link>

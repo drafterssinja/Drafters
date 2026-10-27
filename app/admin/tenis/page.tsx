@@ -73,9 +73,9 @@ function TorneosTenis() {
   const boton = { ...S.secondaryLinkButton, width: 'auto', padding: '7px 11px', fontSize: 12 } as const;
   return (
     <div style={{ ...S.card, flexDirection: 'column', alignItems: 'stretch', gap: 10 }}>
-      <span style={{ fontWeight: 800, color: S.TEXT }}>Torneos de esta semana y próximos (ESPN)</span>
+      <span style={{ fontWeight: 800, color: S.TEXT }}>Torneos de los próximos 6 días y en juego (ESPN)</span>
       <span style={{ fontSize: 12, color: S.ACCENT, lineHeight: 1.5 }}>
-        Automático: cada 15 minutos se crean solos los torneos ATP y WTA en cuanto sale su cuadro (los inscritos), con el precio de cada jugador sacado de su cuota a ganar el torneo (la de las casas de apuestas si la hay; si no, calculada jugando el cuadro 20.000 veces con el ranking).
+        Automático: cada 15 minutos se crean solos los torneos ATP (de momento, sin WTA) que empiezan en los próximos 6 días (aunque todavía no haya cuadro: los jugadores y sus precios llegan solos en cuanto sale y se avisa a los de las salas), con el precio de cada jugador sacado de su cuota a ganar el torneo (la de las casas de apuestas si la hay; si no, calculada jugando el cuadro 20.000 veces con el ranking).
       </span>
       <button type="button" disabled={!!ocupado} onClick={() => accion('auto', { accion: 'auto' }, (r) => (r.resultados as { liga: string; torneo: string; estado: string; detalle: string }[]).map((x) => `${x.liga.toUpperCase()} · ${x.torneo}: ${x.detalle}`).join('  |  ') || 'Nada que crear.')} style={{ ...boton, alignSelf: 'flex-start' }}>
         {ocupado === 'auto' ? 'Buscando…' : 'Buscar y crear ahora'}
@@ -100,8 +100,8 @@ function TorneosTenis() {
             {t.competicion ? (
               <span style={{ fontSize: 12, color: S.ACCENT, fontWeight: 700 }}>✓ Creado: {t.competicion}</span>
             ) : (
-              <button type="button" disabled={!!ocupado || t.pre === 0} onClick={() => accion(`crear-${t.id}`, { accion: 'crear', liga: t.liga, id: t.id }, (r) => `✓ ${r.competicion}: ${r.jugadores} jugadores, cierra ${fecha(r.cierre)}.`)} style={{ ...boton, alignSelf: 'flex-start', opacity: t.pre === 0 ? 0.5 : 1 }}>
-                {ocupado === `crear-${t.id}` ? 'Creando…' : t.pre === 0 ? 'No quedan partidos por empezar' : 'Crear torneo en Drafters'}
+              <button type="button" disabled={!!ocupado || (t.jugadores > 0 && t.pre === 0)} onClick={() => accion(`crear-${t.id}`, { accion: 'crear', liga: t.liga, id: t.id }, (r) => `✓ ${r.competicion}: ${r.jugadores} jugadores, cierra ${fecha(r.cierre)}.`)} style={{ ...boton, alignSelf: 'flex-start', opacity: t.jugadores > 0 && t.pre === 0 ? 0.5 : 1 }}>
+                {ocupado === `crear-${t.id}` ? 'Creando…' : t.jugadores > 0 && t.pre === 0 ? 'No quedan partidos por empezar' : t.jugadores === 0 ? 'Crear ya (sin cuadro todavía)' : 'Crear torneo en Drafters'}
               </button>
             )}
           </div>
@@ -186,14 +186,8 @@ export default function AdminTenisPage() {
               <button type="button" onClick={() => probar('', { fuente: 'espn-auto', liga: 'atp' })} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '8px 12px', fontSize: 12 }}>
                 Analizar ATP
               </button>
-              <button type="button" onClick={() => probar('', { fuente: 'espn-auto', liga: 'wta' })} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '8px 12px', fontSize: 12 }}>
-                Analizar WTA
-              </button>
               <button type="button" onClick={() => probar('', { fuente: 'ranking', liga: 'atp' })} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '8px 12px', fontSize: 12 }}>
                 Ranking ATP
-              </button>
-              <button type="button" onClick={() => probar('', { fuente: 'ranking', liga: 'wta' })} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '8px 12px', fontSize: 12 }}>
-                Ranking WTA
               </button>
               <button type="button" onClick={() => probar('', { fuente: 'oddsapi' })} style={{ ...S.secondaryLinkButton, width: 'auto', padding: '8px 12px', fontSize: 12 }}>
                 The Odds API (créditos)
