@@ -24,7 +24,8 @@ const NORMALIZAR = (s: string) =>
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '');
 
-const PERMITIDOS = ['inigo.sinde@gmail.com', 'porrasgolfespain@gmail.com', 'javier.murua.alzueta@zabalburu.org'];
+// 28/10 (Iñi): + porrasgolfspain@gmail.com (sin la "e"; se dejan las dos formas).
+const PERMITIDOS = ['inigo.sinde@gmail.com', 'porrasgolfespain@gmail.com', 'porrasgolfspain@gmail.com', 'javier.murua.alzueta@zabalburu.org'];
 
 export function puedeJugarPocha(email: string | null | undefined): boolean {
   return !!email && PERMITIDOS.includes(NORMALIZAR(email));
