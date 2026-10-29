@@ -21,7 +21,7 @@ import { mensajeRecordatorio } from '@/lib/mensajesPush';
 // enciende en el perfil); textos cortos y variados en lib/mensajesPush.ts.
 
 type Admin = ReturnType<typeof crearClienteAdmin>;
-type Tipo = 'recordatorio_dia_antes' | 'recordatorio_hora' | 'gol' | 'fin_partido' | 'ganado' | 'sorteo' | 'social';
+type Tipo = 'recordatorio_dia_antes' | 'recordatorio_hora' | 'gol' | 'fin_partido' | 'ganado' | 'sorteo' | 'social' | 'admin_alta';
 type Aviso = { clave: string; usuarioId: string; tipo: Tipo; titulo: string; cuerpo: string; url: string };
 type Sub = { id: string; usuario_id: string; endpoint: string; p256dh: string; auth: string };
 
@@ -251,6 +251,44 @@ async function cuadrosDeTenis(admin: Admin): Promise<Aviso[]> {
 }
 
 // ---------------------------------------------------------------------------
+// 29/10 (Iñi): aviso cuando se registra un usuario nuevo. De momento SOLO para
+// él (no sale en las preferencias de nadie ni se puede activar).
+// ---------------------------------------------------------------------------
+// 29/10: "cuando hablo de mí en Drafters, siempre es porrasgolfspain@gmail.com" (se deja también la forma con "e").
+const AVISO_ALTAS = ['porrasgolfspain@gmail.com', 'porrasgolfespain@gmail.com'];
+
+async function altasNuevas(admin: Admin): Promise<Aviso[]> {
+  const { data: dest } = await admin.from('perfiles').select('id,email').in('email', AVISO_ALTAS);
+  const destinatarios = ((dest as { id: string }[] | null) ?? []).map((d) => d.id);
+  if (destinatarios.length === 0) {
+    // Por si el perfil no tiene el email copiado: se busca en las cuentas.
+    const { data: us } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    for (const u of us?.users ?? []) if (u.email && AVISO_ALTAS.includes(u.email.toLowerCase())) destinatarios.push(u.id);
+  }
+  if (destinatarios.length === 0) return [];
+  const desde = new Date(Date.now() - 2 * 3600e3).toISOString();
+  const { data } = await admin.from('perfiles').select('id,nombre,apellido,nombre_usuario,created_at').gte('created_at', desde).order('created_at');
+  const nuevos = (data as { id: string; nombre: string | null; apellido: string | null; nombre_usuario: string | null }[] | null) ?? [];
+  const { count } = await admin.from('perfiles').select('id', { count: 'exact', head: true });
+  const avisos: Aviso[] = [];
+  for (const n of nuevos) {
+    if (destinatarios.includes(n.id)) continue;
+    const quien = [n.nombre, n.apellido].filter(Boolean).join(' ').trim();
+    for (const d of destinatarios) {
+      avisos.push({
+        clave: `alta:${n.id}:${d}`,
+        usuarioId: d,
+        tipo: 'admin_alta',
+        titulo: '👤 Nuevo usuario en Drafters',
+        cuerpo: `${n.nombre_usuario ? `@${n.nombre_usuario}` : quien || 'Alguien'}${quien && n.nombre_usuario ? ` (${quien})` : ''} se acaba de registrar.${count ? ` Ya sois ${count}.` : ''}`,
+        url: '/admin/usuarios',
+      });
+    }
+  }
+  return avisos;
+}
+
+// ---------------------------------------------------------------------------
 export async function enviarNotificacionesPush(admin: Admin): Promise<{ avisos: number; enviados: number; fallidos: number; error?: string }> {
   const publica = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
   const privada = process.env.VAPID_PRIVATE_KEY;
@@ -266,12 +304,14 @@ export async function enviarNotificacionesPush(admin: Admin): Promise<{ avisos: 
   const quiere = (u: string, t: Tipo) => {
     const p = pref.get(u);
     if (!subsDe.has(u)) return false;
+    // El aviso de altas va siempre (solo lo reciben las cuentas de AVISO_ALTAS).
+    if (t === 'admin_alta') return true;
     if (p && !p.activo) return false;
     return (p?.tipos ?? POR_DEFECTO).includes(t);
   };
   const usuarios = Array.from(subsDe.keys());
 
-  const lotes = await Promise.all([recordatorios(admin, usuarios), goles(admin), finalesDePartido(admin), notificacionesApp(admin), cuadrosDeTenis(admin).catch(() => [] as Aviso[])]);
+  const lotes = await Promise.all([recordatorios(admin, usuarios), goles(admin), finalesDePartido(admin), notificacionesApp(admin), cuadrosDeTenis(admin).catch(() => [] as Aviso[]), altasNuevas(admin).catch(() => [] as Aviso[])]);
   const avisos = lotes.flat().filter((a) => quiere(a.usuarioId, a.tipo));
   if (avisos.length === 0) return { avisos: 0, enviados: 0, fallidos: 0 };
 
