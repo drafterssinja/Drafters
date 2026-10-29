@@ -10,6 +10,7 @@ import { V2_COLOR } from '@/components/v2/MarcoV2';
 import Cargando from '@/components/Cargando';
 import ClasificacionMesaFutbol, { type EquipoExterno } from '@/components/ClasificacionMesaFutbol';
 import ClasificacionSala from '@/components/ClasificacionMesaGolf';
+import ClasificacionMesaTenis from '@/components/ClasificacionMesaTenis';
 import { cadaXSegundos, repartirPremio, textoBote, type Amistoso, type AmistosoJornada, type Resumen } from '@/lib/v2';
 
 type Equipo = { competicion: string; usuario_id: string; jugadores: string[]; alineacion: string | null };
@@ -29,7 +30,8 @@ type Props = { amistoso: Amistoso; jornadas: AmistosoJornada[]; resumen: Resumen
 // "Total" con la suma. Golf sigue con la lista.
 export default function ClasificacionAmistoso(props: Props) {
   // 18/10 (Iñi): el golf también, exactamente como la clasificación de golf de la V1.
-  if (props.amistoso.deporte === 'futbol' || props.amistoso.deporte === 'golf') return <ClasificacionAmistosoFutbol {...props} />;
+  // 28/10 (Iñi): el tenis también, igual que fútbol y golf (equipos a la izquierda, jugadores a la derecha).
+  if (props.amistoso.deporte === 'futbol' || props.amistoso.deporte === 'golf' || props.amistoso.deporte === 'tenis') return <ClasificacionAmistosoFutbol {...props} />;
   return <ListaClasificacionAmistoso {...props} />;
 }
 
@@ -86,7 +88,9 @@ function ClasificacionAmistosoFutbol(props: Props) {
       ) : equipos === null ? (
         <Cargando compacto />
       ) : (
-        amistoso.deporte === 'golf' ? (
+        amistoso.deporte === 'tenis' ? (
+          <ClasificacionMesaTenis key={vista} competicion={vista} terminada={terminada(vista)} externo={{ equipos: equiposVista, misJugadores: equiposVista.find((e) => e.equipoId === miId)?.jugadores ?? [] }} premios={premios} />
+        ) : amistoso.deporte === 'golf' ? (
           <ClasificacionSala
             key={vista}
             embebido

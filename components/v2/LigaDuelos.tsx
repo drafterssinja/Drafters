@@ -37,7 +37,7 @@ type Ronda = {
 type Info = {
   apuntado: boolean;
   apuntados: number;
-  temporada: { id: string; nombre: string; estado: 'inscripcion' | 'en_juego' | 'terminada'; desde: number; hasta: number; tam: number; ascensos: number; descensos: number; jornadas: number; primera_cierre: string | null; sin_fin?: boolean } | null;
+  temporada: { id: string; nombre: string; estado: 'inscripcion' | 'en_juego' | 'terminada'; desde: number; hasta: number; tam: number; ascensos: number; descensos: number; jornadas: number; primera_cierre: string | null; sin_fin?: boolean; num_rondas?: number | null } | null;
   division: { id: string; nombre: string; nivel: number } | null;
   divisiones: { id: string; nombre: string; nivel: number; jugadores: number }[];
   ronda: Ronda | null;
@@ -52,7 +52,8 @@ const VERDE = '#3DDC84';
 const ROJO = '#FF8A8A';
 const ORO = '#F0B94D';
 
-export function jornadaBonita(c: string): string {
+export function jornadaBonita(c: string, deporte = 'futbol'): string {
+  if (deporte !== 'futbol') return c.replace(/^(ATP|WTA)\s*·\s*/i, '').replace(/\s+\d{4}$/, '');
   const n = c.match(/Jornada\s*(\d+)/i)?.[1];
   if (/champions/i.test(c)) return `Champions · J${n ?? ''}`;
   return `LaLiga · J${n ?? ''}`;
@@ -71,7 +72,10 @@ function movimientos(n: number, tam: number, asc: number): number {
   return n >= 4 ? Math.max(1, Math.round(n * 0.25)) : 0;
 }
 
-export default function LigaDuelos() {
+// 28/10 (Iñi): la misma liga en golf (y tenis cuando se active): 19 torneos por
+// temporada, un torneo por semana (el más importante). SQL 69.
+export default function LigaDuelos({ deporte = 'futbol' }: { deporte?: 'futbol' | 'golf' | 'tenis' } = {}) {
+  const esFutbol = deporte === 'futbol';
   const [info, setInfo] = useState<Info | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState(false);
@@ -82,12 +86,12 @@ export default function LigaDuelos() {
   const [divs, setDivs] = useState<DivMiembros[] | null>(null);
 
   const cargar = useCallback(async () => {
-    const { data, error: e } = await supabase.rpc('duelos_mi_liga');
+    const { data, error: e } = await supabase.rpc('duelos_mi_liga', { p_deporte: deporte });
     if (e) return setError(mensajeError(e));
     const i = data as Info;
     setInfo(i);
     setDivVista((d) => d ?? i.division?.id ?? i.divisiones[0]?.id ?? null);
-  }, []);
+  }, [deporte]);
 
   useEffect(() => {
     void cargar();
@@ -120,7 +124,7 @@ export default function LigaDuelos() {
   async function apuntarse(si: boolean) {
     setOcupado(true);
     setError(null);
-    const { error: e } = await supabase.rpc(si ? 'duelos_apuntarse' : 'duelos_desapuntarse');
+    const { error: e } = await supabase.rpc(si ? 'duelos_apuntarse' : 'duelos_desapuntarse', { p_deporte: deporte });
     setOcupado(false);
     if (e) return setError(mensajeError(e));
     void cargar();
@@ -159,8 +163,15 @@ export default function LigaDuelos() {
           {[
             ['⚔️', 'Cada jornada, un duelo 1 contra 1 con un rival de tu división.'],
             ['📋', 'Equipo con presupuesto de 100.000 €, como siempre.'],
-            ['🔁', 'Tu rival se sortea en cuanto se publica cada jornada. En una temporada (una vuelta de LaLiga) no repites rival.'],
-            ['⭐', 'Las jornadas de Champions son jornadas extra, con rival sorteado.'],
+            ...(esFutbol
+              ? [
+                  ['🔁', 'Tu rival se sortea en cuanto se publica cada jornada. En una temporada (una vuelta de LaLiga) no repites rival.'],
+                  ['⭐', 'Las jornadas de Champions son jornadas extra, con rival sorteado.'],
+                ]
+              : [
+                  ['🏆', `Cada semana cuenta un torneo: el más importante de la semana. Una temporada son ${t?.num_rondas ?? 19} torneos.`],
+                  ['🔁', 'Tu rival se sortea en cuanto se publica cada torneo. En una temporada no repites rival.'],
+                ]),
             ['3️⃣', 'Ganar 3 puntos · empatar 1 · perder 0. Si no haces equipo, pierdes.'],
             ['⬆️', `Al final de la temporada suben y bajan los ${t?.ascensos && t.tam >= 20 ? t.ascensos : 5} primeros y últimos de cada división.`],
           ].map(([i, x]) => (
@@ -170,7 +181,7 @@ export default function LigaDuelos() {
             </div>
           ))}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: S.MUTED }}>
-            <IconoCredito size={16} /> Cada jornada cuesta 1 crédito de fútbol (al hacer tu equipo).
+            <IconoCredito size={16} /> Cada {esFutbol ? 'jornada' : 'torneo'} cuesta 1 crédito de {esFutbol ? 'fútbol' : deporte} (al hacer tu equipo).
           </div>
           {info.apuntado ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '12px 14px', borderRadius: 12, background: 'rgba(61,220,132,0.08)', border: '1px solid rgba(61,220,132,0.4)' }}>
@@ -203,7 +214,7 @@ export default function LigaDuelos() {
         <Link href={`/v2/liga/${sinEquipo.ronda_id}/equipo`} style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 12, padding: '14px 14px', borderRadius: 16, background: 'linear-gradient(135deg, rgba(61,220,132,0.22) 0%, rgba(61,220,132,0.06) 100%)', border: '1px solid rgba(61,220,132,0.5)' }}>
           <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
             <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: VERDE }}>
-              Jornada {sinEquipo.orden} · {etiquetaReal(sinEquipo.competicion)}
+              Jornada {sinEquipo.orden} · {etiquetaReal(sinEquipo.competicion, deporte)}
             </span>
             <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 21, color: S.TEXT, lineHeight: 1.1 }}>Haz tu equipo contra {sinEquipo.rival_nombre ?? 'tu rival'}</span>
             <span style={{ fontSize: 12, color: S.MUTED_2 }}>Hasta {fecha(sinEquipo.cierre)}</span>
@@ -316,7 +327,7 @@ export default function LigaDuelos() {
                   <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
                     <span style={{ fontSize: 14.5, fontWeight: 800, color: j.tipo === 'champions' ? '#7FB2FF' : S.TEXT }}>
                       {j.tipo === 'champions' ? '⭐ ' : ''}Jornada {j.orden}{' '}
-                      <span style={{ fontWeight: 600, fontSize: 12.5, color: S.MUTED_2 }}>({etiquetaReal(j.competicion)})</span>
+                      <span style={{ fontWeight: 600, fontSize: 12.5, color: S.MUTED_2 }}>({etiquetaReal(j.competicion, deporte)})</span>
                     </span>
                     <span style={{ fontSize: 11.5, fontWeight: 700, color: j.estado === 'en_juego' ? VERDE : S.MUTED_3, whiteSpace: 'nowrap' }}>{j.estado === 'en_juego' ? '● En juego' : j.estado === 'terminada' ? `${dia(j.cierre)} · Terminada` : dia(j.cierre)}</span>
                   </div>
@@ -344,7 +355,16 @@ export default function LigaDuelos() {
         <Panel style={{ padding: 14, gap: 6 }}>
           <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 18, color: S.TEXT }}>Temporada</span>
           <span style={{ fontSize: 13, color: S.MUTED, lineHeight: 1.5 }}>
-            {t.sin_fin ? (
+            {!esFutbol ? (
+              t.sin_fin ? (
+                <>Liga de pruebas: de momento no tiene final. Cada semana cuenta el torneo más importante. Si alguien se apunta, entra en el siguiente torneo con 0 puntos.</>
+              ) : (
+                <>
+                  {t.num_rondas ?? 19} torneos (uno por semana, el más importante).
+                  {t.estado === 'en_juego' ? ` Quedan ${Math.max(0, (t.num_rondas ?? 19) - (jornadas ?? []).filter((j) => j.estado === 'terminada').length)}.` : ' Terminada.'}
+                </>
+              )
+            ) : t.sin_fin ? (
               <>Liga de pruebas: empieza en la jornada {t.desde} de LaLiga y de momento no tiene final. Si alguien se apunta, entra en la siguiente jornada con 0 puntos.</>
             ) : (
               <>
@@ -389,8 +409,9 @@ export default function LigaDuelos() {
   );
 }
 
-/** "J9 LaLiga" / "J4 Champions". */
-function etiquetaReal(c: string): string {
+/** "J9 LaLiga" / "J4 Champions"; en golf y tenis, el nombre del torneo. */
+function etiquetaReal(c: string, deporte = 'futbol'): string {
+  if (deporte !== 'futbol') return c.replace(/^(ATP|WTA)\s*·\s*/i, '').replace(/\s+\d{4}$/, '');
   const n = c.match(/Jornada\s*(\d+)/i)?.[1] ?? '';
   return /champions/i.test(c) ? `J${n} Champions` : `J${n} LaLiga`;
 }
