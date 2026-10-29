@@ -30,6 +30,9 @@ export default function AdminLigaDuelos() {
   const [error, setError] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
   const [desde, setDesde] = useState('');
+  // 28/10 (Iñi): liga también de golf (19 torneos por temporada, SQL 69).
+  const [deporte, setDeporte] = useState<'futbol' | 'golf'>('futbol');
+  const [rondas, setRondas] = useState('19');
   const [hasta, setHasta] = useState('19');
   const [ocupado, setOcupado] = useState(false);
   const [confirmar, setConfirmar] = useState<string | null>(null);
@@ -37,8 +40,8 @@ export default function AdminLigaDuelos() {
   const [sinFin, setSinFin] = useState(true);
 
   const cargar = useCallback(async () => {
-    const { data, error: e } = await supabase.rpc('duelos_admin_resumen');
-    if (e) return setError(e.message.includes('duelos_admin_resumen') ? 'Falta ejecutar los SQL 60, 61 y 63 de la liga de duelos en Supabase.' : e.message);
+    const { data, error: e } = await supabase.rpc('duelos_admin_resumen', { p_deporte: deporte });
+    if (e) return setError(e.message.includes('duelos_admin_resumen') ? 'Falta ejecutar los SQL de la liga de duelos (60 a 69) en Supabase.' : e.message);
     const r = data as Resumen;
     setDatos(r);
     // Sugerencia: la próxima jornada de LaLiga que no ha empezado.
@@ -50,7 +53,7 @@ export default function AdminLigaDuelos() {
       setDesde((d) => d || String(numero));
       setHasta((h) => (h === '19' && numero > 19 ? '38' : h));
     }
-  }, []);
+  }, [deporte]);
 
   useEffect(() => {
     (async () => {
@@ -90,7 +93,14 @@ export default function AdminLigaDuelos() {
           <Link href="/admin" style={{ fontSize: 12, color: S.MUTED_2, textDecoration: 'none' }}>
             ← Panel de administración
           </Link>
-          <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT, fontFamily: "'Barlow Condensed', sans-serif", margin: 0 }}>Liga de duelos (fútbol)</h1>
+          <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT, fontFamily: "'Barlow Condensed', sans-serif", margin: 0 }}>Liga de duelos</h1>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {(['futbol', 'golf'] as const).map((d) => (
+              <button key={d} type="button" onClick={() => { setDatos(null); setDeporte(d); }} style={{ ...S.pill(deporte === d), width: 'auto' }}>
+                {d === 'futbol' ? '⚽ Fútbol' : '⛳ Golf'}
+              </button>
+            ))}
+          </div>
           <p style={{ fontSize: 12.5, color: S.MUTED_2, margin: 0, lineHeight: 1.5 }}>
             Temporada = una vuelta de LaLiga. Divisiones de tantos como jornadas + 1 (20 en una vuelta completa): todos contra todos, una vez. Cada jornada se añade sola cuando se publica y en ese momento se sortean los duelos (no hace falta calendario). Champions = jornadas extra con rival sorteado, las que caen entre la primera y la última jornada. La temporada se cierra sola al terminar la última. Ganar 3, empatar 1, perder 0. Suben y bajan 5 de 20 (la cuarta parte en divisiones más pequeñas). Cada jornada cuesta 1 crédito.
           </p>
@@ -108,13 +118,20 @@ export default function AdminLigaDuelos() {
               {!abierta && (
                 <div style={{ ...S.card, flexDirection: 'column', alignItems: 'stretch', gap: 10 }}>
                   <span style={{ fontWeight: 800, color: S.TEXT }}>1. Crear temporada</span>
+                  {deporte === 'golf' ? (
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <input value={rondas} onChange={(e) => setRondas(e.target.value.replace(/\D/g, ''))} style={{ ...S.input, width: 70 }} inputMode="numeric" />
+                      <span style={{ fontSize: 13, color: S.MUTED }}>torneos (uno por semana, el más importante) → divisiones de hasta {Number(rondas) + 1 || 0}.</span>
+                    </div>
+                  ) : (
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                     <span style={{ fontSize: 13, color: S.MUTED }}>De la jornada</span>
                     <input value={desde} onChange={(e) => setDesde(e.target.value.replace(/\D/g, ''))} style={{ ...S.input, width: 70 }} inputMode="numeric" />
                     <span style={{ fontSize: 13, color: S.MUTED }}>a la</span>
                     <input value={hasta} onChange={(e) => setHasta(e.target.value.replace(/\D/g, ''))} style={{ ...S.input, width: 70 }} inputMode="numeric" />
                   </div>
-                  {jornadas > 0 && (
+                  )}
+                  {deporte === 'futbol' && jornadas > 0 && (
                     <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>
                       {jornadas} jornadas de LaLiga → divisiones de hasta {tam} jugadores (+ las de Champions que caigan entre medias).
                     </span>
@@ -123,7 +140,20 @@ export default function AdminLigaDuelos() {
                     <input type="checkbox" checked={sinFin} onChange={(e) => setSinFin(e.target.checked)} />
                     Sin fin (pruebas): no se cierra y los nuevos entran en la siguiente jornada
                   </label>
-                  <button type="button" disabled={ocupado || !jornadas} onClick={() => void llamar('duelos_crear_temporada', { p_desde: nDesde, p_hasta: nHasta, p_sin_fin: sinFin }, 'Temporada creada.')} style={{ ...boton, opacity: ocupado || !jornadas ? 0.5 : 1 }}>
+                  <button
+                    type="button"
+                    disabled={ocupado || (deporte === 'futbol' ? !jornadas : !Number(rondas))}
+                    onClick={() =>
+                      void llamar(
+                        'duelos_crear_temporada',
+                        deporte === 'futbol'
+                          ? { p_desde: nDesde, p_hasta: nHasta, p_sin_fin: sinFin, p_deporte: 'futbol' }
+                          : { p_desde: 1, p_hasta: Number(rondas), p_sin_fin: sinFin, p_deporte: deporte, p_rondas: Number(rondas) },
+                        'Temporada creada.'
+                      )
+                    }
+                    style={{ ...boton, opacity: ocupado || (deporte === 'futbol' ? !jornadas : !Number(rondas)) ? 0.5 : 1 }}
+                  >
                     Crear temporada
                   </button>
                 </div>
@@ -149,14 +179,14 @@ export default function AdminLigaDuelos() {
                   {t.divisiones.length > 0 && <span style={{ fontSize: 12.5, color: S.MUTED }}>{t.divisiones.map((d) => `${d.nombre}: ${d.jugadores}`).join(' · ')}</span>}
                   {t.estado !== 'terminada' && t.rondas.length === 0 && (
                     <span style={{ fontSize: 12, color: S.MUTED_3 }}>
-                      {t.estado === 'inscripcion' ? 'Las jornadas se añaden al empezar y según se vayan publicando.' : `Todavía no hay ninguna jornada publicada desde la J${t.desde}. Se añade sola en cuanto salga.`}
+                      {t.estado === 'inscripcion' ? 'Las jornadas se añaden al empezar y según se vayan publicando.' : deporte === 'futbol' ? `Todavía no hay ninguna jornada publicada desde la J${t.desde}. Se añade sola en cuanto salga.` : 'Todavía no hay torneo: el de cada semana se elige y se sortea 48 horas antes de su cierre.'}
                     </span>
                   )}
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                     {t.rondas.map((r) => (
                       <span key={r.id} title={r.competicion} style={{ fontSize: 11, padding: '3px 7px', borderRadius: 6, background: r.tipo === 'champions' ? 'rgba(127,178,255,0.15)' : '#1A211D', color: r.estado === 'terminada' ? S.MUTED_3 : r.estado === 'en_juego' ? S.ACCENT : S.MUTED }}>
-                        {r.tipo === 'champions' ? 'UCL ' : 'J'}
-                        {r.competicion.match(/(\d+)\s*$/)?.[1]}
+                        {deporte === 'futbol' ? (r.tipo === 'champions' ? 'UCL ' : 'J') : ''}
+                        {deporte === 'futbol' ? r.competicion.match(/(\d+)\s*$/)?.[1] : r.competicion.replace(/\s+\d{4}$/, '')}
                         {r.estado === 'terminada' ? ' ✓' : r.estado === 'en_juego' ? ' ●' : ''}
                       </span>
                     ))}

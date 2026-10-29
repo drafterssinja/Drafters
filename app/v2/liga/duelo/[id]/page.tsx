@@ -20,7 +20,7 @@ import { mensajeError } from '@/lib/v2';
 type Linea = { clave: string; etiqueta: string; cantidad: number; puntos: number };
 type Jugador = { id: string; nombre: string; posicion: string; equipo_real: string | null; precio: number; puntos: number; jugo: boolean; minutos: number; partido_estado: string; desglose: Linea[] };
 type Lado = { id: string; nombre: string; soy_yo: boolean; tiene_equipo: boolean; visible: boolean; total: number | null; alineacion: string | null; jugadores: Jugador[] | null } | null;
-type Detalle = { id: string; competicion: string; tipo: string; estado: 'pendiente' | 'en_juego' | 'terminada'; cierre: string | null; division: string; local: Lado; visitante: Lado };
+type Detalle = { id: string; competicion: string; deporte?: 'futbol' | 'golf' | 'tenis'; tipo: string; estado: 'pendiente' | 'en_juego' | 'terminada'; cierre: string | null; division: string; local: Lado; visitante: Lado };
 
 const VERDE = '#3DDC84';
 const ROJO = '#FF8A8A';
@@ -71,7 +71,7 @@ export default function DueloPagina() {
   const visto = d ? (lado === 'local' ? d.local : d.visitante) : null;
 
   return (
-    <MarcoV2 perfil={perfil} estado={estado} deporte="futbol" volverA="/v2/futbol?modo=liga">
+    <MarcoV2 perfil={perfil} estado={estado} deporte={d?.deporte ?? 'futbol'} volverA={`/v2/${d?.deporte ?? 'futbol'}?modo=liga`}>
       {error && <p style={S.errorText}>{error}</p>}
       {!d && !error && <Cargando compacto />}
       {d && (
@@ -82,7 +82,7 @@ export default function DueloPagina() {
             </span>
             <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 26, color: S.TEXT }}>
               {d.tipo === 'champions' ? '⭐ ' : ''}
-              {jornadaBonita(d.competicion)}
+              {jornadaBonita(d.competicion, d.deporte)}
             </span>
             <span style={{ fontSize: 12, fontWeight: 700, color: d.estado === 'en_juego' ? VERDE : S.MUTED_2 }}>{d.estado === 'terminada' ? 'Terminada' : d.estado === 'en_juego' ? '● En juego · puntos en directo' : 'Todavía no ha empezado'}</span>
           </div>
@@ -127,7 +127,7 @@ export default function DueloPagina() {
               ) : (
                 <>
                   <span style={{ fontSize: 12, color: S.MUTED_2 }}>
-                    Alineación {visto.alineacion ?? ''} · toca un jugador para ver de dónde salen sus puntos
+                    {visto.alineacion ? `Alineación ${visto.alineacion} · ` : ''}toca un jugador para ver de dónde salen sus puntos
                   </span>
                   {visto.jugadores.map((j) => (
                     <FilaJugador key={j.id} j={j} pendiente={d.estado === 'pendiente'} />

@@ -123,7 +123,8 @@ export default function V2Deporte() {
             </>
           )}
           {/* 26/10 (Iñi): en fútbol la liga es de duelos 1 contra 1 por divisiones (SQL 60), con su propia página. */}
-          {modo === 'liga' && perfil && deporte === 'futbol' && <LigaDuelos />}
+          {/* 28/10 (Iñi): la liga de golf, exactamente igual que la de fútbol (duelos por divisiones, SQL 69). */}
+          {modo === 'liga' && perfil && (deporte === 'futbol' || deporte === 'golf') && <LigaDuelos deporte={deporte} />}
           {modo === 'liga' && deporte === 'tenis' && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, padding: '40px 10px', textAlign: 'center' }}>
               <BolaTenis size={64} />
@@ -131,7 +132,7 @@ export default function V2Deporte() {
               <span style={{ fontSize: 13.5, color: S.MUTED_2, lineHeight: 1.5, maxWidth: 320 }}>La liga de tenis llega en cuanto tengamos los primeros torneos rodando. De momento, juega amistosos.</span>
             </div>
           )}
-          {modo === 'liga' && perfil && deporte !== 'futbol' && deporte !== 'tenis' && (
+          {modo === 'liga' && perfil && deporte !== 'futbol' && deporte !== 'golf' && deporte !== 'tenis' && (
             <>
               <MisEquiposV2 deporte={deporte} miId={perfil.id} solo="liga" />
               <MesasLiga deporte={deporte} miId={perfil.id} />
