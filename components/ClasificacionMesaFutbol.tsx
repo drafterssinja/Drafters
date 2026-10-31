@@ -767,6 +767,8 @@ export default function ClasificacionMesaFutbol({
                             >
                               {j.nombre}
                             </span>
+                            {/* 01/11 (Iñi): estrellita pequeña para el MVP del partido. */}
+                            {p?.desglose?.some((l) => l.clave === 'mvp') && <span title="MVP del partido" style={{ flexShrink: 0, fontSize: 10, lineHeight: 1, color: '#F0B94D' }}>★</span>}
                             {j.posicion && <span style={{ flexShrink: 0, fontSize: 8.5, fontWeight: 700, color: S.MUTED_3 }}>{POSICION_CORTA[j.posicion] ?? ''}</span>}
                           </span>
                           <span style={{ fontSize: 9, color: S.MUTED_3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{detalle}</span>
