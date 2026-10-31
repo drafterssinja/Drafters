@@ -30,6 +30,7 @@ import { emparejarEquipo } from '../aliasEquipos';
 import { claveEquipoFutbol, emparejarJugadoresConTabla, resultadoDeEquipo, type FilaFantasy, type ResultadoEquipo } from '../futbolLaLiga';
 import type { TipoAvisoFutbol } from '../futbolAvisos';
 import { estadisticasVacias, puntuarJugador, type EstadisticasJugador, type LineaDesglose } from '../futbolPuntuacion';
+import { LIGA_APIF, buscarFixture, claveApif, emparejarApif, estadisticasApif, partidosApifDelDia, type FixtureApif, type StatsApifEquipo, type StatsApifJugador } from './apiFootball';
 
 type Admin = ReturnType<typeof crearClienteAdmin>;
 
@@ -239,6 +240,8 @@ type FilaRoster = {
   entro: boolean;
   salio: boolean;
   stats: Record<string, number>;
+  /** Dorsal (para emparejar con API-Football, 01/11). */
+  dorsal: string;
 };
 
 /** Evento del partido con su protagonista (para los avisos de la clasificación, 07/10). */
@@ -359,6 +362,7 @@ async function resumenDelPartido(slug: string, p: PartidoEspn): Promise<ResumenP
         entro: !!x.subbedIn,
         salio: !!x.subbedOut,
         stats,
+        dorsal: x.jersey === undefined || x.jersey === null ? '' : String(x.jersey),
       };
     });
   const rosters: any[] = json.rosters ?? [];
@@ -397,7 +401,7 @@ async function resumenDelPartido(slug: string, p: PartidoEspn): Promise<ResumenP
 }
 
 /** Estadísticas de un jugador de ESPN → las que usa la puntuación Drafters. */
-function estadisticasDe(f: FilaRoster, r: ResumenPartido, finalizado: boolean, penaltisParados: number): EstadisticasJugador {
+function estadisticasDe(f: FilaRoster, r: ResumenPartido, finalizado: boolean, penaltisParados: number, apif?: StatsApifJugador, mvp = false): EstadisticasJugador {
   const jugo = (f.stats.appearances ?? 0) > 0 || f.titular || f.entro;
   const st = estadisticasVacias();
   if (!jugo) return st;
@@ -419,6 +423,18 @@ function estadisticasDe(f: FilaRoster, r: ResumenPartido, finalizado: boolean, p
   st.golesEncajados = f.stats.goalsConceded ?? 0;
   st.penaltisFallados = r.penaltisFallados.get(f.atletaId) ?? 0;
   st.penaltisParados = penaltisParados;
+  // 01/11 (Iñi): faltas recibidas (ESPN) y lo que añade API-Football.
+  st.faltasRecibidas = f.stats.foulsSuffered ?? 0;
+  if (apif) {
+    st.pasesClave = apif.pasesClave;
+    st.entradas = apif.entradas;
+    st.intercepciones = apif.intercepciones;
+    st.tirosBloqueados = apif.tirosBloqueados;
+    st.duelosGanados = apif.duelosGanados;
+    st.duelosPerdidos = Math.max(0, apif.duelos - apif.duelosGanados);
+    st.regatesBuenos = apif.regatesBuenos;
+  }
+  st.mvp = finalizado && mvp;
   return st;
 }
 
@@ -593,6 +609,43 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
   }
   const partidosSinDatos: string[] = [];
 
+  // 01/11 (Iñi): estadísticas de API-Football (pases clave, entradas, intercepciones,
+  // duelos, regates y nota para el MVP). Se guardan en futbol_apif_partido.
+  type FilaApif = { clave_local: string; clave_visitante: string; apif_id: number | null; datos: StatsApifEquipo[] | null; actualizado_en: string | null };
+  const apifPorPartido = new Map<string, FilaApif>();
+  const filasApif: Record<string, unknown>[] = [];
+  if (claveApif() && LIGA_APIF[slug]) {
+    const { data: apifBD } = await admin.from('futbol_apif_partido').select('clave_local,clave_visitante,apif_id,datos,actualizado_en').eq('competicion', competicion);
+    for (const f of (apifBD as FilaApif[] | null) ?? []) apifPorPartido.set(`${f.clave_local}|${f.clave_visitante}`, f);
+    const fixturesPorDia = new Map<string, FixtureApif[] | null>();
+    for (const p of partidos) {
+      if (!resumenes.get(p.espnId)) continue; // solo los que se están puntuando en esta pasada
+      const k = `${p.local.clave}|${p.visitante.clave}`;
+      const prev = apifPorPartido.get(k);
+      const desde = prev?.actualizado_en ? ahora.getTime() - new Date(prev.actualizado_en).getTime() : Infinity;
+      const guardado = guardadoPorPartido.get(k);
+      const minTrasFinal = guardado?.finalizado_visto_en ? (ahora.getTime() - new Date(guardado.finalizado_visto_en).getTime()) / 60000 : 0;
+      const toca = !prev?.datos || opciones.forzar || (p.estado === 'en_juego' ? desde >= 50 * 1000 : minTrasFinal <= 180 && desde >= 10 * 60 * 1000);
+      if (!toca) continue;
+      try {
+        let id = prev?.apif_id ?? null;
+        if (!id) {
+          const dia = p.kickoff.toISOString().slice(0, 10);
+          if (!fixturesPorDia.has(dia)) fixturesPorDia.set(dia, await partidosApifDelDia(slug, p.kickoff).catch(() => null));
+          id = buscarFixture(fixturesPorDia.get(dia) ?? [], p.kickoff, p.local.nombre, p.visitante.nombre)?.id ?? null;
+        }
+        if (!id) continue;
+        const datos = await estadisticasApif(id);
+        if (datos.length === 0) continue;
+        const fila = { competicion, clave_local: p.local.clave, clave_visitante: p.visitante.clave, apif_id: id, datos, actualizado_en: ahora.toISOString() };
+        apifPorPartido.set(k, fila);
+        filasApif.push(fila);
+      } catch {
+        // API-Football no responde: se sigue con lo guardado (o solo con ESPN).
+      }
+    }
+  }
+
   for (const p of partidos) {
     const k = `${p.local.clave}|${p.visitante.clave}`;
     const prev = guardadoPorPartido.get(k);
@@ -668,6 +721,12 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
 
     if (yaCongelado) continue;
 
+    // 01/11: API-Football de este partido, emparejado con la alineación de ESPN, y el MVP (mejor nota).
+    const datosApif = apifPorPartido.get(k)?.datos ?? null;
+    const apifPorAtleta = datosApif && resumen ? emparejarApif(datosApif, resumen.roster.local, resumen.roster.visitante) : new Map<string, StatsApifJugador>();
+    const notas = (datosApif ?? []).flatMap((e) => e.jugadores).filter((x) => x.minutos > 0 && x.nota !== null).map((x) => x.nota as number);
+    const mejorNota = notas.length > 0 ? Math.max(...notas) : null;
+
     // Puntos de los jugadores de los dos equipos.
     for (const lado of ['local', 'visitante'] as const) {
       const mio = lado === 'local' ? p.local : p.visitante;
@@ -718,7 +777,8 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
       }
       for (const j of nuestrosDelEquipo) {
         const fr = filaPorNuestro.get(j.id);
-        const st = fr && resumen ? estadisticasDe(fr, resumen, finalizado, paradosPor.get(fr.atletaId) ?? 0) : estadisticasVacias();
+        const ap = fr ? apifPorAtleta.get(fr.atletaId) : undefined;
+        const st = fr && resumen ? estadisticasDe(fr, resumen, finalizado, paradosPor.get(fr.atletaId) ?? 0, ap, !!ap && mejorNota !== null && ap.nota === mejorNota) : estadisticasVacias();
         const { total, desglose } = puntuarJugador(j.posicion, st, { finalizado, golesContraEquipo: rival.goles, equipoGana: resultado === 'G' });
         // Eventos del jugador para los avisos de la clasificación (07/10).
         if (fr && resumen) {
@@ -856,6 +916,8 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
     const { error } = await admin.from('futbol_partidos_jornada').upsert(filasPartido, { onConflict: 'competicion,clave_local,clave_visitante' });
     if (error) throw new Error(`Guardando partidos: ${error.message}`);
   }
+  // 01/11: lo que ha traído API-Football en esta pasada (si falla, no rompe la sincronización).
+  if (filasApif.length > 0) await admin.from('futbol_apif_partido').upsert(filasApif, { onConflict: 'competicion,clave_local,clave_visitante' });
 
   // Cierre automático de las mesas (06/10, pedido de Iñi): en cuanto termina
   // el último partido de la jornada, las mesas pasan a "finalizada" (clasificación

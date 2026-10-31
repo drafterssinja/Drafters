@@ -40,6 +40,17 @@ export type EstadisticasJugador = {
   golesEncajados: number;
   penaltisFallados: number;
   penaltisParados: number;
+  // 01/11 (Iñi): con API-Football (y faltas recibidas de ESPN).
+  faltasRecibidas: number;
+  pasesClave: number;
+  entradas: number;
+  intercepciones: number;
+  tirosBloqueados: number;
+  duelosGanados: number;
+  duelosPerdidos: number;
+  regatesBuenos: number;
+  /** El de mejor nota del partido (API-Football), con el partido terminado. */
+  mvp: boolean;
 };
 
 export type ContextoPartido = {
@@ -59,8 +70,19 @@ export type LineaDesglose = {
 
 export const PUNTOS_GOL: Record<PosicionFutbol, number> = { delantero: 10, centrocampista: 12, defensa: 16, portero: 20 };
 export const PUNTOS_ASISTENCIA: Record<PosicionFutbol, number> = { delantero: 6, centrocampista: 6, defensa: 7, portero: 0 };
-export const PUNTOS_TIRO_A_PUERTA: Record<PosicionFutbol, number> = { delantero: 1, centrocampista: 1, defensa: 1.5, portero: 0 };
-export const PUNTOS_TIRO_FUERA: Record<PosicionFutbol, number> = { delantero: 0.5, centrocampista: 0.5, defensa: 1, portero: 0 };
+// 01/11 (Iñi): disparo a puerta +2,5 y fuera +1,5, para todos.
+export const PUNTOS_TIRO_A_PUERTA: Record<PosicionFutbol, number> = { delantero: 2.5, centrocampista: 2.5, defensa: 2.5, portero: 2.5 };
+export const PUNTOS_TIRO_FUERA: Record<PosicionFutbol, number> = { delantero: 1.5, centrocampista: 1.5, defensa: 1.5, portero: 1.5 };
+// 01/11 (Iñi): acciones nuevas con API-Football (iguales para todas las posiciones salvo la intercepción).
+export const PUNTOS_PASE_CLAVE = 1;
+export const PUNTOS_ENTRADA = 1;
+export const PUNTOS_INTERCEPCION: Record<PosicionFutbol, number> = { defensa: 1, centrocampista: 0.5, delantero: 0.5, portero: 0.5 };
+export const PUNTOS_TIRO_BLOQUEADO = 0.5;
+export const PUNTOS_DUELO_GANADO = 0.3;
+export const PUNTOS_DUELO_PERDIDO = -0.2;
+export const PUNTOS_REGATE = 0.5;
+export const PUNTOS_FALTA_RECIBIDA = 0.5;
+export const PUNTOS_MVP = 3;
 
 export const PUNTOS_PENALTI_FALLADO = -4;
 /** CONFIRMADO por Iñi (06/10): gol en propia puerta = −4 (la tabla maestra no lo contemplaba). */
@@ -87,15 +109,7 @@ export const MINUTOS_VICTORIA = 60;
 /** Acciones de las tablas que ESPN no proporciona: se muestran como
  * "Próximamente" y no puntúan. Se compara con el texto de la fila en
  * lib/puntuaciones.ts (empieza por…). */
-export const ACCIONES_PROXIMAMENTE = [
-  'Centro clave',
-  'Entrada ganada',
-  'Pase interceptado',
-  'Despeje clave',
-  'Salida aérea ganada',
-  'Duelo aéreo ganado',
-  'MVP del partido',
-];
+export const ACCIONES_PROXIMAMENTE = ['Despeje clave', 'Salida aérea ganada'];
 
 export function estadisticasVacias(): EstadisticasJugador {
   return {
@@ -114,6 +128,15 @@ export function estadisticasVacias(): EstadisticasJugador {
     golesEncajados: 0,
     penaltisFallados: 0,
     penaltisParados: 0,
+    faltasRecibidas: 0,
+    pasesClave: 0,
+    entradas: 0,
+    intercepciones: 0,
+    tirosBloqueados: 0,
+    duelosGanados: 0,
+    duelosPerdidos: 0,
+    regatesBuenos: 0,
+    mvp: false,
   };
 }
 
@@ -140,6 +163,9 @@ export function puntuarJugador(posicion: PosicionFutbol | string | null | undefi
   add('asistencia', 'Asistencia', st.asistencias, PUNTOS_ASISTENCIA[pos]);
   add('tiro_puerta', 'Disparo a puerta', st.tirosAPuerta, PUNTOS_TIRO_A_PUERTA[pos]);
   add('tiro_fuera', 'Disparo fuera', Math.max(0, st.tirosTotales - st.tirosAPuerta), PUNTOS_TIRO_FUERA[pos]);
+  add('pase_clave', 'Pase clave', st.pasesClave, PUNTOS_PASE_CLAVE);
+  add('regate', 'Regate', st.regatesBuenos, PUNTOS_REGATE);
+  add('falta_recibida', 'Falta recibida', st.faltasRecibidas, PUNTOS_FALTA_RECIBIDA);
   add('penalti_fallado', 'Penalti fallado', st.penaltisFallados, PUNTOS_PENALTI_FALLADO);
   add('propia_puerta', 'Gol en propia puerta', st.golesPropiaPuerta, PUNTOS_GOL_PROPIA_PUERTA);
 
@@ -150,6 +176,13 @@ export function puntuarJugador(posicion: PosicionFutbol | string | null | undefi
   // Disciplina. La 2ª amarilla (= expulsión) cuenta -4 en total, sin sumar
   // además las amarillas (ESPN ya la da como roja con 0 amarillas, pero se
   // protege el caso de que llegue como 2 amarillas + roja).
+  // Defensivas (01/11, API-Football)
+  add('entrada', 'Entrada', st.entradas, PUNTOS_ENTRADA);
+  add('intercepcion', 'Intercepción', st.intercepciones, PUNTOS_INTERCEPCION[pos]);
+  add('tiro_bloqueado', 'Tiro bloqueado', st.tirosBloqueados, PUNTOS_TIRO_BLOQUEADO);
+  add('duelo_ganado', 'Duelo ganado', st.duelosGanados, PUNTOS_DUELO_GANADO);
+  add('duelo_perdido', 'Duelo perdido', st.duelosPerdidos, PUNTOS_DUELO_PERDIDO);
+
   add('falta', 'Falta cometida', st.faltasCometidas, PUNTOS_FALTA);
   if (st.rojas > 0 && st.amarillas >= 2) {
     addTotal('roja', 'Expulsión (2 amarillas)', PUNTOS_ROJA);
@@ -172,6 +205,9 @@ export function puntuarJugador(posicion: PosicionFutbol | string | null | undefi
   if (pos === 'defensa' && ctx.finalizado && ctx.golesContraEquipo === 0 && st.minutos >= MINUTOS_DEFENSA_PORTERIA_A_CERO) {
     addTotal('porteria_cero', 'Portería a cero (60+ min.)', PUNTOS_DEFENSA_PORTERIA_A_CERO);
   }
+
+  // MVP del partido: el de mejor nota (API-Football), con el partido terminado.
+  if (ctx.finalizado && st.mvp) addTotal('mvp', 'MVP del partido', PUNTOS_MVP);
 
   // Partido completo (todos)
   if (ctx.finalizado && st.partidoCompleto) addTotal('completo', 'Partido completo', PUNTOS_PARTIDO_COMPLETO);
