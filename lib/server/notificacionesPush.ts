@@ -244,7 +244,7 @@ async function cuadrosDeTenis(admin: Admin): Promise<Aviso[]> {
     const parts = await todas<{ usuario_id: string; amistoso_id: string }>((d, h) => admin.from('amistoso_participantes').select('usuario_id,amistoso_id').in('amistoso_id', ids).range(d, h));
     const nombre = t.competicion.replace(/^ATP · |^WTA · /, '');
     for (const u of Array.from(new Set(parts.map((p) => p.usuario_id)))) {
-      avisos.push({ clave: `cuadro:${t.competicion}:${u}`, usuarioId: u, tipo: 'recordatorio_dia_antes', titulo: '🎾 Ya ha salido el cuadro', cuerpo: `Ya puedes hacer tu equipo de ${nombre}.`, url: '/v2/tenis?modo=amistosos' });
+      avisos.push({ clave: `cuadro:${t.competicion}:${u}`, usuarioId: u, tipo: 'recordatorio_dia_antes', titulo: '🎾 Ya ha salido el cuadro', cuerpo: `Ya puedes hacer tu equipo de ${nombre}.`, url: '/v2/tenis?modo=privadas' });
     }
   }
   return avisos;
