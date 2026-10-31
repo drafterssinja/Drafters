@@ -9,6 +9,7 @@ import { etiquetasPosicion } from '@/lib/posicionesEmpate';
 import { puntuarPartidoTenis, type EstadoPartido } from '@/lib/tenisPuntuacion';
 import type { LineaDesglose } from '@/lib/futbolPuntuacion';
 import Cargando from '@/components/Cargando';
+import { NivelBadge, useFichaUsuario, useNiveles } from '@/components/v2/Nivel';
 
 // ============================================================================
 // CLASIFICACIÓN DE TENIS (28/10, Iñi) — exactamente como fútbol y golf
@@ -60,8 +61,11 @@ export default function ClasificacionMesaTenis({
   const [partidos, setPartidos] = useState<Partido[]>([]);
   const [desde, setDesde] = useState<number>(0);
   const [cargado, setCargado] = useState(false);
-  const [vista, setVista] = useState<Vista>(terminada ? 'premios' : 'mesa');
+  const [vista, setVista] = useState<Vista>('mesa'); // 01/11 (Iñi): siempre se entra al detalle.
   const [equipoId, setEquipoId] = useState<string | null>(null);
+  // 01/11 (Iñi): un segundo toque en el equipo (o en su nombre) abre la ficha del usuario: nivel y vuestro historial.
+  const { abrirFicha, ficha } = useFichaUsuario();
+  const nivelesExt = useNiveles(externo.equipos.map((e) => e.equipoId));
   const [foco, setFoco] = useState<string | null>(null);
 
   useEffect(() => {
@@ -210,6 +214,7 @@ export default function ClasificacionMesaTenis({
   const pill = (activa: boolean) => ({ ...S.pill(activa), width: 'auto' as const });
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {ficha}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         <button type="button" onClick={() => setVista('mesa')} style={pill(vista === 'mesa')}>
           Mesa
@@ -229,6 +234,7 @@ export default function ClasificacionMesaTenis({
           <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
             <div style={{ flexShrink: 0, width: 150, display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 420, overflowY: 'auto' }}>
               <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Equipos ({equipos.length})</span>
+              <span style={{ fontSize: 9, fontWeight: 600, color: S.MUTED_3, lineHeight: 1.3 }}>Pulsa otra vez un equipo para ver su nivel y vuestro historial</span>
               {equipos.map((eq, i) => {
                 const activo = eq.equipoId === elegido.equipoId;
                 return (
@@ -239,12 +245,14 @@ export default function ClasificacionMesaTenis({
                     href="#"
                     onClick={(e) => {
                       e.preventDefault();
+                      if (activo) return abrirFicha(eq.equipoId);
                       setEquipoId(eq.equipoId);
                       setFoco(null);
                     }}
                     style={{ display: 'flex', alignItems: 'center', gap: 6, padding: 8, background: activo ? 'rgba(61,220,132,0.1)' : S.PANEL, border: `1px solid ${activo ? 'rgba(61,220,132,0.4)' : '#1E2723'}`, borderRadius: 9, textDecoration: 'none' }}
                   >
                     <span style={{ flexShrink: 0, minWidth: 16, textAlign: 'center', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 11, color: S.MUTED_2 }}>{rangos[i]}</span>
+                    <NivelBadge nivel={nivelesExt.get(eq.equipoId)} size={15} />
                     <span style={{ flex: 1, minWidth: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{eq.nombre}</span>
                     <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 12, color: S.MUTED_2 }}>{formatPuntos(totalEquipo(eq.jugadores))}</span>
                   </motion.a>
@@ -253,7 +261,10 @@ export default function ClasificacionMesaTenis({
             </div>
             <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
-                <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{elegido.nombre}</span>
+                <button type="button" onClick={() => abrirFicha(elegido.equipoId)} style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
+                  <NivelBadge nivel={nivelesExt.get(elegido.equipoId)} size={18} />
+                  <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textDecoration: 'underline', textDecorationColor: 'rgba(255,255,255,0.25)', textUnderlineOffset: 3 }}>{elegido.nombre}</span>
+                </button>
                 <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, color: S.MUTED_2 }}>{formatPuntos(totalEquipo(elegido.jugadores))} pts</span>
               </div>
               {[...elegido.jugadores]

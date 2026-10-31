@@ -21,6 +21,7 @@ import { PremiosDraftis } from '@/components/v2/DraftisMesa';
 import { IconoGema } from '@/components/v2/IconosV2';
 import { textoDraftis } from '@/lib/draftisMesa';
 import EtiquetaTramo from '@/components/v2/EtiquetaTramo';
+import { NivelBadge, useFichaUsuario, useNiveles } from '@/components/v2/Nivel';
 
 // ============================================================================
 // CLASIFICACIÓN EN DIRECTO DE UNA MESA DRAFTERS DE FÚTBOL (06/10)
@@ -335,7 +336,7 @@ export default function ClasificacionMesaFutbol({
   // 13/10 (Iñi): una mesa finalizada se abre en la clasificación final; los
   // equipos y los puntos de cada jugador siguen en "Ver detalles".
   const mesaFinalizada = sala.estado === 'finalizada';
-  const [vista, setVista] = useState<'mesa' | 'eventos' | 'premios'>(mesaFinalizada ? 'premios' : 'mesa');
+  const [vista, setVista] = useState<'mesa' | 'eventos' | 'premios'>(mesaFinalizada && !externo ? 'premios' : 'mesa'); // 01/11 (Iñi): en salas y ligas, siempre se entra al detalle (equipos a la izquierda, jugadores a la derecha).
 
   // Avisos y eventos (07/10, pedido de Iñi): como en golf, pero para los
   // jugadores del EQUIPO del usuario en esta mesa y con las alertas
@@ -353,6 +354,9 @@ export default function ClasificacionMesaFutbol({
   sonidoActivadoRef.current = sonidoActivado;
   const eventosVistosRef = useRef<Set<string> | null>(null);
   const [equipoSeleccionadoId, setEquipoSeleccionadoId] = useState<string | null>(null);
+  // 01/11 (Iñi): en salas y ligas (equipos = usuarios), un segundo toque en el equipo (o en su nombre) abre su ficha: nivel y vuestro historial.
+  const { abrirFicha, ficha } = useFichaUsuario();
+  const nivelesExt = useNiveles(externo ? externo.equipos.map((e) => e.equipoId) : []);
   const [jugadorFocoId, setJugadorFocoId] = useState<string | null>(null);
   const claveExterno = externo ? externo.equipos.map((e) => `${e.equipoId}:${e.jugadores.join('.')}`).join('|') + '#' + externo.misJugadores.join('.') : '';
   // Marco: página completa (mesas) o solo el contenido (dentro de un amistoso).
@@ -579,6 +583,7 @@ export default function ClasificacionMesaFutbol({
 
   return marco(
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: embebido ? 0 : '24px 20px 40px' }}>
+          {ficha}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#3DDC84' }}>{sala.nombre}</span>
             <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT }}>{mesaFinalizada ? 'Clasificación final' : 'Clasificación en directo'}</h1>
@@ -666,6 +671,7 @@ export default function ClasificacionMesaFutbol({
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
               <div style={{ flexShrink: 0, width: 150, display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 520, overflowY: 'auto' }}>
                 <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Equipos ({equipos.length})</span>
+                {externo && <span style={{ fontSize: 9, fontWeight: 600, color: S.MUTED_3, lineHeight: 1.3 }}>Pulsa otra vez un equipo para ver su nivel y vuestro historial</span>}
                 {equiposPorPuntuacion.map((eq, i) => {
                   const activo = eq.equipoId === equipoSeleccionado.equipoId;
                   return (
@@ -676,6 +682,7 @@ export default function ClasificacionMesaFutbol({
                       href="#"
                       onClick={(e) => {
                         e.preventDefault();
+                        if (externo && activo) return abrirFicha(eq.equipoId);
                         setEquipoSeleccionadoId(eq.equipoId);
                         setJugadorFocoId(null);
                       }}
@@ -691,6 +698,7 @@ export default function ClasificacionMesaFutbol({
                       }}
                     >
                       <span style={{ flexShrink: 0, minWidth: 16, textAlign: 'center', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 11, color: S.MUTED_2 }}>{etiquetasEquipos[i]}</span>
+                      {externo && <NivelBadge nivel={nivelesExt.get(eq.equipoId)} size={15} />}
                       <span style={{ flex: 1, minWidth: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{eq.nombre}</span>
                       <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 12, color: S.MUTED_2 }}>{formatPuntos(totalEquipo(eq.jugadores))}</span>
                     </motion.a>
@@ -700,7 +708,14 @@ export default function ClasificacionMesaFutbol({
 
               <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
-                  <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{equipoSeleccionado.nombre}</span>
+                  {externo ? (
+                    <button type="button" onClick={() => abrirFicha(equipoSeleccionado.equipoId)} style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
+                      <NivelBadge nivel={nivelesExt.get(equipoSeleccionado.equipoId)} size={18} />
+                      <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textDecoration: 'underline', textDecorationColor: 'rgba(255,255,255,0.25)', textUnderlineOffset: 3 }}>{equipoSeleccionado.nombre}</span>
+                    </button>
+                  ) : (
+                    <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{equipoSeleccionado.nombre}</span>
+                  )}
                   <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, color: '#3DDC84' }}>{formatPuntos(totalEquipo(equipoSeleccionado.jugadores))} pts</span>
                 </div>
 

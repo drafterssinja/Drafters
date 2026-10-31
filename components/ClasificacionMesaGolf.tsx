@@ -25,6 +25,7 @@ import { BotonNotificaciones } from '@/components/AjustesNotificaciones';
 import { PremiosDraftis, ResultadoDraftis } from '@/components/v2/DraftisMesa';
 import { puntosGolfTramo, type PorRonda } from '@/lib/tramos';
 import EtiquetaTramo from '@/components/v2/EtiquetaTramo';
+import { NivelBadge, useFichaUsuario, useNiveles } from '@/components/v2/Nivel';
 
 // ============================================================================
 // CLASIFICACIÓN EN DIRECTO DE UNA MESA DRAFTERS (nuevo, 30/09)
@@ -152,9 +153,14 @@ export default function ClasificacionSala({
   // verdad no se resuelve con un desempate automático).
   const [torneoFinalizado, setTorneoFinalizado] = useState(false);
   useEffect(() => {
-    if (torneoFinalizado) setVista((v) => (v === 'mesa' ? 'premios' : v));
+    // 01/11 (Iñi): en salas y ligas (externo), aunque haya terminado se entra al detalle.
+    if (torneoFinalizado && !externo) setVista((v) => (v === 'mesa' ? 'premios' : v));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [torneoFinalizado]);
   const [equipoSeleccionadoId, setEquipoSeleccionadoId] = useState<string | null>(null);
+  // 01/11 (Iñi): en salas y ligas (equipos = usuarios), un segundo toque en el equipo (o en su nombre) abre su ficha: nivel y vuestro historial.
+  const { abrirFicha, ficha } = useFichaUsuario();
+  const nivelesExt = useNiveles(externo ? externo.equipos.map((e) => e.equipoId) : []);
   const [jugadorFocoId, setJugadorFocoId] = useState<string | null>(null);
   const [hoyosFoco, setHoyosFoco] = useState<HoyoRow[] | 'cargando' | null>(null);
   // Nombre de cada campo (01/10) — mismo criterio que
@@ -622,6 +628,7 @@ export default function ClasificacionSala({
 
   return marco(
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: embebido ? 0 : '24px 20px 40px' }}>
+          {ficha}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#3DDC84' }}>{sala.nombre}</span>
             {sala.tramo && <EtiquetaTramo tramo={sala.tramo} deporte={sala.deporte} />}
@@ -703,6 +710,7 @@ export default function ClasificacionSala({
                     </button>
                   )}
                 </div>
+                {externo && <span style={{ fontSize: 9, fontWeight: 600, color: S.MUTED_3, lineHeight: 1.3 }}>Pulsa otra vez un equipo para ver su nivel y vuestro historial</span>}
                 {equiposVisibles.map(({ eq, rango }) => {
                   const activo = eq.equipoId === equipoSeleccionado.equipoId;
                   const esFavorito = esMaraton && favoritos.has(eq.equipoId);
@@ -714,6 +722,7 @@ export default function ClasificacionSala({
                       href="#"
                       onClick={(e) => {
                         e.preventDefault();
+                        if (externo && activo) return abrirFicha(eq.equipoId);
                         setEquipoSeleccionadoId(eq.equipoId);
                         setJugadorFocoId(null);
                       }}
@@ -730,6 +739,7 @@ export default function ClasificacionSala({
                     >
                       <span style={{ flexShrink: 0, minWidth: esMaraton ? 14 : 16, textAlign: 'center', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 11, color: S.MUTED_2 }}>{rango}</span>
                       {esMaraton && <EstrellaFavorito activo={esFavorito} onToggle={() => alternarFavorito(eq.equipoId)} />}
+                      {externo && <NivelBadge nivel={nivelesExt.get(eq.equipoId)} size={15} />}
                       <span style={{ flex: 1, minWidth: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {eq.nombre}
                       </span>
@@ -748,9 +758,16 @@ export default function ClasificacionSala({
 
               <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
-                  <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {equipoSeleccionado.nombre}
-                  </span>
+                  {externo ? (
+                    <button type="button" onClick={() => abrirFicha(equipoSeleccionado.equipoId)} style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
+                      <NivelBadge nivel={nivelesExt.get(equipoSeleccionado.equipoId)} size={18} />
+                      <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textDecoration: 'underline', textDecorationColor: 'rgba(255,255,255,0.25)', textUnderlineOffset: 3 }}>{equipoSeleccionado.nombre}</span>
+                    </button>
+                  ) : (
+                    <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {equipoSeleccionado.nombre}
+                    </span>
+                  )}
                   <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, color: S.MUTED_2 }}>
                     {formatPuntos(totalEquipo(equipoSeleccionado.jugadores))} pts
                   </span>

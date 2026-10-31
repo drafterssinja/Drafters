@@ -122,7 +122,7 @@ export function UsuarioConNivel({ id, nombre, nivel, miId, estilo, sinArroba = f
 }
 
 type Nivel = { nivel: number; xp: number; xp_en_nivel: number; xp_siguiente: number; para_subir?: number; jugadas: number; ganadas: number; nombre: string };
-type H2H = { ganadas: number; perdidas: number; empates: number; total: number };
+type H2H = { ganadas: number; perdidas: number; empates: number; total: number; ultima?: string | null };
 
 // 31/10 (Iñi, como en Ludoteka): puntuación de nivel; cada 100 puntos, un nivel (3821 = nivel 38).
 export function BarraNivel({ n }: { n: Pick<Nivel, 'nivel' | 'xp' | 'xp_en_nivel' | 'xp_siguiente' | 'para_subir'> }) {
@@ -143,7 +143,13 @@ export function BarraNivel({ n }: { n: Pick<Nivel, 'nivel' | 'xp' | 'xp_en_nivel
 export function FichaUsuario({ id, miId, onCerrar }: { id: string; miId?: string; onCerrar: () => void }) {
   const [n, setN] = useState<Nivel | null>(null);
   const [h, setH] = useState<H2H | null>(null);
-  const yo = miId === id;
+  // Sin miId (p. ej. desde la clasificación de una sala), se mira la sesión.
+  const [yoId, setYoId] = useState<string | undefined>(miId);
+  useEffect(() => {
+    if (miId) return setYoId(miId);
+    void supabase.auth.getSession().then(({ data }) => setYoId(data.session?.user.id));
+  }, [miId]);
+  const yo = yoId === id;
   useEffect(() => {
     void supabase.rpc('mi_nivel', { p_usuario: id }).then(({ data }) => setN(data as Nivel));
     if (!yo) void supabase.rpc('h2h_resumen', { p_rival: id }).then(({ data }) => setH(data as H2H));
@@ -168,6 +174,12 @@ export function FichaUsuario({ id, miId, onCerrar }: { id: string; miId?: string
             {!yo && h && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 12, borderRadius: 12, background: 'rgba(255,255,255,0.03)', border: '1px solid #1E2823' }}>
                 <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: S.MUTED_3 }}>Tú contra @{n.nombre}</span>
+                {h.total > 0 && (
+                  <span style={{ fontSize: 12.5, color: S.MUTED, lineHeight: 1.4 }}>
+                    Habéis coincidido en <b style={{ color: S.TEXT }}>{h.total} {h.total === 1 ? 'partida' : 'partidas'}</b>
+                    {h.ultima ? ` · la última, el ${new Intl.DateTimeFormat('es-ES', { day: 'numeric', month: 'long', timeZone: 'Europe/Madrid' }).format(new Date(h.ultima))}` : ''}
+                  </span>
+                )}
                 {h.total === 0 ? (
                   <span style={{ fontSize: 13, color: S.MUTED_2 }}>Todavía no habéis coincidido en ninguna partida terminada.</span>
                 ) : (
@@ -202,4 +214,10 @@ export function FichaUsuario({ id, miId, onCerrar }: { id: string; miId?: string
       </div>
     </div>
   );
+}
+
+/** 01/11 (Iñi): para abrir la ficha de un usuario (nivel y cara a cara) desde cualquier lista. */
+export function useFichaUsuario() {
+  const [id, setId] = useState<string | null>(null);
+  return { abrirFicha: setId, ficha: id ? <FichaUsuario id={id} onCerrar={() => setId(null)} /> : null };
 }

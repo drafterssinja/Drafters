@@ -7,9 +7,8 @@ import LogoDrafters from '@/components/LogoDrafters';
 import { supabase, type Perfil } from '@/lib/supabaseClient';
 import * as S from '@/lib/mockupStyles';
 import { DEPORTES_V2, DEPORTE_NOMBRE, IconoCartas, IconoCredito, PelotaDeporte, type DeporteV2 } from '@/components/v2/IconosV2';
-import { puedeJugarPocha } from '@/lib/pocha';
 import { FichaCreditos, useCreditosV2 } from '@/components/v2/creditos';
-import { NivelBadge, useNiveles } from '@/components/v2/Nivel';
+import { NivelBadge, tramoNivel, useNiveles } from '@/components/v2/Nivel';
 
 // ============================================================================
 // CABECERA DE DRAFTERS V2 (15/10)
@@ -31,12 +30,8 @@ export default function CabeceraV2({ perfil, deporte: deporteOPocha, volverA }: 
   const [ficha, setFicha] = useState(false);
   const [noLeidas, setNoLeidas] = useState(0);
   // 19/10 (Iñi): el icono de cartas (pocha) solo lo ven Iñi y Javier.
-  const [pocha, setPocha] = useState(false);
-  useEffect(() => {
-    if (!perfil) return;
-    if (puedeJugarPocha(perfil.email)) return setPocha(true);
-    void supabase.auth.getSession().then(({ data }) => setPocha(puedeJugarPocha(data.session?.user.email)));
-  }, [perfil]);
+  // 01/11 (Iñi): de momento, fuera las cartas para todos (ocupaban sitio arriba).
+  const pocha = false;
   // 15/10 (Iñi: "la parte superior está muy achatada"): más alta, y tres
   // tamaños según el ancho del móvil para que todo quepa sin aplastarse.
   const [ancho, setAncho] = useState(400);
@@ -57,12 +52,14 @@ export default function CabeceraV2({ perfil, deporte: deporteOPocha, volverA }: 
   }, [perfil]);
 
   const info = creditos?.[deporte] ?? null;
-  const t = ancho >= 400 ? { logo: 26, bola: 30, icono: 21, boton: 32, pad: 16 } : ancho >= 370 ? { logo: 23, bola: 27, icono: 19, boton: 31, pad: 14 } : { logo: 21, bola: 25, icono: 18, boton: 29, pad: 12 };
+  const t = ancho >= 400 ? { logo: 26, bola: 30, icono: 21, boton: 32, pad: 16 } : ancho >= 370 ? { logo: 22, bola: 26, icono: 19, boton: 30, pad: 12 } : { logo: 21, bola: 25, icono: 18, boton: 29, pad: 10 };
+  // 01/11: con la insignia de nivel arriba, todo un poco más junto para que quepan las tres pelotas.
+  const estrecho = ancho < 420;
 
   return (
     <div className="v2">
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, minHeight: 68, padding: `18px ${t.pad}px`, borderBottom: '1px solid #1A211D' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: estrecho ? 4 : 6, minHeight: 68, padding: `18px ${t.pad}px`, borderBottom: '1px solid #1A211D' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: estrecho ? 4 : 6, minWidth: 0 }}>
           <Link href="/v2/futbol" style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }} aria-label="Drafters">
             <LogoDrafters size={pocha ? t.logo - 2 : t.logo} />
           </Link>
@@ -79,7 +76,7 @@ export default function CabeceraV2({ perfil, deporte: deporteOPocha, volverA }: 
                     height: pocha ? t.icono + 7 : t.bola + 2,
                     minWidth: pocha ? t.icono + 3 : t.bola,
                     flexShrink: 0,
-                    padding: activo && !pocha ? '0 10px 0 4px' : 0,
+                    padding: activo && !pocha ? (estrecho ? '0 8px 0 3px' : '0 10px 0 4px') : 0,
                     borderRadius: 999,
                     display: 'flex',
                     alignItems: 'center',
@@ -127,7 +124,7 @@ export default function CabeceraV2({ perfil, deporte: deporteOPocha, volverA }: 
         </div>
 
         {perfil && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: estrecho ? 3 : 5, flexShrink: 0 }}>
             <Link href="/notificaciones" aria-label="Notificaciones" style={{ position: 'relative', flexShrink: 0, width: t.boton, height: t.boton, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#C9D2CC', background: '#131917', border: '1px solid #2A3733', borderRadius: 8 }}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
@@ -143,14 +140,16 @@ export default function CabeceraV2({ perfil, deporte: deporteOPocha, volverA }: 
               type="button"
               onClick={() => setFicha(true)}
               aria-label={`Créditos de ${DEPORTE_NOMBRE[deporte]}`}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, height: t.boton, background: '#131917', border: '1px solid #2A3733', borderRadius: 8, padding: '0 9px', cursor: 'pointer' }}
+              style={{ display: 'flex', alignItems: 'center', gap: estrecho ? 4 : 6, flexShrink: 0, height: t.boton, background: '#131917', border: '1px solid #2A3733', borderRadius: 8, padding: estrecho ? '0 6px' : '0 9px', cursor: 'pointer' }}
             >
               <IconoCredito size={15} />
               <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13, color: S.TEXT }}>{info ? info.saldo : '–'}</span>
             </button>
             {miNivel ? (
-              <Link href="/v2/nivel" aria-label={`Mi nivel: ${miNivel}`} style={{ display: 'flex', flexShrink: 0 }}>
-                <NivelBadge nivel={miNivel} size={t.boton} />
+              // 01/11 (Iñi): que se vea que es el nivel sin ocupar más: la insignia y debajo, en pequeño, "NIVEL".
+              <Link href="/v2/nivel" aria-label={`Mi nivel: ${miNivel}`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1, flexShrink: 0, height: t.boton, textDecoration: 'none' }}>
+                <NivelBadge nivel={miNivel} size={t.boton - 8} />
+                <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 7, lineHeight: 1, letterSpacing: '0.02em', color: tramoNivel(miNivel).color }}>NIVEL</span>
               </Link>
             ) : null}
             <Link href="/cuenta" aria-label="Mi cuenta" style={{ flexShrink: 0, width: t.boton, height: t.boton, borderRadius: '50%', background: S.ACCENT, color: '#04140B', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 12.5, display: 'flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none' }}>
