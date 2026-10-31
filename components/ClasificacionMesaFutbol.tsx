@@ -981,9 +981,9 @@ export function ContadorDuelos({ l }: { l: LineaDesglose }) {
   const color = ganados ? '#3DDC84' : '#FF8A8A';
   return (
     <span style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-      <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: S.MUTED }}>
+      <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: S.MUTED }}>
         {l.etiqueta}
-        <span style={{ minWidth: 20, textAlign: 'center', padding: '1px 7px', borderRadius: 999, background: ganados ? 'rgba(61,220,132,0.16)' : 'rgba(255,138,138,0.16)', color, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 14, lineHeight: 1.2 }}>{l.cantidad}</span>
+        <span style={{ minWidth: 15, textAlign: 'center', padding: '0 5px', borderRadius: 999, background: ganados ? 'rgba(61,220,132,0.16)' : 'rgba(255,138,138,0.16)', color, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 11.5, lineHeight: 1.35 }}>{l.cantidad}</span>
       </span>
       <span style={{ fontSize: 10, color: S.MUTED_3 }}>{textoFaltaDuelos(l)}</span>
     </span>
