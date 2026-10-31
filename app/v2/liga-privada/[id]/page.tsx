@@ -224,7 +224,7 @@ function LigaPrivada() {
                       <div key={f.usuario_id} style={{ display: 'grid', gridTemplateColumns: '34px 1fr 30px 30px 44px', gap: 6, alignItems: 'center', padding: '8px 2px', borderTop: '1px solid rgba(255,255,255,0.05)', background: f.soy_yo ? 'rgba(61,220,132,0.07)' : 'transparent', borderRadius: f.soy_yo ? 8 : 0 }}>
                         <span style={{ fontWeight: 800, fontSize: 13.5, color: posiciones[i].replace('T', '') === '1' && f.pts > 0 ? ORO : S.MUTED }}>{posiciones[i]}</span>
                         <span style={{ minWidth: 0, fontWeight: 700, fontSize: 13.5, color: f.soy_yo ? VERDE : S.TEXT }}>
-                          <UsuarioConNivel id={f.usuario_id} nombre={f.nombre} nivel={niveles.get(f.usuario_id)} miId={perfil?.id} />
+                          <UsuarioConNivel id={f.usuario_id} nombre={f.nombre} nivel={niveles.get(f.usuario_id)} miId={perfil?.id} modo="popover" />
                         </span>
                         <span style={{ textAlign: 'center', fontSize: 13, color: S.MUTED }}>{f.pj}</span>
                         <span style={{ textAlign: 'center', fontSize: 13, color: S.MUTED }}>{f.victorias}</span>

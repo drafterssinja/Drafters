@@ -125,7 +125,7 @@ function PartidaAbierta({ u }: { u: Ultima }) {
             <div key={f.usuario_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderTop: '1px solid rgba(255,255,255,0.05)', fontSize: 13 }}>
               <span style={{ width: 26, fontWeight: 800, color: f.posicion === 1 ? '#F0B94D' : S.MUTED_2 }}>{f.posicion ? `${f.posicion}º` : '–'}</span>
               <span style={{ flex: 1, minWidth: 0, fontWeight: 700, color: f.soy_yo ? VERDE : S.TEXT }}>
-                <UsuarioConNivel id={f.usuario_id} nombre={f.nombre} nivel={niveles.get(f.usuario_id)} miId={miId} />
+                <UsuarioConNivel id={f.usuario_id} nombre={f.nombre} nivel={niveles.get(f.usuario_id)} miId={miId} modo="popover" />
               </span>
               <span style={{ color: S.MUTED_2, fontSize: 12.5 }}>{f.jugo ? `${f2(f.puntos).replace(/,00$/, '')} pts` : 'sin equipo'}</span>
               <span style={{ minWidth: 50, textAlign: 'right', fontWeight: 800, fontSize: 12.5, color: f.xp > 0 ? VERDE : f.xp < 0 ? ROJO : S.MUTED_3 }}>{f.jugo ? conSigno(Number(f.xp)) : ''}</span>

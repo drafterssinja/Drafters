@@ -94,6 +94,8 @@ const TARJETAS_GESTION: { href: string; titulo: string; subtitulo: string }[] = 
   { href: '/admin/resultados-golf', titulo: 'Resultados de golf en vivo', subtitulo: 'Conectar cada competición con ESPN para la clasificación en directo' },
   // 13/10: diagnóstico de la fuente de tenis en directo (Live Tennis API).
   { href: '/admin/tenis', titulo: 'Tenis', subtitulo: 'Crear los torneos de la semana (ESPN), actualizarlos y probar fuentes' },
+  // 01/11: probar API-Football (estadísticas por jugador: entradas, intercepciones, duelos...).
+  { href: '/admin/api-football', titulo: 'Probar API-Football', subtitulo: 'Ver qué estadísticas por jugador trae un partido real antes de pagar' },
   // Ruta renombrada de /admin/publicidad a /admin/videos (28/09, aviso de
   // Iñi) — la palabra "publicidad" en la URL hacía que algunos
   // bloqueadores de anuncios del navegador (net::ERR_BLOCKED_BY_CLIENT)
