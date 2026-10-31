@@ -157,7 +157,10 @@ function FilaJugador({ j, pendiente }: { j: Jugador; pendiente: boolean }) {
       <button type="button" onClick={() => setAbierto(!abierto)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 4px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
         <span style={{ flexShrink: 0, width: 34, fontSize: 10, fontWeight: 800, color: p.c }}>{p.t}</span>
         <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-          <span style={{ fontWeight: 800, fontSize: 13.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.nombre}</span>
+          <span style={{ fontWeight: 800, fontSize: 13.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {j.nombre}
+            {j.desglose.some((l) => l.clave === 'mvp') && <span title="MVP del partido" style={{ marginLeft: 4, fontSize: 10, color: '#F0B94D' }}>★</span>}
+          </span>
           <span style={{ fontSize: 11, color: S.MUTED_3 }}>
             {j.equipo_real ?? ''} · <span style={{ color: j.partido_estado === 'en_juego' ? VERDE : S.MUTED_3 }}>{estado}</span>
           </span>
