@@ -245,7 +245,7 @@ function LigaPrivada() {
                   const abiertaJ = abierta === j.id;
                   return (
                     <div key={j.id} style={{ borderTop: i === 0 ? 'none' : '1px solid rgba(255,255,255,0.05)' }}>
-                      <button type="button" onClick={() => setAbierta(abiertaJ ? null : j.id)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 2px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
+                      <button type="button" onClick={() => (j.estado === 'pendiente' ? setAbierta(abiertaJ ? null : j.id) : router.push(`/v2/liga-privada/jornada/${j.id}`))} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 2px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
                         <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
                           <span style={{ fontWeight: 800, fontSize: 14, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{jornadaBonita(j.competicion, dep)}</span>
                           <span style={{ fontSize: 11.5, color: j.estado === 'en_juego' ? VERDE : S.MUTED_3 }}>{j.estado === 'terminada' ? 'Terminada' : j.estado === 'en_juego' ? '● En juego' : `Cierra ${fecha(j.cierre)}`}</span>
@@ -254,7 +254,7 @@ function LigaPrivada() {
                           {j.estado === 'pendiente' ? (j.tengo_equipo ? '✓ Equipo hecho' : <span style={{ color: '#FF8A8A' }}>Sin equipo</span>) : yo?.puesto ? `${yo.puesto}º` : 'Sin equipo'}
                         </span>
                         {j.estado === 'terminada' && <span style={{ minWidth: 40, textAlign: 'right', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 16, color: (yo?.puntos_liga ?? 0) > 0 ? VERDE : S.MUTED_3 }}>+{yo?.puntos_liga ?? 0}</span>}
-                        <span style={{ color: S.MUTED_3, fontSize: 11 }}>{abiertaJ ? '▾' : '▸'}</span>
+                        <span style={{ color: S.MUTED_3, fontSize: j.estado === 'pendiente' ? 11 : 16 }}>{j.estado !== 'pendiente' ? '›' : abiertaJ ? '▾' : '▸'}</span>
                       </button>
                       {abiertaJ && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '0 2px 12px' }}>

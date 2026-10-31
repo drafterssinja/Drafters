@@ -23,11 +23,12 @@ import { cadaXSegundos, mensajeError } from '@/lib/v2';
 type Fila = { id: string; liga_id: string; competicion: string; cierre: string | null; lp_ligas: { nombre: string; deporte: 'futbol' | 'golf' | 'tenis' } | { nombre: string; deporte: 'futbol' | 'golf' | 'tenis' }[] | null };
 type Eq = { usuario_id: string; nombre: string; jugadores: string[]; alineacion: string | null; unido_en: string };
 type Estado = 'pendiente' | 'en_juego' | 'terminada';
+type Res = { usuario_id: string; nombre: string; tiene_equipo: boolean; total: number | null; puesto: number | null; puntos_liga: number | null; soy_yo: boolean };
 
 export default function JornadaLigaPrivada() {
   const { id } = useParams<{ id: string }>();
   const { perfil, estado } = useSesionV2();
-  const [j, setJ] = useState<{ ligaId: string; nombre: string; deporte: 'futbol' | 'golf' | 'tenis'; competicion: string; estado: Estado; puntos: Map<string, number | null> } | null>(null);
+  const [j, setJ] = useState<{ ligaId: string; nombre: string; deporte: 'futbol' | 'golf' | 'tenis'; competicion: string; estado: Estado; puntos: Map<string, number | null>; resultados: Res[] } | null>(null);
   const [equipos, setEquipos] = useState<Eq[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,8 +43,8 @@ export default function JornadaLigaPrivada() {
       const liga = Array.isArray(f.lp_ligas) ? f.lp_ligas[0] : f.lp_ligas;
       const [{ data: info }, { data: eqs }] = await Promise.all([supabase.rpc('lp_info', { p_liga: f.liga_id }), supabase.rpc('lp_equipos_jornada', { p_jornada: id })]);
       if (!activo) return;
-      const jo = ((info as { jornadas?: { id: string; estado: Estado; resultados: { usuario_id: string; puntos_liga: number | null }[] }[] } | null)?.jornadas ?? []).find((x) => x.id === id);
-      setJ({ ligaId: f.liga_id, nombre: liga?.nombre ?? 'Liga privada', deporte: liga?.deporte ?? 'futbol', competicion: f.competicion, estado: jo?.estado ?? 'pendiente', puntos: new Map((jo?.resultados ?? []).map((r) => [r.usuario_id, r.puntos_liga])) });
+      const jo = ((info as { jornadas?: { id: string; estado: Estado; resultados: Res[] }[] } | null)?.jornadas ?? []).find((x) => x.id === id);
+      setJ({ ligaId: f.liga_id, nombre: liga?.nombre ?? 'Liga privada', deporte: liga?.deporte ?? 'futbol', competicion: f.competicion, estado: jo?.estado ?? 'pendiente', puntos: new Map((jo?.resultados ?? []).map((r) => [r.usuario_id, r.puntos_liga])), resultados: jo?.resultados ?? [] });
       setEquipos((eqs as Eq[]) ?? []);
     }
     void cargar();
@@ -58,6 +59,20 @@ export default function JornadaLigaPrivada() {
   const externos: EquipoExterno[] = (equipos ?? []).map((e) => ({ equipoId: e.usuario_id, nombre: `@${e.nombre}`, jugadores: e.jugadores, createdAt: e.unido_en }));
   const externo = { equipos: externos, misJugadores: externos.find((e) => e.equipoId === miId)?.jugadores ?? [] };
   const terminada = j?.estado === 'terminada';
+  // 01/11: la pestaña "Clasificación final / Premios" de la liga: puesto, puntos del equipo y puntos de liga.
+  const premios = j ? (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {j.resultados.map((r) => (
+        <div key={r.usuario_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 10, background: r.soy_yo ? 'rgba(61,220,132,0.08)' : S.PANEL, border: `1px solid ${r.soy_yo ? 'rgba(61,220,132,0.35)' : '#1E2723'}` }}>
+          <span style={{ width: 28, fontWeight: 800, color: r.puesto === 1 ? '#F0B94D' : S.MUTED_2 }}>{r.puesto ? `${r.puesto}º` : '–'}</span>
+          <span style={{ flex: 1, minWidth: 0, fontWeight: 700, fontSize: 13.5, color: r.soy_yo ? '#3DDC84' : S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>@{r.nombre}</span>
+          <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>{r.tiene_equipo ? `${String(Math.round(Number(r.total ?? 0) * 10) / 10).replace('.', ',')} pts` : 'sin equipo'}</span>
+          <span style={{ minWidth: 40, textAlign: 'right', fontWeight: 800, color: (r.puntos_liga ?? 0) > 0 ? '#3DDC84' : S.MUTED_3 }}>{terminada ? `+${r.puntos_liga ?? 0}` : ''}</span>
+        </div>
+      ))}
+      <span style={{ fontSize: 11, color: S.MUTED_3 }}>{terminada ? 'A la derecha, los puntos de liga de esta sala.' : 'Los puntos de liga se reparten cuando termina la sala.'}</span>
+    </div>
+  ) : null;
 
   return (
     <MarcoV2 perfil={perfil} estado={estado} deporte={j?.deporte ?? 'futbol'} volverA={j ? `/v2/liga-privada/${j.ligaId}` : undefined}>
@@ -79,29 +94,21 @@ export default function JornadaLigaPrivada() {
           ) : externos.length === 0 ? (
             <p style={{ fontSize: 13, color: S.MUTED_2 }}>Nadie hizo equipo en esta jornada.</p>
           ) : j.deporte === 'tenis' ? (
-            <ClasificacionMesaTenis competicion={j.competicion} terminada={terminada} externo={externo} />
+            <ClasificacionMesaTenis competicion={j.competicion} terminada={terminada} externo={externo} premios={premios} />
           ) : j.deporte === 'golf' ? (
             <ClasificacionSala
               embebido
               salaFija={{ id: j.ligaId, nombre: j.nombre, competicion: j.competicion, deporte: 'golf', tipo: 'amistoso', estado: terminada ? 'finalizada' : 'abierta', buy_in: 0, aforo: externos.length, fecha_limite_inscripcion: null, tramo: null }}
               externo={externo}
+              premios={premios}
             />
           ) : (
             <ClasificacionMesaFutbol
               embebido
               sala={{ id: j.ligaId, nombre: j.nombre, competicion: j.competicion, tipo: 'amistoso', estado: terminada ? 'finalizada' : 'abierta', buy_in: 0, aforo: externos.length, fecha_limite_inscripcion: null, tramo: null }}
               externo={externo}
+              premios={premios}
             />
-          )}
-          {terminada && (
-            <span style={{ fontSize: 11.5, color: S.MUTED_3 }}>
-              Puntos de liga de esta jornada:{' '}
-              {Array.from(j.puntos.entries())
-                .filter(([, p]) => (p ?? 0) > 0)
-                .sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))
-                .map(([u, p]) => `${externos.find((e) => e.equipoId === u)?.nombre ?? '@?'} +${p}`)
-                .join(' · ') || '—'}
-            </span>
           )}
         </>
       )}
