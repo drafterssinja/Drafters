@@ -199,16 +199,25 @@ async function partidosEspnDelDia(slug: string, dia: Date, nuestros: MapaEquipos
   return salida;
 }
 
-async function partidosDeLaJornada(slug: string, desde: Date, nuestros: MapaEquipos, diasConocidos: Date[] | null): Promise<PartidoEspn[]> {
+// 01/11 (bug de Iñi: tras forzar, todos los jugadores salían "Sin partido esta
+// jornada"): si ESPN falla al dar los partidos de algún día, la lista queda
+// INCOMPLETA y no se puede deducir que un equipo no juega. Se reintenta cada
+// día una vez y, si aun así falla, se avisa con `incompleta`.
+async function partidosDeLaJornada(slug: string, desde: Date, nuestros: MapaEquipos, diasConocidos: Date[] | null): Promise<{ partidos: PartidoEspn[]; incompleta: boolean }> {
+  let incompleta = false;
   const todos: PartidoEspn[] = [];
   const inicioDia = new Date(Date.UTC(desde.getUTCFullYear(), desde.getUTCMonth(), desde.getUTCDate()));
   const dias: Date[] = diasConocidos && diasConocidos.length > 0 ? diasConocidos : Array.from({ length: DIAS_VENTANA_PARTIDOS }, (_, i) => new Date(inicioDia.getTime() + i * 86400000));
   let primero = true;
   for (const dia of dias) {
     try {
-      todos.push(...(await partidosEspnDelDia(slug, dia, nuestros)));
+      todos.push(...(await partidosEspnDelDia(slug, dia, nuestros).catch(async () => {
+        await new Promise((r) => setTimeout(r, 1500));
+        return partidosEspnDelDia(slug, dia, nuestros);
+      })));
     } catch (err) {
       if (primero && !diasConocidos) throw err; // sin el primer día no hay jornada que construir
+      incompleta = true;
     }
     primero = false;
   }
@@ -226,7 +235,7 @@ async function partidosDeLaJornada(slug: string, desde: Date, nuestros: MapaEqui
     yaTienePartido.add(p.visitante.clave);
     elegidos.push(p);
   }
-  return elegidos;
+  return { partidos: elegidos, incompleta };
 }
 
 // ----------------------------------------------------------------------------
@@ -570,7 +579,7 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
   const diasConocidos = barridoCompleto
     ? null
     : Array.from(new Set(partidosGuardados.filter((p) => p.kickoff).map((p) => yyyymmdd(new Date(p.kickoff as string))))).map((s) => new Date(Date.UTC(Number(s.slice(0, 4)), Number(s.slice(4, 6)) - 1, Number(s.slice(6, 8)))));
-  const partidos = await partidosDeLaJornada(slug, fechaLimite ?? ahora, nuestros, diasConocidos);
+  const { partidos, incompleta: listaIncompleta } = await partidosDeLaJornada(slug, fechaLimite ?? ahora, nuestros, diasConocidos);
   const guardadoPorPartido = new Map(partidosGuardados.map((p) => [`${p.clave_local}|${p.clave_visitante}`, p]));
   await guardarEscudos(admin, slug, partidos.flatMap((p) => [{ nombre: p.local.nombre, logo: p.local.logo }, { nombre: p.visitante.nombre, logo: p.visitante.logo }]));
 
@@ -617,33 +626,35 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
   if (claveApif() && LIGA_APIF[slug]) {
     const { data: apifBD } = await admin.from('futbol_apif_partido').select('clave_local,clave_visitante,apif_id,datos,actualizado_en').eq('competicion', competicion);
     for (const f of (apifBD as FilaApif[] | null) ?? []) apifPorPartido.set(`${f.clave_local}|${f.clave_visitante}`, f);
-    const fixturesPorDia = new Map<string, FixtureApif[] | null>();
-    for (const p of partidos) {
-      if (!resumenes.get(p.espnId)) continue; // solo los que se están puntuando en esta pasada
+    // Partido a partido, de 4 en 4 a la vez (para no alargar la sincronización).
+    const fixturesPorDia = new Map<string, Promise<FixtureApif[] | null>>();
+    const unPartido = async (p: PartidoEspn) => {
+      if (!resumenes.get(p.espnId)) return; // solo los que se están puntuando en esta pasada
       const k = `${p.local.clave}|${p.visitante.clave}`;
       const prev = apifPorPartido.get(k);
       const desde = prev?.actualizado_en ? ahora.getTime() - new Date(prev.actualizado_en).getTime() : Infinity;
       const guardado = guardadoPorPartido.get(k);
       const minTrasFinal = guardado?.finalizado_visto_en ? (ahora.getTime() - new Date(guardado.finalizado_visto_en).getTime()) / 60000 : 0;
-      const toca = !prev?.datos || opciones.forzar || (p.estado === 'en_juego' ? desde >= 50 * 1000 : minTrasFinal <= 180 && desde >= 10 * 60 * 1000);
-      if (!toca) continue;
+      const toca = !prev?.datos || (p.estado === 'en_juego' ? desde >= 50 * 1000 : minTrasFinal <= 180 && desde >= 10 * 60 * 1000);
+      if (!toca) return;
       try {
         let id = prev?.apif_id ?? null;
         if (!id) {
           const dia = p.kickoff.toISOString().slice(0, 10);
-          if (!fixturesPorDia.has(dia)) fixturesPorDia.set(dia, await partidosApifDelDia(slug, p.kickoff).catch(() => null));
-          id = buscarFixture(fixturesPorDia.get(dia) ?? [], p.kickoff, p.local.nombre, p.visitante.nombre)?.id ?? null;
+          if (!fixturesPorDia.has(dia)) fixturesPorDia.set(dia, partidosApifDelDia(slug, p.kickoff).catch(() => null));
+          id = buscarFixture((await fixturesPorDia.get(dia)) ?? [], p.kickoff, p.local.nombre, p.visitante.nombre)?.id ?? null;
         }
-        if (!id) continue;
+        if (!id) return;
         const datos = await estadisticasApif(id);
-        if (datos.length === 0) continue;
+        if (datos.length === 0) return;
         const fila = { competicion, clave_local: p.local.clave, clave_visitante: p.visitante.clave, apif_id: id, datos, actualizado_en: ahora.toISOString() };
         apifPorPartido.set(k, fila);
         filasApif.push(fila);
       } catch {
         // API-Football no responde: se sigue con lo guardado (o solo con ESPN).
       }
-    }
+    };
+    for (let i = 0; i < partidos.length; i += 4) await Promise.all(partidos.slice(i, i + 4).map(unPartido));
   }
 
   for (const p of partidos) {
@@ -839,11 +850,16 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
   }
 
   // Jugadores de equipos sin partido encontrado.
-  const equiposSinPartido = Array.from(nuestros.keys()).filter((c) => !partidoPorEquipo.has(c));
-  for (const c of equiposSinPartido) {
+  // 01/11: NUNCA si la lista de partidos ha salido incompleta (ESPN falló algún
+  // día), ni a un equipo que ya tiene su partido guardado de otra pasada, ni
+  // machacando puntos de un partido ya jugado o en juego.
+  const conPartidoGuardado = new Set(partidosGuardados.filter((g) => !g.descartado).flatMap((g) => [g.clave_local, g.clave_visitante]));
+  const equiposSinPartido = Array.from(nuestros.keys()).filter((c) => !partidoPorEquipo.has(c) && !conPartidoGuardado.has(c));
+  for (const c of listaIncompleta ? [] : equiposSinPartido) {
     for (const j of jugadoresPorEquipo.get(c) ?? []) {
       const previo = puntosGuardados.get(j.id);
       if (previo && (previo.partido_estado === 'sin_partido' || (previo.partido_estado === 'aplazado' && previo.actualizado))) continue;
+      if (previo && (previo.partido_estado === 'finalizado' || previo.partido_estado === 'en_juego')) continue;
       filasPuntos.push({ jugador_id: j.id, competicion, puntos_total: 0, jugo: false, minutos: 0, espn_atleta_id: null, resultado_equipo: null, partido_estado: 'sin_partido', actualizado: false, desglose: [], actualizado_en: ahora.toISOString() });
     }
   }
@@ -867,7 +883,7 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
   // partido normal antes de dar la jornada por terminada (antes 3 h), y nunca
   // se da por terminada si en esta pasada algún partido no ha dado datos.
   const cubreTodos = clavesVistas.size * 2 >= nuestros.size - 1 || (normales.length > 0 && ahora.getTime() > ultimoKickoffNormal + 24 * 3600 * 1000);
-  const jornadaTerminada = normales.length > 0 && cubreTodos && partidosSinDatos.length === 0 && normales.every((p) => p.estado === 'finalizado');
+  const jornadaTerminada = !listaIncompleta && normales.length > 0 && cubreTodos && partidosSinDatos.length === 0 && normales.every((p) => p.estado === 'finalizado');
 
   // Partidos guardados de otras pasadas que ya no aparecen (movidos fuera de
   // la ventana de días) y siguen sin acabar: también quedan fuera de plazo.

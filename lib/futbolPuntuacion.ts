@@ -70,16 +70,16 @@ export type LineaDesglose = {
 
 export const PUNTOS_GOL: Record<PosicionFutbol, number> = { delantero: 10, centrocampista: 12, defensa: 16, portero: 20 };
 export const PUNTOS_ASISTENCIA: Record<PosicionFutbol, number> = { delantero: 6, centrocampista: 6, defensa: 7, portero: 0 };
-// 01/11 (Iñi): disparo a puerta +2,5 y fuera +1,5, para todos.
-export const PUNTOS_TIRO_A_PUERTA: Record<PosicionFutbol, number> = { delantero: 2.5, centrocampista: 2.5, defensa: 2.5, portero: 2.5 };
-export const PUNTOS_TIRO_FUERA: Record<PosicionFutbol, number> = { delantero: 1.5, centrocampista: 1.5, defensa: 1.5, portero: 1.5 };
+// 01/11 (Iñi): disparo a puerta +2 y fuera +1, para todos.
+export const PUNTOS_TIRO_A_PUERTA: Record<PosicionFutbol, number> = { delantero: 2, centrocampista: 2, defensa: 2, portero: 2 };
+export const PUNTOS_TIRO_FUERA: Record<PosicionFutbol, number> = { delantero: 1, centrocampista: 1, defensa: 1, portero: 1 };
 // 01/11 (Iñi): acciones nuevas con API-Football (iguales para todas las posiciones salvo la intercepción).
 export const PUNTOS_PASE_CLAVE = 1;
 export const PUNTOS_ENTRADA = 1;
 export const PUNTOS_INTERCEPCION: Record<PosicionFutbol, number> = { defensa: 1, centrocampista: 0.5, delantero: 0.5, portero: 0.5 };
 export const PUNTOS_TIRO_BLOQUEADO = 0.5;
-export const PUNTOS_DUELO_GANADO = 0.3;
-export const PUNTOS_DUELO_PERDIDO = -0.2;
+// 01/11 (Iñi): los duelos cuentan de 3 en 3: cada 3 ganados +1, cada 3 perdidos −1.
+export const DUELOS_POR_PUNTO = 3;
 export const PUNTOS_REGATE = 0.5;
 export const PUNTOS_FALTA_RECIBIDA = 0.5;
 export const PUNTOS_MVP = 3;
@@ -180,8 +180,15 @@ export function puntuarJugador(posicion: PosicionFutbol | string | null | undefi
   add('entrada', 'Entrada', st.entradas, PUNTOS_ENTRADA);
   add('intercepcion', 'Intercepción', st.intercepciones, PUNTOS_INTERCEPCION[pos]);
   add('tiro_bloqueado', 'Tiro bloqueado', st.tirosBloqueados, PUNTOS_TIRO_BLOQUEADO);
-  add('duelo_ganado', 'Duelo ganado', st.duelosGanados, PUNTOS_DUELO_GANADO);
-  add('duelo_perdido', 'Duelo perdido', st.duelosPerdidos, PUNTOS_DUELO_PERDIDO);
+  // Duelos, de 3 en 3, con contador para que se vea cuánto le falta (aunque aún no sume).
+  const duelos = (clave: string, nombre: string, n: number, signo: 1 | -1) => {
+    if (n <= 0) return;
+    const falta = DUELOS_POR_PUNTO - (n % DUELOS_POR_PUNTO);
+    const puntos = signo * Math.floor(n / DUELOS_POR_PUNTO);
+    lineas.push({ clave, etiqueta: `${nombre}: ${n} · ${falta === 1 ? 'le falta 1' : `le faltan ${falta}`} para ${puntos === 0 ? '' : 'otro '}${signo > 0 ? '+1' : '−1'}`, cantidad: 1, puntos: puntos === 0 ? 0 : puntos });
+  };
+  duelos('duelos_ganados', 'Duelos ganados', st.duelosGanados, 1);
+  duelos('duelos_perdidos', 'Duelos perdidos', st.duelosPerdidos, -1);
 
   add('falta', 'Falta cometida', st.faltasCometidas, PUNTOS_FALTA);
   if (st.rojas > 0 && st.amarillas >= 2) {
