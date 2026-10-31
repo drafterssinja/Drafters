@@ -20,6 +20,10 @@ async function ejecutar(req: NextRequest) {
     await admin.rpc('v2_sortear_pendientes');
     // 27/10: liga de duelos — jornadas recién publicadas (sorteo de duelos) y cierre de temporada.
     await admin.rpc('duelos_actualizar');
+    // 31/10: ligas privadas (jornadas nuevas) y niveles (puntos de nivel de las partidas terminadas), cada 5 minutos.
+    const minuto = new Date().getUTCMinutes();
+    if (minuto % 5 === 0) await admin.rpc('lp_actualizar');
+    if (minuto % 5 === 2) await admin.rpc('xp_procesar');
     // Tenis en directo (27/10): marcador, saque y breaks de ESPN cada minuto.
     let tenis: unknown = null;
     try {

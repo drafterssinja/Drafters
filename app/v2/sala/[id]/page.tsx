@@ -22,6 +22,7 @@ import EtiquetaTramo from '@/components/v2/EtiquetaTramo';
 import EditorPremio, { PREMIO_VACIO } from '@/components/v2/EditorPremio';
 import { MODALIDAD_DESC, MODALIDAD_LABEL, cadaXSegundos, fechaCorta, mensajeError, premioValido,  type Amistoso, type AmistosoJornada, type Mensaje, type Premio, type Resumen } from '@/lib/v2';
 import Cargando from '@/components/Cargando';
+import { UsuarioConNivel, useNiveles } from '@/components/v2/Nivel';
 
 // ============================================================================
 // DRAFTERS V2 — PANTALLA DE UNA SALA (15/10)
@@ -63,6 +64,8 @@ export default function V2Sala() {
 
   const miId = perfil?.id ?? '';
   const soyParticipante = !!resumen?.participantes.some((p) => p.usuario_id === miId);
+  // 31/10 (Iñi): nivel de cada jugador delante de su nombre.
+  const niveles = useNiveles((resumen?.participantes ?? []).map((p) => p.usuario_id));
 
   const cargarSala = useCallback(async () => {
     const [{ data: a }, { data: js }, { data: r }] = await Promise.all([
@@ -173,7 +176,7 @@ export default function V2Sala() {
     const { error: e } = await supabase.rpc('amistoso_salir', { p_amistoso: id });
     if (e) return setError(mensajeError(e));
     avisarCambioCreditos();
-    router.replace(`/v2/${amistoso?.deporte ?? 'futbol'}?modo=amistosos`);
+    router.replace(`/v2/${amistoso?.deporte ?? 'futbol'}?modo=privadas`);
   }
 
   async function borrar() {
@@ -181,7 +184,7 @@ export default function V2Sala() {
     const { error: e } = await supabase.rpc('amistoso_borrar', { p_amistoso: id });
     if (e) return setError(mensajeError(e));
     avisarCambioCreditos();
-    router.replace(`/v2/${amistoso?.deporte ?? 'futbol'}?modo=amistosos`);
+    router.replace(`/v2/${amistoso?.deporte ?? 'futbol'}?modo=privadas`);
   }
 
   async function guardarPremio() {
@@ -242,9 +245,9 @@ export default function V2Sala() {
 
   if (estado === 'ok' && amistoso === null) {
     return (
-      <MarcoV2 perfil={perfil} estado={estado} volverA="/v2/futbol?modo=amistosos">
+      <MarcoV2 perfil={perfil} estado={estado} volverA="/v2/futbol?modo=privadas">
         <p style={{ fontSize: 14, color: S.MUTED }}>Esta sala no existe o ya se ha borrado.</p>
-        <Link href="/v2/futbol?modo=amistosos" style={{ ...S.secondaryLinkButton, textAlign: 'center', textDecoration: 'none' }}>
+        <Link href="/v2/futbol?modo=privadas" style={{ ...S.secondaryLinkButton, textAlign: 'center', textDecoration: 'none' }}>
           Volver a amistosos
         </Link>
       </MarcoV2>
@@ -266,10 +269,9 @@ export default function V2Sala() {
       </span>
       {resumen!.participantes.map((p) => (
         <div key={p.usuario_id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, color: S.TEXT }}>
-          <span style={{ width: 28, height: 28, borderRadius: 999, background: 'rgba(167,139,250,0.15)', color: V2_COLOR, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800 }}>{p.nombre.slice(0, 1).toUpperCase()}</span>
-          <span style={{ flex: 1 }}>
-            @{p.nombre}
-            {p.usuario_id === miId ? ' (tú)' : ''}
+          <span style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <UsuarioConNivel id={p.usuario_id} nombre={p.nombre} nivel={niveles.get(p.usuario_id)} miId={miId} />
+            {p.usuario_id === miId ? <span style={{ color: S.MUTED_2, flexShrink: 0 }}>(tú)</span> : null}
           </span>
           {p.usuario_id === amistoso!.creador_id && <span style={{ fontSize: 10.5, fontWeight: 700, color: '#F0B94D' }}>👑 ADMIN</span>}
           {!soloLectura && esCreador && p.usuario_id !== miId && (
@@ -318,7 +320,7 @@ export default function V2Sala() {
   );
 
   return (
-    <MarcoV2 perfil={perfil} estado={estado} deporte={amistoso?.deporte ?? 'futbol'} volverA={`/v2/${amistoso?.deporte ?? 'futbol'}?modo=amistosos`}>
+    <MarcoV2 perfil={perfil} estado={estado} deporte={amistoso?.deporte ?? 'futbol'} volverA={`/v2/${amistoso?.deporte ?? 'futbol'}?modo=privadas`}>
       {cargando ? (
         <Cargando />
       ) : (
@@ -390,6 +392,13 @@ export default function V2Sala() {
             </>
           )}
 
+          {/* 30/10 (Iñi): las salas ya empezadas se pueden ver (la clasificación) aunque no estés dentro. */}
+          {!soyParticipante && empezada && amistoso && resumen && (
+            <Panel>
+              <span style={S.sectionLabel}>Clasificación</span>
+              <ClasificacionAmistoso amistoso={amistoso} jornadas={jornadas} resumen={resumen} miId={miId} />
+            </Panel>
+          )}
           {soyParticipante && (
             <>
               <div style={{ display: 'flex', gap: 6 }}>
