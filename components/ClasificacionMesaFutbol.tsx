@@ -12,7 +12,7 @@ import * as S from '@/lib/mockupStyles';
 import { formatEuros, parteParaPremios } from '@/lib/salaShared';
 import { calcularReparto, repartirPremiosConEmpates, type TipoSala } from '@/lib/repartoPremios';
 import { claveEquipoLaLiga, escudoLaLiga, formatPuntos } from '@/lib/futbolLaLiga';
-import type { LineaDesglose } from '@/lib/futbolPuntuacion';
+import { esLineaDuelos, textoFaltaDuelos, type LineaDesglose } from '@/lib/futbolPuntuacion';
 import { reproducirSonidoAviso, leerPreferenciaSonido, guardarPreferenciaSonido } from '@/lib/sonidoAviso';
 import { TIPOS_AVISO_FUTBOL, TIPOS_AVISO_POR_DEFECTO, INFO_TIPO_AVISO, textoAvisoFutbol, type EventoFutbol, type TipoAvisoFutbol } from '@/lib/futbolAvisos';
 import Cargando from '@/components/Cargando';
@@ -261,7 +261,7 @@ function textoResumen(p: PuntosF | undefined, partido: PartidoF | null): string 
   if (!p.jugo) return p.partido_estado === 'finalizado' ? 'No ha jugado' : 'Todavía no ha jugado';
   const lineas = p.desglose ?? [];
   if (lineas.length === 0) return '0 puntos';
-  return lineas.map((l) => `${l.etiqueta}${l.cantidad > 1 ? ` ×${l.cantidad}` : ''} ${signo(l.puntos)}`).join(' · ');
+  return lineas.map((l) => (esLineaDuelos(l) ? `${l.etiqueta}: ${l.cantidad} ${signo(l.puntos)}` : `${l.etiqueta}${l.cantidad > 1 ? ` ×${l.cantidad}` : ''} ${signo(l.puntos)}`)).join(' · ');
 }
 
 /** Desglose acción a acción de los puntos del jugador (al pulsarlo). */
@@ -276,10 +276,14 @@ function DesglosePuntos({ p }: { p: PuntosF | null }) {
       {lineas.length === 0 && <span style={{ fontSize: 11.5, color: S.MUTED }}>Todavía sin acciones que puntúen.</span>}
       {lineas.map((l) => (
         <div key={l.clave} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: 11.5 }}>
+          {esLineaDuelos(l) ? (
+            <ContadorDuelos l={l} />
+          ) : (
           <span style={{ color: S.MUTED }}>
             {l.etiqueta}
             {l.cantidad > 1 ? ` ×${l.cantidad}` : ''}
           </span>
+          )}
           <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 13, color: l.puntos < 0 ? S.ERROR : '#F0B94D' }}>{signo(l.puntos)}</span>
         </div>
       ))}
@@ -968,5 +972,20 @@ export default function ClasificacionMesaFutbol({
             <AnuncioVideoInline ubicacion="clasificacion" />
           </div>
         </div>
+  );
+}
+
+/** 01/11 (Iñi): duelos con el número bien visible y, debajo, cuántos le faltan para el siguiente punto. */
+export function ContadorDuelos({ l }: { l: LineaDesglose }) {
+  const ganados = l.clave === 'duelos_ganados';
+  const color = ganados ? '#3DDC84' : '#FF8A8A';
+  return (
+    <span style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+      <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: S.MUTED }}>
+        {l.etiqueta}
+        <span style={{ minWidth: 20, textAlign: 'center', padding: '1px 7px', borderRadius: 999, background: ganados ? 'rgba(61,220,132,0.16)' : 'rgba(255,138,138,0.16)', color, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 14, lineHeight: 1.2 }}>{l.cantidad}</span>
+      </span>
+      <span style={{ fontSize: 10, color: S.MUTED_3 }}>{textoFaltaDuelos(l)}</span>
+    </span>
   );
 }
