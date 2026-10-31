@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
   const clave = process.env.API_FOOTBALL_KEY;
   if (!clave) return NextResponse.json({ error: 'Falta la variable API_FOOTBALL_KEY en Vercel (y volver a desplegar).' }, { status: 400 });
 
-  let body: { accion?: string; liga?: string; temporada?: string; fecha?: string; partido?: string } = {};
+  let body: { accion?: string; liga?: string; temporada?: string; fecha?: string; partido?: string; jornada?: string } = {};
   try {
     body = await req.json();
   } catch {
@@ -98,7 +98,11 @@ export async function POST(req: NextRequest) {
     const liga = LIGAS[body.liga ?? 'laliga'] ?? 140;
     const fecha = /^\d{4}-\d{2}-\d{2}$/.test(body.fecha ?? '') ? body.fecha : new Date().toISOString().slice(0, 10);
     const temporada = /^\d{4}$/.test(body.temporada ?? '') ? body.temporada : String(new Date().getUTCMonth() >= 6 ? new Date().getUTCFullYear() : new Date().getUTCFullYear() - 1);
-    const r = await pedir(`/fixtures?league=${liga}&season=${temporada}&date=${fecha}&timezone=Europe/Madrid`, clave);
+    // 01/11: el plan gratuito solo deja temporadas pasadas Y fechas de ayer a mañana, así que
+    // con una temporada pasada se busca por jornada ("Regular Season - N"), sin fecha.
+    const jornada = /^\d{1,2}$/.test(body.jornada ?? '') ? body.jornada : null;
+    const filtro = jornada ? `round=${encodeURIComponent(`Regular Season - ${jornada}`)}` : `date=${fecha}`;
+    const r = await pedir(`/fixtures?league=${liga}&season=${temporada}&${filtro}&timezone=Europe/Madrid`, clave);
     type Fx = { fixture?: { id?: number; date?: string; status?: { short?: string; elapsed?: number } }; teams?: { home?: { name?: string }; away?: { name?: string } }; goals?: { home?: number | null; away?: number | null } };
     const lista = ((r.json?.response ?? []) as Fx[]).map((f) => ({
       id: f.fixture?.id,

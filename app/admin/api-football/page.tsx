@@ -63,6 +63,8 @@ export default function AdminApiFootball() {
   const [estado, setEstado] = useState<Record<string, unknown> | null>(null);
   const [liga, setLiga] = useState<'laliga' | 'champions'>('laliga');
   const [fecha, setFecha] = useState(ayer());
+  const [jornada, setJornada] = useState('35');
+  const [porJornada, setPorJornada] = useState(false);
   const [temporada, setTemporada] = useState(String(new Date().getMonth() >= 6 ? new Date().getFullYear() : new Date().getFullYear() - 1));
   const [partidos, setPartidos] = useState<Partido[] | null>(null);
   const [res, setRes] = useState<Jugadores | null>(null);
@@ -133,6 +135,7 @@ export default function AdminApiFootball() {
           {/* 2. Partidos */}
           <div style={{ ...S.card, flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
             <span style={{ fontWeight: 800, color: S.TEXT }}>2 · Buscar un partido ya jugado</span>
+            <span style={{ fontSize: 12, color: S.MUTED_2, lineHeight: 1.45 }}>Con el plan gratuito: LaLiga, temporada 2024 y &quot;Por jornada&quot; (de la 1 a la 38). La búsqueda por fecha solo vale para ayer, hoy y mañana.</span>
             <div style={{ display: 'flex', gap: 6 }}>
               {(['laliga', 'champions'] as const).map((l) => (
                 <button key={l} type="button" onClick={() => setLiga(l)} style={{ ...S.pill(liga === l), width: 'auto' }}>
@@ -141,7 +144,16 @@ export default function AdminApiFootball() {
               ))}
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} style={{ ...S.input, width: 'auto', colorScheme: 'dark' }} />
+              <button type="button" onClick={() => setPorJornada(true)} style={{ ...S.pill(porJornada), width: 'auto' }}>Por jornada</button>
+              <button type="button" onClick={() => setPorJornada(false)} style={{ ...S.pill(!porJornada), width: 'auto' }}>Por fecha</button>
+              {porJornada ? (
+                <label style={{ fontSize: 12, color: S.MUTED_2, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  Jornada
+                  <input value={jornada} onChange={(e) => setJornada(e.target.value)} style={{ ...S.input, width: 60 }} />
+                </label>
+              ) : (
+                <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} style={{ ...S.input, width: 'auto', colorScheme: 'dark' }} />
+              )}
               <label style={{ fontSize: 12, color: S.MUTED_2, display: 'flex', alignItems: 'center', gap: 6 }}>
                 Temporada
                 <input value={temporada} onChange={(e) => setTemporada(e.target.value)} style={{ ...S.input, width: 70 }} />
@@ -152,7 +164,7 @@ export default function AdminApiFootball() {
               disabled={cargando}
               onClick={async () => {
                 setRes(null);
-                const j = await llamar({ accion: 'partidos', liga, fecha, temporada });
+                const j = await llamar(porJornada ? { accion: 'partidos', liga, temporada, jornada } : { accion: 'partidos', liga, fecha, temporada });
                 setPartidos(j?.partidos ?? []);
               }}
               style={boton}
