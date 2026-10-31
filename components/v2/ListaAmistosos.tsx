@@ -34,6 +34,8 @@ type FilaLista = {
   sistema?: boolean;
   // 17/10 (SQL 49): tramo de cada jornada ('' = completa).
   tramos?: string[] | null;
+  // 01/11 (SQL 74): todas sus jornadas/torneos han terminado.
+  terminada?: boolean;
 };
 
 export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
@@ -111,11 +113,16 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
     .sort((a, b) => Number(b.privada) - Number(a.privada) || Number(completa(a)) - Number(completa(b)) || b.inscritos / b.num_jugadores - a.inscritos / a.num_jugadores);
   const numCompletas = (lista ?? []).filter((l) => abiertaDeVerdad(l) && completa(l) && coincide(l) && delTorneo(l)).length;
   // 30/10 (Iñi): las salas que ya han empezado (públicas y privadas), para verlas aunque no estés (SQL 70).
+  // 01/11 (Iñi): "En juego" = han empezado y NO han acabado. Las terminadas van debajo, aparte y marcadas.
   const enJuego = (lista ?? [])
-    .filter((l) => l.empezada && l.estado !== 'finalizado' && pasaTipo(l) && coincide(l) && delTorneo(l))
+    .filter((l) => l.empezada && !l.terminada && l.estado !== 'finalizado' && pasaTipo(l) && coincide(l) && delTorneo(l))
     .sort((a, b) => Number(b.soy_participante) - Number(a.soy_participante) || Number(b.privada) - Number(a.privada));
+  const terminadas = (lista ?? [])
+    .filter((l) => (l.terminada || l.estado === 'finalizado') && pasaTipo(l) && coincide(l) && delTorneo(l))
+    .sort((a, b) => Number(b.soy_participante) - Number(a.soy_participante) || (b.cierre ?? '').localeCompare(a.cierre ?? ''));
+  const fase = (a: FilaLista) => (a.terminada || a.estado === 'finalizado' ? 2 : a.empezada ? 0 : 1);
   const vista = pestana;
-  const mostradas = vista === 'mias' ? [...mias].sort((a, b) => Number(b.privada) - Number(a.privada)).filter(pasaTipo) : vista === 'en_juego' ? enJuego : publicas;
+  const mostradas = vista === 'mias' ? [...mias].sort((a, b) => fase(a) - fase(b) || Number(b.privada) - Number(a.privada)).filter(pasaTipo) : vista === 'en_juego' ? enJuego : publicas;
 
 
   return (
@@ -165,22 +172,43 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
 
       {lista === null && <Cargando compacto />}
       {lista !== null && mostradas.length === 0 && (
-        <p style={{ fontSize: 13, color: S.MUTED_3, margin: 0 }}>{q ? 'Ninguna sala coincide con la búsqueda.' : vista === 'mias' ? 'Todavía no estás en ningún amistoso. Crea uno o únete a uno abierto.' : vista === 'en_juego' ? 'Ahora mismo no hay ninguna sala en juego.' : numCompletas > 0 && !verCompletas ? `No hay salas con hueco ahora mismo. Pulsa «Completas» para ver las ${numCompletas} que están llenas.` : 'No hay amistosos abiertos ahora mismo. ¡Crea el primero!'}</p>
+        <p style={{ fontSize: 13, color: S.MUTED_3, margin: 0 }}>{q ? 'Ninguna sala coincide con la búsqueda.' : vista === 'mias' ? 'Todavía no estás en ningún amistoso. Crea uno o únete a uno abierto.' : vista === 'en_juego' ? 'Ahora mismo no hay ninguna sala jugándose.' : numCompletas > 0 && !verCompletas ? `No hay salas con hueco ahora mismo. Pulsa «Completas» para ver las ${numCompletas} que están llenas.` : 'No hay amistosos abiertos ahora mismo. ¡Crea el primero!'}</p>
       )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {mostradas.map((a) => {
+        {mostradas.map((a) => tarjeta(a))}
+        {vista === 'en_juego' && terminadas.length > 0 && (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
+              <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 16, textTransform: 'uppercase', letterSpacing: '0.03em', color: S.MUTED_2, whiteSpace: 'nowrap' }}>🏁 Terminadas ({terminadas.length})</span>
+              <span style={{ flex: 1, height: 1, background: S.CARD_BORDER }} />
+            </div>
+            {terminadas.map((a) => tarjeta(a))}
+          </>
+        )}
+      </div>
+    </div>
+  );
+
+  function tarjeta(a: FilaLista) {
           const llena = a.inscritos >= a.num_jugadores;
+          const acabada = a.terminada || a.estado === 'finalizado';
           return (
-            <Link key={a.id} href={`/v2/sala/${a.id}`} style={{ ...S.card, flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
+            <Link key={a.id} href={a.empezada ? `/v2/sala/${a.id}?tab=clasificacion` : `/v2/sala/${a.id}`} style={{ ...S.card, flexDirection: 'column', alignItems: 'stretch', gap: 6, opacity: acabada ? 0.7 : 1 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                   {a.privada && <IconoCandado size={18} />}
                   {/* 16/10 (Iñi): el nombre de la mesa bien grande. */}
                   <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 22, lineHeight: 1.1, color: S.TEXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.nombre}</span>
                 </span>
-                <span style={{ flexShrink: 0, alignSelf: 'center', fontSize: 13, fontWeight: 800, color: llena ? '#F0B94D' : S.ACCENT }}>
-                  {a.inscritos}/{a.num_jugadores}
-                </span>
+                {a.empezada ? (
+                  <span style={{ flexShrink: 0, alignSelf: 'center', fontSize: 11, fontWeight: 800, letterSpacing: '0.04em', textTransform: 'uppercase', padding: '3px 8px', borderRadius: 999, color: acabada ? S.MUTED_2 : '#FF5C5C', background: acabada ? 'rgba(255,255,255,0.06)' : 'rgba(255,92,92,0.12)' }}>
+                    {acabada ? '🏁 Terminada' : '● En juego'}
+                  </span>
+                ) : (
+                  <span style={{ flexShrink: 0, alignSelf: 'center', fontSize: 13, fontWeight: 800, color: llena ? '#F0B94D' : S.ACCENT }}>
+                    {a.inscritos}/{a.num_jugadores}
+                  </span>
+                )}
               </div>
               {a.tramos?.[0] && <EtiquetaTramo tramo={a.tramos[0]} deporte={a.deporte} compacta />}
               <span style={{ fontSize: 11, fontWeight: 700, color: '#F0B94D', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
@@ -193,7 +221,9 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
                 {a.privada && <span>· creada por @{a.creador}</span>}
                 {vista === 'publicas' && a.soy_participante && <span style={{ color: S.ACCENT, fontWeight: 700 }}>· ✓ Estás dentro</span>}
                 {vista === 'publicas' && completa(a) && <span style={{ color: '#F0B94D', fontWeight: 700 }}>· Completa</span>}
-                {a.cierre && <span>· empieza {fechaCorta(a.cierre)}</span>}
+                {a.cierre && !a.empezada && <span>· empieza {fechaCorta(a.cierre)}</span>}
+                {a.empezada && <span>· {a.inscritos} jugadores</span>}
+                {vista !== 'publicas' && a.soy_participante && vista === 'en_juego' && <span style={{ color: S.ACCENT, fontWeight: 700 }}>· ✓ Estás dentro</span>}
               </div>
               {a.premio && a.premio.tipo !== 'nada' ? (
                 <TiraPuestos premio={a.premio} participantes={a.num_jugadores} compacta />
@@ -202,10 +232,7 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
               )}
             </Link>
           );
-        })}
-      </div>
-    </div>
-  );
+  }
 }
 
 /** Grupo de una competición para las pestañas: en fútbol, la competición (sin la jornada); si no, el torneo. */

@@ -234,7 +234,7 @@ export default function ClasificacionMesaTenis({
           <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
             <div style={{ flexShrink: 0, width: 150, display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 420, overflowY: 'auto' }}>
               <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3 }}>Equipos ({equipos.length})</span>
-              <span style={{ fontSize: 9, fontWeight: 600, color: S.MUTED_3, lineHeight: 1.3 }}>Pulsa otra vez un equipo para ver su nivel y vuestro historial</span>
+              <span style={{ fontSize: 9, fontWeight: 600, color: S.MUTED_3, lineHeight: 1.3 }}>Pulsa otra vez un equipo para ver vuestro cara a cara</span>
               {equipos.map((eq, i) => {
                 const activo = eq.equipoId === elegido.equipoId;
                 return (
@@ -245,7 +245,7 @@ export default function ClasificacionMesaTenis({
                     href="#"
                     onClick={(e) => {
                       e.preventDefault();
-                      if (activo) return abrirFicha(eq.equipoId);
+                      if (activo) return abrirFicha(eq.equipoId, e.currentTarget);
                       setEquipoId(eq.equipoId);
                       setFoco(null);
                     }}
@@ -261,7 +261,7 @@ export default function ClasificacionMesaTenis({
             </div>
             <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
-                <button type="button" onClick={() => abrirFicha(elegido.equipoId)} style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
+                <button type="button" onClick={(e) => abrirFicha(elegido.equipoId, e.currentTarget)} style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
                   <NivelBadge nivel={nivelesExt.get(elegido.equipoId)} size={18} />
                   <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textDecoration: 'underline', textDecorationColor: 'rgba(255,255,255,0.25)', textUnderlineOffset: 3 }}>{elegido.nombre}</span>
                 </button>

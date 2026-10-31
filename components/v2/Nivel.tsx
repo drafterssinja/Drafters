@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import * as S from '@/lib/mockupStyles';
 
@@ -96,9 +97,16 @@ export function useNiveles(ids: string[]): Map<string, number> {
   return mapa;
 }
 
-/** Nombre con su nivel delante y, al pulsarlo, su ficha (nivel y cara a cara). */
-export function UsuarioConNivel({ id, nombre, nivel, miId, estilo, sinArroba = false }: { id: string; nombre: string; nivel?: number; miId?: string; estilo?: React.CSSProperties; sinArroba?: boolean }) {
-  const [abierta, setAbierta] = useState(false);
+/**
+ * Nombre con su nivel delante (01/11, Iñi):
+ *  · modo "popover" (en las clasificaciones): al pulsarlo se abre una ventanita
+ *    pequeña, sin salir de la página, con el resumen contra él y "Ver más".
+ *  · modo "historial" (fuera de las clasificaciones): lleva directamente al
+ *    historial contigo (o a "Mi nivel" si eres tú).
+ */
+export function UsuarioConNivel({ id, nombre, nivel, miId, estilo, sinArroba = false, modo = 'historial' }: { id: string; nombre: string; nivel?: number; miId?: string; estilo?: React.CSSProperties; sinArroba?: boolean; modo?: 'popover' | 'historial' }) {
+  const router = useRouter();
+  const { abrirFicha, ficha } = useFichaUsuario();
   return (
     <>
       <button
@@ -106,7 +114,8 @@ export function UsuarioConNivel({ id, nombre, nivel, miId, estilo, sinArroba = f
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          setAbierta(true);
+          if (modo === 'popover') return abrirFicha(id, e.currentTarget);
+          router.push(miId && miId === id ? '/v2/nivel' : `/v2/historial/${id}`);
         }}
         style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0, maxWidth: '100%', background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'inherit', font: 'inherit', textAlign: 'left', ...estilo }}
       >
@@ -116,8 +125,80 @@ export function UsuarioConNivel({ id, nombre, nivel, miId, estilo, sinArroba = f
           {nombre}
         </span>
       </button>
-      {abierta && <FichaUsuario id={id} miId={miId} onCerrar={() => setAbierta(false)} />}
+      {ficha}
     </>
+  );
+}
+
+/** Ventanita pequeña junto al nombre (como en Ludoteka): nivel, ganadas/perdidas, última vez y "Ver más". */
+export function PopoverUsuario({ id, ancla, onCerrar }: { id: string; ancla: DOMRect; onCerrar: () => void }) {
+  const [nivel, setNivel] = useState<number | null>(null);
+  const [h, setH] = useState<(H2H & { nombre?: string }) | null>(null);
+  const [yoId, setYoId] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    void supabase.auth.getSession().then(({ data }) => setYoId(data.session?.user.id));
+    void supabase.rpc('niveles_de', { p_usuarios: [id] }).then(({ data }) => setNivel(((data as { nivel: number }[]) ?? [])[0]?.nivel ?? 1));
+    void supabase.rpc('h2h_resumen', { p_rival: id }).then(({ data }) => setH(data as H2H & { nombre?: string }));
+  }, [id]);
+  useEffect(() => {
+    const cerrar = () => onCerrar();
+    window.addEventListener('scroll', cerrar, true);
+    window.addEventListener('resize', cerrar);
+    return () => {
+      window.removeEventListener('scroll', cerrar, true);
+      window.removeEventListener('resize', cerrar);
+    };
+  }, [onCerrar]);
+  const yo = yoId === id;
+  const ANCHO = 216;
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 400;
+  const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
+  const left = Math.max(8, Math.min(vw - ANCHO - 8, ancla.left));
+  const abajo = ancla.bottom + 150 < vh;
+  const fecha = h?.ultima ? new Intl.DateTimeFormat('es-ES', { day: 'numeric', month: 'short', timeZone: 'Europe/Madrid' }).format(new Date(h.ultima)) : null;
+  const num = (v: number, t: string, c: string) => (
+    <span style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+      <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 19, lineHeight: 1, color: c }}>{v}</span>
+      <span style={{ fontSize: 9, color: S.MUTED_3, whiteSpace: 'nowrap' }}>{t}</span>
+    </span>
+  );
+  return (
+    <div onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCerrar(); }} style={{ position: 'fixed', inset: 0, zIndex: 90 }}>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ position: 'fixed', left, ...(abajo ? { top: ancla.bottom + 6 } : { bottom: vh - ancla.top + 6 }), width: ANCHO, background: '#141B18', border: '1px solid #2E3A35', borderRadius: 12, boxShadow: '0 10px 30px rgba(0,0,0,0.55)', padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          <NivelBadge nivel={nivel} size={26} />
+          <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+            <span style={{ fontWeight: 800, fontSize: 13, color: S.TEXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>@{h?.nombre ?? '…'}</span>
+            <span style={{ fontSize: 10.5, color: S.MUTED_2 }}>{nivel ? `Nivel ${nivel}` : ''}</span>
+          </span>
+        </div>
+        {!h ? (
+          <span style={{ fontSize: 11.5, color: S.MUTED_3 }}>Cargando…</span>
+        ) : yo ? (
+          <span style={{ fontSize: 11.5, color: S.MUTED_2 }}>Eres tú.</span>
+        ) : h.total === 0 ? (
+          <span style={{ fontSize: 11.5, color: S.MUTED_2, lineHeight: 1.35 }}>Todavía no habéis coincidido en ninguna partida terminada.</span>
+        ) : (
+          <>
+            <div style={{ display: 'flex', padding: '6px 0', borderRadius: 8, background: 'rgba(255,255,255,0.03)' }}>
+              {num(h.ganadas, 'Le has ganado', '#3DDC84')}
+              {num(h.perdidas, 'Te ha ganado', '#FF8A8A')}
+              {num(h.empates, 'Empates', S.MUTED_2)}
+            </div>
+            <span style={{ fontSize: 10.5, color: S.MUTED_2, lineHeight: 1.35 }}>
+              {h.total} {h.total === 1 ? 'partida juntos' : 'partidas juntos'}
+              {fecha ? ` · la última, el ${fecha}` : ''}
+            </span>
+          </>
+        )}
+        <Link href={yo ? '/v2/nivel' : `/v2/historial/${id}`} onClick={(e) => e.stopPropagation()} style={{ alignSelf: 'flex-end', fontSize: 12, fontWeight: 800, color: '#3DDC84', textDecoration: 'none' }}>
+          Ver más ›
+        </Link>
+      </div>
+    </div>
   );
 }
 
@@ -216,8 +297,11 @@ export function FichaUsuario({ id, miId, onCerrar }: { id: string; miId?: string
   );
 }
 
-/** 01/11 (Iñi): para abrir la ficha de un usuario (nivel y cara a cara) desde cualquier lista. */
+/** 01/11 (Iñi): abre la ventanita del usuario junto al elemento pulsado. */
 export function useFichaUsuario() {
-  const [id, setId] = useState<string | null>(null);
-  return { abrirFicha: setId, ficha: id ? <FichaUsuario id={id} onCerrar={() => setId(null)} /> : null };
+  const [abierta, setAbierta] = useState<{ id: string; ancla: DOMRect } | null>(null);
+  return {
+    abrirFicha: (id: string, el: Element) => setAbierta({ id, ancla: el.getBoundingClientRect() }),
+    ficha: abierta ? <PopoverUsuario id={abierta.id} ancla={abierta.ancla} onCerrar={() => setAbierta(null)} /> : null,
+  };
 }

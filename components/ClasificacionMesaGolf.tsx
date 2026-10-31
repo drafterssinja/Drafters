@@ -710,7 +710,7 @@ export default function ClasificacionSala({
                     </button>
                   )}
                 </div>
-                {externo && <span style={{ fontSize: 9, fontWeight: 600, color: S.MUTED_3, lineHeight: 1.3 }}>Pulsa otra vez un equipo para ver su nivel y vuestro historial</span>}
+                {externo && <span style={{ fontSize: 9, fontWeight: 600, color: S.MUTED_3, lineHeight: 1.3 }}>Pulsa otra vez un equipo para ver vuestro cara a cara</span>}
                 {equiposVisibles.map(({ eq, rango }) => {
                   const activo = eq.equipoId === equipoSeleccionado.equipoId;
                   const esFavorito = esMaraton && favoritos.has(eq.equipoId);
@@ -722,7 +722,7 @@ export default function ClasificacionSala({
                       href="#"
                       onClick={(e) => {
                         e.preventDefault();
-                        if (externo && activo) return abrirFicha(eq.equipoId);
+                        if (externo && activo) return abrirFicha(eq.equipoId, e.currentTarget);
                         setEquipoSeleccionadoId(eq.equipoId);
                         setJugadorFocoId(null);
                       }}
@@ -759,7 +759,7 @@ export default function ClasificacionSala({
               <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', background: S.PANEL, border: '1px solid #1E2723', borderRadius: 10 }}>
                   {externo ? (
-                    <button type="button" onClick={() => abrirFicha(equipoSeleccionado.equipoId)} style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
+                    <button type="button" onClick={(e) => abrirFicha(equipoSeleccionado.equipoId, e.currentTarget)} style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
                       <NivelBadge nivel={nivelesExt.get(equipoSeleccionado.equipoId)} size={18} />
                       <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textDecoration: 'underline', textDecorationColor: 'rgba(255,255,255,0.25)', textUnderlineOffset: 3 }}>{equipoSeleccionado.nombre}</span>
                     </button>

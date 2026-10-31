@@ -281,7 +281,7 @@ export default function LigaDuelos({ deporte = 'futbol' }: { deporte?: 'futbol' 
                       >
                         <span style={{ fontWeight: 800, fontSize: 12.5, color: i === 0 && d?.nivel === 1 ? ORO : S.MUTED }}>{i + 1}</span>
                         <span style={{ minWidth: 0, fontWeight: 800, fontSize: 13, color: f.soy_yo ? VERDE : S.TEXT }}>
-                          <UsuarioConNivel id={f.usuario_id} nombre={f.nombre} nivel={niveles.get(f.usuario_id)} miId={miIdTabla} sinArroba />
+                          <UsuarioConNivel id={f.usuario_id} nombre={f.nombre} nivel={niveles.get(f.usuario_id)} miId={miIdTabla} sinArroba modo="popover" />
                         </span>
                         <span style={num}>{f.pj}</span>
                         <span style={{ textAlign: 'right', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 18, color: S.TEXT }}>{f.pts}</span>
