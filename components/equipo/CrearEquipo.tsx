@@ -102,7 +102,8 @@ function normalizarBusqueda(texto: string): string {
 export type AmistosoEquipo = { id: string; competicion: string };
 // 26/10 (Iñi): equipo de una jornada de la Liga Drafters de duelos 1 contra 1
 // (SQL 60): la misma pantalla, con presupuesto; se guarda con duelos_guardar_equipo().
-export type DueloEquipo = { ronda: string };
+// 31/10 (Iñi): con `privada`, una jornada de una liga privada (SQL 71: lp_ronda_para_equipo / lp_guardar_equipo).
+export type DueloEquipo = { ronda: string; privada?: boolean };
 
 // soyParticipante = false → todavía no estás en la sala: entras al guardar el equipo (SQL 47).
 type AmistosoInfo = { modalidad: 'presupuesto' | 'libre' | 'draft'; equipo_fijo: boolean; equipos_permitidos: string[] | null; tieneEquipo: boolean; soyParticipante: boolean; deporte: string };
@@ -112,6 +113,8 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
   const params = useParams<{ id: string }>();
   const salaId = params.id;
   const esDuelo = !!duelo;
+  const esPrivada = !!duelo?.privada;
+  const [ligaPrivadaId, setLigaPrivadaId] = useState<string | null>(null);
   const esAmistoso = !!amistoso || esDuelo;
   const [infoAmistoso, setInfoAmistoso] = useState<AmistosoInfo | null>(null);
   const libre = infoAmistoso?.modalidad === 'libre';
@@ -366,11 +369,11 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
     async function cargarDuelo(uid: string, du: DueloEquipo) {
       const [{ data: perfilData }, { data: infoData, error: infoError }] = await Promise.all([
         supabase.from('perfiles').select('*').eq('id', uid).single(),
-        supabase.rpc('duelos_ronda_para_equipo', { p_ronda: du.ronda }),
+        supabase.rpc(du.privada ? 'lp_ronda_para_equipo' : 'duelos_ronda_para_equipo', { p_ronda: du.ronda }),
       ]);
       if (!activo) return;
       if (perfilData) setPerfil(perfilData as Perfil);
-      const info = infoData as { competicion: string; tipo: string; cierre: string | null; publicada: boolean; deporte?: string; mi_equipo: { jugadores: string[]; alineacion: string | null } | null } | null;
+      const info = infoData as { competicion: string; tipo: string; cierre: string | null; publicada: boolean; deporte?: string; liga_id?: string; mi_equipo: { jugadores: string[]; alineacion: string | null } | null } | null;
       if (infoError || !info) {
         setError(infoError?.message?.replace(/^ERROR:\s*/i, '') ?? 'No se ha encontrado esta jornada.');
         setCargando(false);
@@ -378,12 +381,13 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
       }
       // 28/10: la liga también es de golf (y tenis): el deporte viene de la jornada.
       const dep = info.deporte ?? 'futbol';
+      if (info.liga_id) setLigaPrivadaId(info.liga_id);
       if (!info.cierre || !info.publicada || new Date(info.cierre).getTime() <= Date.now()) {
-        router.replace(`/v2/${dep}?modo=liga`);
+        router.replace(du.privada && info.liga_id ? `/v2/liga-privada/${info.liga_id}` : `/v2/${dep}?modo=liga`);
         return;
       }
       const nombreJornada = info.competicion.replace('La Liga', 'LaLiga').replace('Champions League', 'Champions').replace(/\s*-\s*Jornada\s*/i, ' · Jornada ');
-      const salaRow: SalaRow = { id: du.ronda, nombre: `Liga Drafters · ${nombreJornada}`, competicion: info.competicion, deporte: dep, tipo: 'amistoso', aforo: 2, buy_in: 0, estado: 'abierta', fecha_limite_inscripcion: info.cierre, tramo: null };
+      const salaRow: SalaRow = { id: du.ronda, nombre: `${du.privada ? 'Liga privada' : 'Liga Drafters'} · ${nombreJornada}`, competicion: info.competicion, deporte: dep, tipo: 'amistoso', aforo: 2, buy_in: 0, estado: 'abierta', fecha_limite_inscripcion: info.cierre, tramo: null };
       const [{ data: jugData }, { data: partidosData }, { data: otrosData }, { data: v1Data }] = await Promise.all([
         todasLasFilas((d, h) => supabase.from('jugadores').select('id,nombre,posicion,precio,lesionado,equipo_real,baja').eq('deporte', dep).eq('competicion', info.competicion).order('precio', { ascending: false }).order('id').range(d, h)),
         dep === 'futbol' ? supabase.from('cuotas_partido_futbol').select('equipo_local,equipo_visitante,cuota_1,cuota_x,cuota_2').eq('competicion', info.competicion) : Promise.resolve({ data: [] }),
@@ -535,7 +539,7 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
       activo = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router, salaId, equipoEditandoId, amistoso?.id, amistoso?.competicion, duelo?.ronda]);
+  }, [router, salaId, equipoEditandoId, amistoso?.id, amistoso?.competicion, duelo?.ronda, duelo?.privada]);
 
   // Sin pantalla previa de "cómo puntúan" al editar (o si ya tenías equipo en el amistoso).
   const sinPasoInfo = modoEdicion || !!infoAmistoso?.tieneEquipo;
@@ -593,7 +597,7 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
     if (step === 'confirm' || (step === 'draft' && !sinPasoInfo)) {
       window.history.back();
     } else {
-      router.push(esDuelo ? '/v2/futbol?modo=liga' : esAmistoso ? `/v2/sala/${salaId}` : v2 && sala ? `/v2/${sala.deporte}` : `/salas/${salaId}`);
+      router.push(esPrivada && ligaPrivadaId ? `/v2/liga-privada/${ligaPrivadaId}` : esDuelo ? `/v2/${sala?.deporte ?? 'futbol'}?modo=liga` : esAmistoso ? `/v2/sala/${salaId}` : v2 && sala ? `/v2/${sala.deporte}` : `/salas/${salaId}`);
     }
   }
 
@@ -910,14 +914,14 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
     setEnviando(true);
     setErrorEnvio(null);
     if (esDuelo && duelo && sala) {
-      const { error: errDu } = await supabase.rpc('duelos_guardar_equipo', { p_ronda: duelo.ronda, p_jugadores: selected, p_alineacion: sala.deporte === 'futbol' ? alineacion : null });
+      const { error: errDu } = await supabase.rpc(esPrivada ? 'lp_guardar_equipo' : 'duelos_guardar_equipo', { p_ronda: duelo.ronda, p_jugadores: selected, p_alineacion: sala.deporte === 'futbol' ? alineacion : null });
       if (errDu) {
         setErrorEnvio(traducirError(errDu.message));
         setEnviando(false);
         return;
       }
       if (!infoAmistoso?.tieneEquipo) avisarCambioCreditos();
-      router.replace(`/v2/${sala.deporte ?? 'futbol'}?modo=liga`);
+      router.replace(esPrivada && ligaPrivadaId ? `/v2/liga-privada/${ligaPrivadaId}` : `/v2/${sala.deporte ?? 'futbol'}?modo=liga`);
       return;
     }
     if (esAmistoso && sala) {

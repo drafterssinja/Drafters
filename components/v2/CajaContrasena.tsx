@@ -9,15 +9,15 @@ import { IconoCandado } from '@/components/v2/IconosV2';
 // botón para ver lo que escribes.
 const V2 = '#A78BFA';
 
-export default function CajaContrasena({ valor, onChange, onEnter, creador }: { valor: string; onChange: (v: string) => void; onEnter: () => void; creador: string | null }) {
+export default function CajaContrasena({ valor, onChange, onEnter, creador, que = 'sala' }: { valor: string; onChange: (v: string) => void; onEnter: () => void; creador: string | null; que?: 'sala' | 'liga' }) {
   const [ver, setVer] = useState(false);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, background: 'rgba(167,139,250,0.10)', border: `2px solid ${V2}`, borderRadius: 14, padding: 14 }}>
       <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 800, fontSize: 16, color: S.TEXT }}>
-        <IconoCandado size={18} /> Esta sala es privada
+        <IconoCandado size={18} /> {que === 'liga' ? 'Esta liga es privada' : 'Esta sala es privada'}
       </span>
       <span style={{ fontSize: 13.5, color: S.MUTED, lineHeight: 1.5 }}>
-        Para entrar tienes que <b style={{ color: S.TEXT }}>escribir la contraseña</b> aquí abajo. Si no la tienes, pídesela a <b style={{ color: S.TEXT }}>@{creador ?? 'quien creó la sala'}</b>.
+        Para entrar tienes que <b style={{ color: S.TEXT }}>escribir la contraseña</b> aquí abajo. Si no la tienes, pídesela a <b style={{ color: S.TEXT }}>@{creador ?? (que === 'liga' ? 'quien creó la liga' : 'quien creó la sala')}</b>.
       </span>
       <label htmlFor="contrasena-sala" style={{ fontSize: 12, fontWeight: 800, color: V2, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
         👇 Contraseña

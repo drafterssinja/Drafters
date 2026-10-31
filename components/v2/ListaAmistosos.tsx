@@ -39,7 +39,7 @@ type FilaLista = {
 export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
   const [lista, setLista] = useState<FilaLista[] | null>(null);
   // 16/10 (Iñi): por defecto siempre "Abiertos", no las salas en las que ya estás.
-  const [pestana, setPestana] = useState<'mias' | 'publicas'>('publicas');
+  const [pestana, setPestana] = useState<'mias' | 'publicas' | 'en_juego'>('publicas');
   // 16/10 (Iñi): se ven también las privadas (con candado) y hay un buscador arriba.
   const [busqueda, setBusqueda] = useState('');
   // 16/10 (Iñi): casilla (de primeras sin marcar) para ver también las salas completas.
@@ -57,19 +57,15 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
 
   const cargar = useCallback(async () => {
     const { data } = await supabase.rpc('amistosos_v2_lista');
-    setLista(((data as FilaLista[]) ?? []).filter((a) => a.deporte === deporte));
+    // 31/10 (Iñi): ya no hay salas públicas de Drafters; las que quedan solo las ve quien está dentro.
+    setLista(((data as FilaLista[]) ?? []).filter((a) => a.deporte === deporte && (!a.sistema || a.soy_participante)));
   }, [deporte]);
 
   useEffect(() => {
     // 16/10 (Iñi): siempre tiene que haber salas públicas de Drafters abiertas
     // (próxima jornada de LaLiga y Champions, próximo torneo de cada circuito
     // de golf; de 2, 3, 4 y 6). Se crean las que falten antes de cargar la lista.
-    void (async () => {
-      try {
-        await supabase.rpc('v2_asegurar_salas_sistema');
-      } catch {}
-      await cargar();
-    })();
+    void cargar();
     return cadaXSegundos(cargar, 15);
   }, [cargar]);
 
@@ -89,7 +85,7 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
   const torneos = porTorneo
     ? Array.from(
         (lista ?? [])
-          .filter((l) => (!l.empezada && l.estado !== 'finalizado') || l.soy_participante)
+          .filter((l) => l.estado !== 'finalizado' || l.soy_participante)
           .reduce((m, l) => {
             for (const c0 of l.competiciones) {
               const c = grupoDe(deporte, c0);
@@ -114,8 +110,12 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
     .filter((l) => abiertaDeVerdad(l) && (verCompletas || !completa(l)) && pasaTipo(l) && coincide(l) && delTorneo(l))
     .sort((a, b) => Number(b.privada) - Number(a.privada) || Number(completa(a)) - Number(completa(b)) || b.inscritos / b.num_jugadores - a.inscritos / a.num_jugadores);
   const numCompletas = (lista ?? []).filter((l) => abiertaDeVerdad(l) && completa(l) && coincide(l) && delTorneo(l)).length;
+  // 30/10 (Iñi): las salas que ya han empezado (públicas y privadas), para verlas aunque no estés (SQL 70).
+  const enJuego = (lista ?? [])
+    .filter((l) => l.empezada && l.estado !== 'finalizado' && pasaTipo(l) && coincide(l) && delTorneo(l))
+    .sort((a, b) => Number(b.soy_participante) - Number(a.soy_participante) || Number(b.privada) - Number(a.privada));
   const vista = pestana;
-  const mostradas = vista === 'mias' ? [...mias].sort((a, b) => Number(b.privada) - Number(a.privada)).filter(pasaTipo) : publicas;
+  const mostradas = vista === 'mias' ? [...mias].sort((a, b) => Number(b.privada) - Number(a.privada)).filter(pasaTipo) : vista === 'en_juego' ? enJuego : publicas;
 
 
   return (
@@ -130,17 +130,18 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
         </div>
       )}
       <input value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="🔍 Buscar sala por nombre, creador o jornada" style={S.input} />
-      <Link href={`/v2/crear?deporte=${deporte}${torneoVisto ? `&${deporte === 'futbol' ? 'liga' : 'torneo'}=${encodeURIComponent(torneoVisto)}` : ''}`} style={{ ...S.primaryButton, background: V2_COLOR, textAlign: 'center', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 0 }}>
-        🔒 Crear sala privada
-      </Link>
+      {/* 31/10: el botón de crear sala está arriba, en la pestaña Privadas. */}
 
 
-      <div style={{ display: 'flex', gap: 6 }}>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         <button type="button" style={S.pill(vista === 'publicas')} onClick={() => setPestana('publicas')}>
           Abiertos ({publicas.length})
         </button>
         <button type="button" style={S.pill(vista === 'mias')} onClick={() => setPestana('mias')}>
           Mis amistosos ({mias.length})
+        </button>
+        <button type="button" style={{ ...S.pill(vista === 'en_juego'), width: 'auto' }} onClick={() => setPestana('en_juego')}>
+          ● En juego ({enJuego.length})
         </button>
       </div>
 
@@ -164,7 +165,7 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
 
       {lista === null && <Cargando compacto />}
       {lista !== null && mostradas.length === 0 && (
-        <p style={{ fontSize: 13, color: S.MUTED_3, margin: 0 }}>{q ? 'Ninguna sala coincide con la búsqueda.' : vista === 'mias' ? 'Todavía no estás en ningún amistoso. Crea uno o únete a uno abierto.' : numCompletas > 0 && !verCompletas ? `No hay salas con hueco ahora mismo. Pulsa «Completas» para ver las ${numCompletas} que están llenas.` : 'No hay amistosos abiertos ahora mismo. ¡Crea el primero!'}</p>
+        <p style={{ fontSize: 13, color: S.MUTED_3, margin: 0 }}>{q ? 'Ninguna sala coincide con la búsqueda.' : vista === 'mias' ? 'Todavía no estás en ningún amistoso. Crea uno o únete a uno abierto.' : vista === 'en_juego' ? 'Ahora mismo no hay ninguna sala en juego.' : numCompletas > 0 && !verCompletas ? `No hay salas con hueco ahora mismo. Pulsa «Completas» para ver las ${numCompletas} que están llenas.` : 'No hay amistosos abiertos ahora mismo. ¡Crea el primero!'}</p>
       )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {mostradas.map((a) => {

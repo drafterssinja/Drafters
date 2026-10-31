@@ -9,6 +9,7 @@ import * as S from '@/lib/mockupStyles';
 import { DEPORTES_V2, DEPORTE_NOMBRE, IconoCartas, IconoCredito, PelotaDeporte, type DeporteV2 } from '@/components/v2/IconosV2';
 import { puedeJugarPocha } from '@/lib/pocha';
 import { FichaCreditos, useCreditosV2 } from '@/components/v2/creditos';
+import { NivelBadge, useNiveles } from '@/components/v2/Nivel';
 
 // ============================================================================
 // CABECERA DE DRAFTERS V2 (15/10)
@@ -24,6 +25,9 @@ export default function CabeceraV2({ perfil, deporte: deporteOPocha, volverA }: 
   const deporte: DeporteV2 = enPocha ? 'futbol' : (deporteOPocha as DeporteV2);
   const router = useRouter();
   const { creditos } = useCreditosV2(!!perfil);
+  // 31/10 (Iñi): mi nivel en la cabecera, delante de mi cuenta.
+  const misNiveles = useNiveles(perfil ? [perfil.id] : []);
+  const miNivel = perfil ? misNiveles.get(perfil.id) : undefined;
   const [ficha, setFicha] = useState(false);
   const [noLeidas, setNoLeidas] = useState(0);
   // 19/10 (Iñi): el icono de cartas (pocha) solo lo ven Iñi y Javier.
@@ -144,6 +148,11 @@ export default function CabeceraV2({ perfil, deporte: deporteOPocha, volverA }: 
               <IconoCredito size={15} />
               <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13, color: S.TEXT }}>{info ? info.saldo : '–'}</span>
             </button>
+            {miNivel ? (
+              <Link href="/v2/nivel" aria-label={`Mi nivel: ${miNivel}`} style={{ display: 'flex', flexShrink: 0 }}>
+                <NivelBadge nivel={miNivel} size={t.boton} />
+              </Link>
+            ) : null}
             <Link href="/cuenta" aria-label="Mi cuenta" style={{ flexShrink: 0, width: t.boton, height: t.boton, borderRadius: '50%', background: S.ACCENT, color: '#04140B', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 12.5, display: 'flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none' }}>
               {S.iniciales(perfil.nombre, perfil.apellido)}
             </Link>

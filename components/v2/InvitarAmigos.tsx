@@ -9,7 +9,8 @@ import type { FilaAmigo } from '@/lib/amigos';
 
 // Invitar a amigos de Drafters a esta sala (16/10, Iñi). Les llega una
 // notificación con el enlace a la sala.
-export default function InvitarAmigos({ amistosoId, dentro }: { amistosoId: string; dentro: string[] }) {
+// 31/10: también para las ligas privadas (ligaId).
+export default function InvitarAmigos({ amistosoId, ligaId, dentro }: { amistosoId?: string; ligaId?: string; dentro: string[] }) {
   const [abierto, setAbierto] = useState(false);
   const [amigos, setAmigos] = useState<FilaAmigo[] | null>(null);
   const [hecho, setHecho] = useState<Record<string, string>>({});
@@ -21,7 +22,9 @@ export default function InvitarAmigos({ amistosoId, dentro }: { amistosoId: stri
   }
 
   async function invitar(f: FilaAmigo) {
-    const { error } = await supabase.rpc('amistoso_invitar', { p_amistoso: amistosoId, p_usuario: f.usuario_id });
+    const { error } = ligaId
+      ? await supabase.rpc('lp_invitar', { p_liga: ligaId, p_usuario: f.usuario_id })
+      : await supabase.rpc('amistoso_invitar', { p_amistoso: amistosoId, p_usuario: f.usuario_id });
     setHecho((h) => ({ ...h, [f.usuario_id]: error ? error.message.replace(/^ERROR:\s*/i, '') : '✓ Invitado' }));
   }
 

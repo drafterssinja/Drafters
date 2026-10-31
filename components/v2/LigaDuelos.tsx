@@ -8,6 +8,7 @@ import { Panel } from '@/components/v2/MarcoV2';
 import Cargando from '@/components/Cargando';
 import { IconoCredito } from '@/components/v2/IconosV2';
 import { mensajeError } from '@/lib/v2';
+import { UsuarioConNivel, useNiveles } from '@/components/v2/Nivel';
 
 // ============================================================================
 // LIGA DRAFTERS DE FÚTBOL — DUELOS 1 CONTRA 1 POR DIVISIONES (26/10, Iñi)
@@ -84,6 +85,9 @@ export default function LigaDuelos({ deporte = 'futbol' }: { deporte?: 'futbol' 
   const [jornadas, setJornadas] = useState<JornadaDiv[] | null>(null);
   const [abierta, setAbierta] = useState<string | null>(null);
   const [divs, setDivs] = useState<DivMiembros[] | null>(null);
+  // 31/10 (Iñi): el nivel delante de cada nombre; al pulsarlo, su ficha y el cara a cara.
+  const niveles = useNiveles((tabla ?? []).map((f) => f.usuario_id));
+  const miIdTabla = tabla?.find((f) => f.soy_yo)?.usuario_id;
 
   const cargar = useCallback(async () => {
     const { data, error: e } = await supabase.rpc('duelos_mi_liga', { p_deporte: deporte });
@@ -276,7 +280,9 @@ export default function LigaDuelos({ deporte = 'futbol' }: { deporte?: 'futbol' 
                         style={{ display: 'grid', gridTemplateColumns: cols, gap: 3, alignItems: 'center', padding: '8px 4px', borderTop: '1px solid #1A221E', background: f.soy_yo ? 'rgba(61,220,132,0.08)' : 'transparent', borderLeft: `3px solid ${sube ? VERDE : baja ? ROJO : 'transparent'}` }}
                       >
                         <span style={{ fontWeight: 800, fontSize: 12.5, color: i === 0 && d?.nivel === 1 ? ORO : S.MUTED }}>{i + 1}</span>
-                        <span style={{ fontWeight: 800, fontSize: 13, color: f.soy_yo ? VERDE : S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.nombre}</span>
+                        <span style={{ minWidth: 0, fontWeight: 800, fontSize: 13, color: f.soy_yo ? VERDE : S.TEXT }}>
+                          <UsuarioConNivel id={f.usuario_id} nombre={f.nombre} nivel={niveles.get(f.usuario_id)} miId={miIdTabla} sinArroba />
+                        </span>
                         <span style={num}>{f.pj}</span>
                         <span style={{ textAlign: 'right', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 18, color: S.TEXT }}>{f.pts}</span>
                         <span style={num}>{pts(f.a_favor)}</span>
