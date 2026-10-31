@@ -24,6 +24,8 @@ async function ejecutar(req: NextRequest) {
     const minuto = new Date().getUTCMinutes();
     if (minuto % 5 === 0) await admin.rpc('lp_actualizar');
     if (minuto % 5 === 2) await admin.rpc('xp_procesar');
+    // 01/11 (Iñi): salas cuyas jornadas han terminado todas → finalizadas (dejan de salir "En juego").
+    if (minuto % 5 === 1) await admin.rpc('v2_cerrar_salas_terminadas');
     // Tenis en directo (27/10): marcador, saque y breaks de ESPN cada minuto.
     let tenis: unknown = null;
     try {

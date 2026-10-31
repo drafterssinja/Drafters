@@ -9,6 +9,8 @@ import { useSesionV2 } from '@/components/v2/useSesionV2';
 import Cargando from '@/components/Cargando';
 import { jornadaBonita } from '@/components/v2/LigaDuelos';
 import { mensajeError } from '@/lib/v2';
+import { esLineaDuelos } from '@/lib/futbolPuntuacion';
+import { ContadorDuelos } from '@/components/ClasificacionMesaFutbol';
 
 // ============================================================================
 // LIGA DRAFTERS — UN ENFRENTAMIENTO (27/10, Iñi)
@@ -175,10 +177,14 @@ function FilaJugador({ j, pendiente }: { j: Jugador; pendiente: boolean }) {
           ) : (
             j.desglose.map((l) => (
               <div key={l.clave} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12.5, color: S.MUTED }}>
-                <span>
-                  {l.etiqueta}
-                  {l.cantidad > 1 ? ` ×${l.cantidad}` : ''}
-                </span>
+                {esLineaDuelos(l) ? (
+                  <ContadorDuelos l={l} />
+                ) : (
+                  <span>
+                    {l.etiqueta}
+                    {l.cantidad > 1 ? ` ×${l.cantidad}` : ''}
+                  </span>
+                )}
                 <span style={{ fontWeight: 800, color: l.puntos > 0 ? VERDE : l.puntos < 0 ? ROJO : S.MUTED }}>{l.puntos > 0 ? `+${n1(l.puntos)}` : n1(l.puntos)}</span>
               </div>
             ))
