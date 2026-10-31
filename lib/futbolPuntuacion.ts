@@ -181,11 +181,12 @@ export function puntuarJugador(posicion: PosicionFutbol | string | null | undefi
   add('intercepcion', 'Intercepción', st.intercepciones, PUNTOS_INTERCEPCION[pos]);
   add('tiro_bloqueado', 'Tiro bloqueado', st.tirosBloqueados, PUNTOS_TIRO_BLOQUEADO);
   // Duelos, de 3 en 3, con contador para que se vea cuánto le falta (aunque aún no sume).
+  // 01/11 (Iñi): la etiqueta es solo el nombre y `cantidad` el número de duelos;
+  // la pantalla lo pinta destacado con textoFaltaDuelos() debajo.
   const duelos = (clave: string, nombre: string, n: number, signo: 1 | -1) => {
     if (n <= 0) return;
-    const falta = DUELOS_POR_PUNTO - (n % DUELOS_POR_PUNTO);
     const puntos = signo * Math.floor(n / DUELOS_POR_PUNTO);
-    lineas.push({ clave, etiqueta: `${nombre}: ${n} · ${falta === 1 ? 'le falta 1' : `le faltan ${falta}`} para ${puntos === 0 ? '' : 'otro '}${signo > 0 ? '+1' : '−1'}`, cantidad: 1, puntos: puntos === 0 ? 0 : puntos });
+    lineas.push({ clave, etiqueta: nombre, cantidad: n, puntos: puntos === 0 ? 0 : puntos });
   };
   duelos('duelos_ganados', 'Duelos ganados', st.duelosGanados, 1);
   duelos('duelos_perdidos', 'Duelos perdidos', st.duelosPerdidos, -1);
@@ -225,4 +226,15 @@ export function puntuarJugador(posicion: PosicionFutbol | string | null | undefi
 
   const total = redondear(lineas.reduce((s, l) => s + l.puntos, 0));
   return { total, desglose: lineas };
+}
+
+/** Líneas de duelos (01/11): se cuentan de 3 en 3 y se enseña el contador. */
+export function esLineaDuelos(l: { clave: string }): boolean {
+  return l.clave === 'duelos_ganados' || l.clave === 'duelos_perdidos';
+}
+/** "le faltan 2 para +1" / "le falta 1 para otro −1". */
+export function textoFaltaDuelos(l: { clave: string; cantidad: number }): string {
+  const falta = DUELOS_POR_PUNTO - (l.cantidad % DUELOS_POR_PUNTO);
+  const yaSuma = l.cantidad >= DUELOS_POR_PUNTO;
+  return `${falta === 1 ? 'le falta 1' : `le faltan ${falta}`} para ${yaSuma ? 'otro ' : ''}${l.clave === 'duelos_ganados' ? '+1' : '−1'}`;
 }
