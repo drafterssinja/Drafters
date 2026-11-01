@@ -23,10 +23,10 @@ export default function MarcoV2({ perfil, estado, volverA, deporte = 'futbol', c
           {estado === 'cargando' && <Cargando />}
           {estado === 'sin_acceso' && (
             <div style={{ ...S.card, flexDirection: 'column', alignItems: 'flex-start' }}>
-              <span style={{ fontWeight: 700, color: S.TEXT }}>Drafters V2 está en pruebas</span>
-              <span style={{ fontSize: 13, color: S.MUTED_2 }}>Todavía no tienes acceso. Te avisaremos cuando se abra para todos.</span>
-              <Link href="/inicio" style={{ ...S.secondaryLinkButton, textAlign: 'center', textDecoration: 'none' }}>
-                Volver a inicio
+              <span style={{ fontWeight: 700, color: S.TEXT }}>No se ha podido cargar tu cuenta</span>
+              <span style={{ fontSize: 13, color: S.MUTED_2 }}>Vuelve a intentarlo en un momento.</span>
+              <Link href="/login" style={{ ...S.secondaryLinkButton, textAlign: 'center', textDecoration: 'none' }}>
+                Volver a entrar
               </Link>
             </div>
           )}
@@ -43,12 +43,9 @@ export default function MarcoV2({ perfil, estado, volverA, deporte = 'futbol', c
   );
 }
 
+// 01/11 (Iñi): ya no es "V2 · beta", es Drafters: la etiqueta ya no se enseña.
 export function EtiquetaBeta() {
-  return (
-    <span style={{ alignSelf: 'flex-start', fontSize: 10, fontWeight: 800, letterSpacing: '0.06em', color: V2_COLOR, border: `1px solid ${V2_COLOR}`, borderRadius: 999, padding: '2px 8px', textTransform: 'uppercase' }}>
-      V2 · beta
-    </span>
-  );
+  return null;
 }
 
 export function Titulo({ children }: { children: ReactNode }) {

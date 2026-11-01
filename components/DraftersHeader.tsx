@@ -45,7 +45,7 @@ export default function DraftersHeader({ saldoLabel, accountInitials, homeHref, 
   useEffect(() => {
     recordarLista(pathname, window.location.search);
   }, [pathname]);
-  const destino = homeHref ?? (saldoLabel && accountInitials ? '/inicio' : '/');
+  const destino = homeHref ?? (saldoLabel && accountInitials ? '/v2/futbol' : '/');
   const enAreaDeCuenta = !!(saldoLabel && accountInitials);
 
   // Icono de notificaciones (pedido de Iñi, 23/09): puntito rojo con el
@@ -139,25 +139,7 @@ export default function DraftersHeader({ saldoLabel, accountInitials, homeHref, 
               </span>
             )}
           </Link>
-          <Link
-            href="/recargar"
-            aria-label="Recargar saldo"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-              background: '#131917',
-              border: '1px solid #2A3733',
-              borderRadius: 8,
-              padding: '7px 10px',
-              textDecoration: 'none',
-            }}
-          >
-            <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 12.5, color: '#F5F7F5', whiteSpace: 'nowrap' }}>
-              {saldoLabel}
-            </span>
-            <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 13, color: ACCENT }}>+</span>
-          </Link>
+          {/* 01/11: sin saldo en euros — fuera el botón de saldo/recargar. */}
           <Link
             href="/cuenta"
             aria-label="Mi cuenta"

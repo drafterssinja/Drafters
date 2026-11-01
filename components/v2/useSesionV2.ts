@@ -24,7 +24,8 @@ export function useSesionV2() {
       if (!activo) return;
       const p = data as Perfil | null;
       setPerfil(p);
-      setEstado(p && (p.acceso_v2 || p.rol === 'admin') ? 'ok' : 'sin_acceso');
+      // 01/11 (Iñi): Drafters V2 es ya Drafters, para todo el mundo.
+      setEstado(p ? 'ok' : 'sin_acceso');
     })();
     return () => {
       activo = false;

@@ -507,7 +507,7 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
         const s0 = uno(e.salas);
         if (soloEstaJornada && s0?.competicion !== jo.competicion) continue;
         const esV2 = (s0?.version ?? 1) === 2;
-        meter({ id: `v1:${e.id}`, etiqueta: `${e.nombre_equipo ? `${e.nombre_equipo} · ` : ''}${s0?.nombre ?? 'Mesa'} · ${s0?.competicion ?? ''}`, jugadores: Array.isArray(e.jugadores) ? e.jugadores : [], alineacion: e.alineacion, grupo: esV2 ? 'Tus mesas de la liga' : 'Tus equipos de las mesas (V1)' });
+        meter({ id: `v1:${e.id}`, etiqueta: `${e.nombre_equipo ? `${e.nombre_equipo} · ` : ''}${s0?.nombre ?? 'Mesa'} · ${s0?.competicion ?? ''}`, jugadores: Array.isArray(e.jugadores) ? e.jugadores : [], alineacion: e.alineacion, grupo: esV2 ? 'Tus mesas de la liga' : 'Tus equipos de mesas anteriores' });
       }
 
       const mio = mioData as { jugadores: string[]; alineacion: string | null } | null;

@@ -9,6 +9,7 @@ import Cargando from '@/components/Cargando';
 import { IconoCredito } from '@/components/v2/IconosV2';
 import { mensajeError } from '@/lib/v2';
 import { UsuarioConNivel, useNiveles } from '@/components/v2/Nivel';
+import { registrarVistaClasificacion } from '@/lib/actividad';
 
 // ============================================================================
 // LIGA DRAFTERS DE FÚTBOL — DUELOS 1 CONTRA 1 POR DIVISIONES (26/10, Iñi)
@@ -85,6 +86,10 @@ export default function LigaDuelos({ deporte = 'futbol' }: { deporte?: 'futbol' 
   const [jornadas, setJornadas] = useState<JornadaDiv[] | null>(null);
   const [abierta, setAbierta] = useState<string | null>(null);
   const [divs, setDivs] = useState<DivMiembros[] | null>(null);
+  // 01/11 (Iñi): registro de actividad al ver la clasificación de la Liga Drafters.
+  useEffect(() => {
+    if (tabla) registrarVistaClasificacion(`liga_drafters:${deporte}`, { modo: 'liga_drafters', nombre: 'Liga Drafters', deporte });
+  }, [tabla, deporte]);
   // 31/10 (Iñi): el nivel delante de cada nombre; al pulsarlo, su ficha y el cara a cara.
   const niveles = useNiveles((tabla ?? []).map((f) => f.usuario_id));
   const miIdTabla = tabla?.find((f) => f.soy_yo)?.usuario_id;

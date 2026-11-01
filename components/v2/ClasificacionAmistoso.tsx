@@ -12,6 +12,7 @@ import ClasificacionMesaFutbol, { type EquipoExterno } from '@/components/Clasif
 import ClasificacionSala from '@/components/ClasificacionMesaGolf';
 import ClasificacionMesaTenis from '@/components/ClasificacionMesaTenis';
 import { cadaXSegundos, repartirPremio, textoBote, type Amistoso, type AmistosoJornada, type Resumen } from '@/lib/v2';
+import { registrarVistaClasificacion } from '@/lib/actividad';
 
 type Equipo = { competicion: string; usuario_id: string; jugadores: string[]; alineacion: string | null };
 type Jug = { id: string; nombre: string; posicion: string | null; equipo_real: string | null };
@@ -29,6 +30,10 @@ type Props = { amistoso: Amistoso; jornadas: AmistosoJornada[]; resumen: Resumen
 // pulsar, eventos y premios. Con varias jornadas, una pestaña por jornada y
 // "Total" con la suma. Golf sigue con la lista.
 export default function ClasificacionAmistoso(props: Props) {
+  // 01/11 (Iñi): registro de actividad al ver la clasificación de una sala, entre por donde entre.
+  useEffect(() => {
+    registrarVistaClasificacion(`sala:${props.amistoso.id}`, { modo: 'sala', nombre: props.amistoso.nombre, deporte: props.amistoso.deporte });
+  }, [props.amistoso.id, props.amistoso.nombre, props.amistoso.deporte]);
   // 18/10 (Iñi): el golf también, exactamente como la clasificación de golf de la V1.
   // 28/10 (Iñi): el tenis también, igual que fútbol y golf (equipos a la izquierda, jugadores a la derecha).
   if (props.amistoso.deporte === 'futbol' || props.amistoso.deporte === 'golf' || props.amistoso.deporte === 'tenis') return <ClasificacionAmistosoFutbol {...props} />;
