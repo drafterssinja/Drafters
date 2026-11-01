@@ -17,24 +17,25 @@
 // elegir → cómo puntúan → sala), ver app/{salas,porras}/[id]/crear-equipo.
 export function rutaAnterior(pathname: string | null): string {
   const p = (pathname ?? '').replace(/\/+$/, '') || '/';
-  if (p === '/inicio') return '/inicio';
-  if (p === '/mesas') return '/inicio';
+  // 01/11: la portada es la página de cada deporte (la versión anterior ya no existe).
+  if (p === '/inicio') return '/v2/futbol';
+  if (p === '/mesas') return '/v2/futbol';
   if (p === '/salas') return '/mesas';
   let m = p.match(/^\/salas\/([^/]+)\/(clasificacion|crear-equipo)$/);
   if (m) return `/salas/${m[1]}`;
   if (/^\/salas\/[^/]+$/.test(p)) return '/salas';
-  if (p === '/porras') return '/inicio';
+  if (p === '/porras') return '/v2/golf?modo=porras';
   m = p.match(/^\/porras\/([^/]+)\/(clasificacion|crear-equipo)$/);
   if (m) return `/porras/${m[1]}`;
-  if (/^\/porras\/[^/]+$/.test(p)) return '/porras';
-  if (p === '/cuenta' || p === '/notificaciones' || p === '/recargar') return '/inicio';
+  if (/^\/porras\/[^/]+$/.test(p)) return '/v2/golf?modo=porras';
+  if (p === '/cuenta' || p === '/notificaciones' || p === '/recargar') return '/v2/futbol';
   if (p === '/admin') return '/cuenta';
   if (/^\/admin\/pagos-pendientes\/[^/]+\/[^/]+$/.test(p)) return '/admin/pagos-pendientes';
   if (/^\/admin\/porras-futbol\/[^/]+$/.test(p)) return '/admin/porras-futbol';
   if (p.startsWith('/admin/')) return '/admin';
   if (p === '/login') return '/';
   if (p === '/registro' || p === '/recuperar' || p === '/restablecer' || p === '/verificar') return '/login';
-  return '/inicio';
+  return '/v2/futbol';
 }
 
 // ----------------------------------------------------------------------------
