@@ -1,5 +1,5 @@
 import type { crearClienteAdmin } from './supabaseAdmin';
-import { calcularPreciosPorCuota } from '@/lib/precioPorCuota';
+import { calcularPreciosTenis } from '@/lib/precioTenis';
 import { normalizarNombre } from '@/lib/nombreMatch';
 import { detectarBreaks, puntuarPartidoTenis, type EstadoPartido } from '@/lib/tenisPuntuacion';
 import type { LineaDesglose } from '@/lib/futbolPuntuacion';
@@ -195,7 +195,7 @@ async function rankingTenis(admin: Admin, liga: LigaTenis): Promise<Map<string, 
 function preciosPorRanking(nombres: string[], ranking: Map<string, number>, ajuste: Map<string, number> = new Map()): Map<string, number> {
   const pesos = nombres.map((n) => (1 / Math.pow(ranking.get(normalizarNombre(n)) ?? 400, 1.25)) * (ajuste.get(n) ?? 1));
   const total = pesos.reduce((s, x) => s + x, 0);
-  const precios = calcularPreciosPorCuota(nombres.map((n, i) => ({ nombre: n, cuota: Math.round((total / pesos[i]) * 100) / 100 })));
+  const precios = calcularPreciosTenis(nombres.map((n, i) => ({ nombre: n, cuota: Math.round((total / pesos[i]) * 100) / 100 })));
   return new Map(nombres.map((n, i) => [n, precios[i].precio]));
 }
 
@@ -344,13 +344,16 @@ async function anadirJugadores(admin: Admin, competicion: string, liga: LigaTeni
     }
     cuotas = cuotasGanadorSimuladas(todos.map((n) => ({ nombre: n, ranking: ranking.get(normalizarNombre(n)) ?? null })), primeraRonda);
   }
-  const calc = calcularPreciosPorCuota(todos.map((n) => ({ nombre: n, cuota: cuotas.get(n) ?? 500 })));
+  // 01/11 (Iñi): precio "como DraftKings" (lib/precioTenis.ts): por los puntos
+  // que se esperan de cada uno en el torneo, más caros los de arriba y sin
+  // que quepan 5 de los 8 primeros.
+  const calc = calcularPreciosTenis(todos.map((n) => ({ nombre: n, cuota: cuotas.get(n) ?? 500 })));
   const precios = new Map(todos.map((n, i) => [n, calc[i].precio]));
   const filas = aMeter.map((j) => ({
     nombre: j.nombre,
     deporte: 'tenis',
     competicion,
-    precio: precios.get(j.nombre) ?? 4000,
+    precio: precios.get(j.nombre) ?? 9000,
     es_espanol: j.pais === 'Spain',
     metadata: { espn_id: j.espn, ranking: ranking.get(normalizarNombre(j.nombre)) ?? null, pais: j.pais, cuota_ganador: cuotas.get(j.nombre) ?? null, origen_cuota: origen },
   }));
