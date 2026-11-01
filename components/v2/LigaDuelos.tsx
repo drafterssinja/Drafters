@@ -35,6 +35,8 @@ type Ronda = {
   cierre: string | null;
   tengo_equipo: boolean;
   rival_tiene_equipo: boolean;
+  sin_sortear?: boolean; // 01/11: la jornada ya está, pero el rival se sortea 24 h antes
+  sorteo?: string | null;
 };
 type Info = {
   apuntado: boolean;
@@ -46,7 +48,7 @@ type Info = {
   calendario: Ronda[];
 };
 type LadoJ = { id: string; nombre: string; total: number | null; equipo: boolean; soy_yo: boolean } | null;
-type JornadaDiv = { ronda_id: string; orden: number; competicion: string; tipo: 'liga' | 'champions'; estado: 'pendiente' | 'en_juego' | 'terminada'; cierre: string | null; partidos: { id: string; local: LadoJ; visitante: LadoJ; resultado_local: 'G' | 'E' | 'P' | null; resultado_visitante: 'G' | 'E' | 'P' | null }[] };
+type JornadaDiv = { ronda_id: string; orden: number; competicion: string; tipo: 'liga' | 'champions'; estado: 'pendiente' | 'en_juego' | 'terminada'; cierre: string | null; sin_sortear?: boolean; sorteo?: string | null; partidos: { id: string; local: LadoJ; visitante: LadoJ; resultado_local: 'G' | 'E' | 'P' | null; resultado_visitante: 'G' | 'E' | 'P' | null }[] };
 type DivMiembros = { id: string; nombre: string; nivel: number; miembros: { id: string; nombre: string; soy_yo: boolean }[] };
 type Fila = { usuario_id: string; nombre: string; pj: number; g: number; e: number; p: number; pts: number; a_favor: number; en_contra: number; soy_yo: boolean };
 
@@ -152,7 +154,7 @@ export default function LigaDuelos({ deporte = 'futbol' }: { deporte?: 'futbol' 
   const faltan = Math.max(0, totalLiga - ligaTerminadas);
   const hayPendiente = (jornadas ?? []).some((j) => j.estado === 'pendiente');
   // 28/10 (Iñi): "Hacer mi equipo" arriba del todo, solo si todavía no lo has hecho.
-  const sinEquipo = juego ? [...info.calendario].sort((a, b) => a.orden - b.orden).find((r) => r.estado === 'pendiente' && !!r.cierre && !!r.rival_id && !r.tengo_equipo && new Date(r.cierre).getTime() > Date.now()) : undefined;
+  const sinEquipo = juego ? [...info.calendario].sort((a, b) => a.orden - b.orden).find((r) => r.estado === 'pendiente' && !!r.cierre && (!!r.rival_id || !!r.sin_sortear) && !r.tengo_equipo && new Date(r.cierre).getTime() > Date.now()) : undefined;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -174,8 +176,9 @@ export default function LigaDuelos({ deporte = 'futbol' }: { deporte?: 'futbol' 
             ['📋', 'Equipo con presupuesto de 100.000 €, como siempre.'],
             ...(esFutbol
               ? [
-                  ['🔁', 'Tu rival se sortea en cuanto se publica cada jornada. En una temporada (una vuelta de LaLiga) no repites rival.'],
-                  ['⭐', 'Las jornadas de Champions son jornadas extra, con rival sorteado.'],
+                  ['📅', 'Cada jornada de LaLiga y de Champions es una jornada de la liga. Puedes hacer tu equipo en cuanto se publica.'],
+                  ['🎲', 'Tu rival se sortea 24 h antes de que empiece la jornada.'],
+                  ['🔁', 'Todos contra todos: no repites rival hasta haber jugado contra todos los de tu división.'],
                 ]
               : [
                   ['🏆', `Cada semana cuenta un torneo: el más importante de la semana. Una temporada son ${t?.num_rondas ?? 19} torneos.`],
@@ -225,8 +228,11 @@ export default function LigaDuelos({ deporte = 'futbol' }: { deporte?: 'futbol' 
             <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: VERDE }}>
               Jornada {sinEquipo.orden} · {etiquetaReal(sinEquipo.competicion, deporte)}
             </span>
-            <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 21, color: S.TEXT, lineHeight: 1.1 }}>Haz tu equipo contra {sinEquipo.rival_nombre ?? 'tu rival'}</span>
-            <span style={{ fontSize: 12, color: S.MUTED_2 }}>Hasta {fecha(sinEquipo.cierre)}</span>
+            <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 21, color: S.TEXT, lineHeight: 1.1 }}>{sinEquipo.sin_sortear ? 'Haz tu equipo' : `Haz tu equipo contra ${sinEquipo.rival_nombre ?? 'tu rival'}`}</span>
+            <span style={{ fontSize: 12, color: S.MUTED_2 }}>
+              Hasta {fecha(sinEquipo.cierre)}
+              {sinEquipo.sin_sortear && sinEquipo.sorteo ? ` · tu rival se sortea el ${fecha(sinEquipo.sorteo)}` : ''}
+            </span>
           </span>
           <span style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6, padding: '10px 12px', borderRadius: 12, background: VERDE, color: '#04140B', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 16, textTransform: 'uppercase' }}>
             Hacer · 1 <IconoCredito size={15} oscuro />
@@ -322,7 +328,7 @@ export default function LigaDuelos({ deporte = 'futbol' }: { deporte?: 'futbol' 
           <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 20, color: S.TEXT }}>Jornadas</span>
           {enJuego && jornadas && !hayPendiente && (
             <span style={{ fontSize: 12.5, color: S.MUTED_2, lineHeight: 1.45 }}>
-              {faltan > 0 || t.sin_fin ? 'La próxima jornada todavía no está publicada. En cuanto se publique, se sortean los duelos y ya puedes hacer tu equipo.' : ''}
+              {faltan > 0 || t.sin_fin ? 'La próxima jornada todavía no está publicada. En cuanto se publique, ya puedes hacer tu equipo; tu rival se sortea 24 h antes de que empiece.' : ''}
             </span>
           )}
           {jornadas === null ? (
@@ -332,7 +338,9 @@ export default function LigaDuelos({ deporte = 'futbol' }: { deporte?: 'futbol' 
           ) : (
             [...jornadas].sort((a, b) => b.orden - a.orden).map((j) => {
               const miRonda = info.calendario.find((r) => r.ronda_id === j.ronda_id);
-              const puedoHacer = !!miRonda && j.estado === 'pendiente' && !!j.cierre && !!miRonda.rival_id;
+              const puedoHacer = !!miRonda && j.estado === 'pendiente' && !!j.cierre && new Date(j.cierre).getTime() > Date.now();
+              // 01/11 (Iñi): sorteado y sin rival = esperando a que entre alguien nuevo antes de que empiece.
+              const esperando = !!miRonda && !miRonda.rival_id && !miRonda.sin_sortear && j.estado === 'pendiente';
               return (
                 <Panel key={j.ronda_id} style={{ padding: 12, gap: 8 }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
@@ -342,7 +350,12 @@ export default function LigaDuelos({ deporte = 'futbol' }: { deporte?: 'futbol' 
                     </span>
                     <span style={{ fontSize: 11.5, fontWeight: 700, color: j.estado === 'en_juego' ? VERDE : S.MUTED_3, whiteSpace: 'nowrap' }}>{j.estado === 'en_juego' ? '● En juego' : j.estado === 'terminada' ? `${dia(j.cierre)} · Terminada` : dia(j.cierre)}</span>
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', borderRadius: 12, background: '#0E1311', border: '1px solid #1A221E', overflow: 'hidden' }}>
+                  {j.sin_sortear && (
+                    <span style={{ fontSize: 12.5, color: S.MUTED_2, textAlign: 'center', padding: '6px 0' }}>
+                      🎲 Los duelos se sortean {j.sorteo ? `el ${fecha(j.sorteo)}` : '24 h antes'}. Ya puedes hacer tu equipo.
+                    </span>
+                  )}
+                  <div style={{ display: 'flex', flexDirection: 'column', borderRadius: 12, background: '#0E1311', border: j.partidos.length ? '1px solid #1A221E' : 'none', overflow: 'hidden' }}>
                     {j.partidos.map((p, i) => (
                       <TarjetaDuelo key={p.id} p={p} estado={j.estado} primera={i === 0} />
                     ))}
@@ -353,7 +366,19 @@ export default function LigaDuelos({ deporte = 'futbol' }: { deporte?: 'futbol' 
                       ✏️ Cambiar mi equipo (hasta {fecha(j.cierre)})
                     </Link>
                   )}
-                  {miRonda && !miRonda.rival_id && j.estado !== 'terminada' && <span style={{ fontSize: 12, color: S.MUTED_2, textAlign: 'center' }}>😴 Esta jornada descansas: te llevas los 3 puntos.</span>}
+                  {esperando && (
+                    <>
+                      <span style={{ fontSize: 12, color: S.MUTED_2, textAlign: 'center', lineHeight: 1.45 }}>
+                        ⏳ De momento no tienes rival. Si entra alguien nuevo en la liga antes de que empiece la jornada, será tu rival. Si no, descansas y te llevas los 3 puntos.
+                      </span>
+                      {puedoHacer && !miRonda?.tengo_equipo && (
+                        <Link href={`/v2/liga/${j.ronda_id}/equipo`} style={{ alignSelf: 'center', fontSize: 12, fontWeight: 700, color: VERDE, textDecoration: 'none', padding: '2px 0' }}>
+                          ＋ Hacer mi equipo por si llega rival (1 crédito)
+                        </Link>
+                      )}
+                    </>
+                  )}
+                  {miRonda && !miRonda.rival_id && !miRonda.sin_sortear && j.estado !== 'terminada' && j.estado !== 'pendiente' && <span style={{ fontSize: 12, color: S.MUTED_2, textAlign: 'center' }}>😴 Esta jornada descansas: te llevas los 3 puntos.</span>}
                 </Panel>
               );
             })
@@ -376,10 +401,10 @@ export default function LigaDuelos({ deporte = 'futbol' }: { deporte?: 'futbol' 
                 </>
               )
             ) : t.sin_fin ? (
-              <>Liga de pruebas: empieza en la jornada {t.desde} de LaLiga y de momento no tiene final. Si alguien se apunta, entra en la siguiente jornada con 0 puntos.</>
+              <>Empezó en la jornada {t.desde} de LaLiga y de momento no tiene final. Cada jornada de LaLiga y de Champions es una jornada de la liga: puedes hacer tu equipo en cuanto se publica y tu rival se sortea 24 h antes. Todos contra todos: no repites rival hasta haber jugado contra todos. Si alguien se apunta, entra en la siguiente jornada con 0 puntos.</>
             ) : (
               <>
-                De la jornada {t.desde} a la {t.hasta} de LaLiga (más las de Champions que caen entre medias).
+                De la jornada {t.desde} a la {t.hasta} de LaLiga, más todas las de Champions hasta entonces.
                 {t.estado === 'en_juego' ? ` Quedan ${faltan} ${faltan === 1 ? 'jornada' : 'jornadas'} de LaLiga.` : ' Terminada.'}
               </>
             )}
@@ -487,16 +512,16 @@ function TarjetaDuelo({ p, estado, primera }: { p: PartidoJ; estado: JornadaDiv[
       ) : (
         <span style={{ fontFamily: LETRA, fontWeight: 500, fontSize: 11.5, letterSpacing: '0.12em', color: '#56625C', padding: '0 8px' }}>vs</span>
       )}
-      <Nombre lado={p.visitante} res={vivo ? null : p.resultado_visitante} mostrar={mostrar} derecha />
+      <Nombre lado={p.visitante} res={vivo ? null : p.resultado_visitante} mostrar={mostrar} derecha esperando={estado === 'pendiente'} />
     </Link>
   );
 }
 
-function Nombre({ lado, res, mostrar, derecha = false }: { lado: LadoJ; res: 'G' | 'E' | 'P' | null; mostrar: boolean; derecha?: boolean }) {
+function Nombre({ lado, res, mostrar, derecha = false, esperando = false }: { lado: LadoJ; res: 'G' | 'E' | 'P' | null; mostrar: boolean; derecha?: boolean; esperando?: boolean }) {
   if (!lado) {
     return (
       <span style={{ minWidth: 0, display: 'flex', justifyContent: derecha ? 'flex-end' : 'flex-start' }}>
-        <span style={{ fontSize: 12.5, color: '#56625C', fontStyle: 'italic' }}>descansa</span>
+        <span style={{ fontSize: 12.5, color: '#56625C', fontStyle: 'italic' }}>{esperando ? 'esperando rival' : 'descansa'}</span>
       </span>
     );
   }
