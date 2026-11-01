@@ -56,7 +56,7 @@ export default function HomePage() {
       if (!activo) return;
       const desdeIcono =
         window.matchMedia?.('(display-mode: standalone)').matches || (navigator as unknown as { standalone?: boolean }).standalone === true;
-      if (session) router.replace('/inicio');
+      if (session) router.replace('/v2/futbol');
       else if (desdeIcono) router.replace('/login');
     });
     return () => {

@@ -13,6 +13,7 @@ import ClasificacionMesaFutbol, { type EquipoExterno } from '@/components/Clasif
 import ClasificacionSala from '@/components/ClasificacionMesaGolf';
 import ClasificacionMesaTenis from '@/components/ClasificacionMesaTenis';
 import { cadaXSegundos, mensajeError } from '@/lib/v2';
+import { registrarVistaClasificacion } from '@/lib/actividad';
 
 // ============================================================================
 // LIGA PRIVADA — LOS EQUIPOS DE UNA JORNADA (31/10, Iñi)
@@ -20,7 +21,7 @@ import { cadaXSegundos, mensajeError } from '@/lib/v2';
 // La clasificación de siempre (equipos a la izquierda, jugadores a la derecha),
 // con los equipos de los miembros de la liga en esta jornada (SQL 71).
 
-type Fila = { id: string; liga_id: string; competicion: string; cierre: string | null; lp_ligas: { nombre: string; deporte: 'futbol' | 'golf' | 'tenis' } | { nombre: string; deporte: 'futbol' | 'golf' | 'tenis' }[] | null };
+type Fila = { id: string; liga_id: string; competicion: string; cierre: string | null; orden?: number | null; lp_ligas: { nombre: string; deporte: 'futbol' | 'golf' | 'tenis' } | { nombre: string; deporte: 'futbol' | 'golf' | 'tenis' }[] | null };
 type Eq = { usuario_id: string; nombre: string; jugadores: string[]; alineacion: string | null; unido_en: string };
 type Estado = 'pendiente' | 'en_juego' | 'terminada';
 type Res = { usuario_id: string; nombre: string; tiene_equipo: boolean; total: number | null; puesto: number | null; puntos_liga: number | null; soy_yo: boolean };
@@ -28,7 +29,7 @@ type Res = { usuario_id: string; nombre: string; tiene_equipo: boolean; total: n
 export default function JornadaLigaPrivada() {
   const { id } = useParams<{ id: string }>();
   const { perfil, estado } = useSesionV2();
-  const [j, setJ] = useState<{ ligaId: string; nombre: string; deporte: 'futbol' | 'golf' | 'tenis'; competicion: string; estado: Estado; puntos: Map<string, number | null>; resultados: Res[] } | null>(null);
+  const [j, setJ] = useState<{ ligaId: string; nombre: string; deporte: 'futbol' | 'golf' | 'tenis'; competicion: string; numero: number | null; estado: Estado; puntos: Map<string, number | null>; resultados: Res[] } | null>(null);
   const [equipos, setEquipos] = useState<Eq[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -36,7 +37,7 @@ export default function JornadaLigaPrivada() {
     if (estado !== 'ok') return;
     let activo = true;
     async function cargar() {
-      const { data: fila, error: e } = await supabase.from('lp_jornadas').select('id,liga_id,competicion,cierre,lp_ligas(nombre,deporte)').eq('id', id).maybeSingle();
+      const { data: fila, error: e } = await supabase.from('lp_jornadas').select('id,liga_id,competicion,cierre,orden,lp_ligas(nombre,deporte)').eq('id', id).maybeSingle();
       if (!activo) return;
       if (e || !fila) return setError(mensajeError(e) || 'No se ha encontrado esta jornada.');
       const f = fila as unknown as Fila;
@@ -44,8 +45,9 @@ export default function JornadaLigaPrivada() {
       const [{ data: info }, { data: eqs }] = await Promise.all([supabase.rpc('lp_info', { p_liga: f.liga_id }), supabase.rpc('lp_equipos_jornada', { p_jornada: id })]);
       if (!activo) return;
       const jo = ((info as { jornadas?: { id: string; estado: Estado; resultados: Res[] }[] } | null)?.jornadas ?? []).find((x) => x.id === id);
-      setJ({ ligaId: f.liga_id, nombre: liga?.nombre ?? 'Liga privada', deporte: liga?.deporte ?? 'futbol', competicion: f.competicion, estado: jo?.estado ?? 'pendiente', puntos: new Map((jo?.resultados ?? []).map((r) => [r.usuario_id, r.puntos_liga])), resultados: jo?.resultados ?? [] });
+      setJ({ ligaId: f.liga_id, nombre: liga?.nombre ?? 'Liga privada', deporte: liga?.deporte ?? 'futbol', competicion: f.competicion, numero: f.orden ?? null, estado: jo?.estado ?? 'pendiente', puntos: new Map((jo?.resultados ?? []).map((r) => [r.usuario_id, r.puntos_liga])), resultados: jo?.resultados ?? [] });
       setEquipos((eqs as Eq[]) ?? []);
+      registrarVistaClasificacion(`lp_jornada:${id}`, { modo: 'liga_privada', nombre: `${liga?.nombre ?? 'Liga privada'} · ${f.competicion}`, deporte: liga?.deporte });
     }
     void cargar();
     const parar = cadaXSegundos(() => void cargar(), 60);
@@ -84,7 +86,7 @@ export default function JornadaLigaPrivada() {
             <Link href={`/v2/liga-privada/${j.ligaId}`} style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#A78BFA', textDecoration: 'none' }}>
               🔒 {j.nombre}
             </Link>
-            <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 26, color: S.TEXT }}>{jornadaBonita(j.competicion, j.deporte)}</span>
+            <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 26, color: S.TEXT }}>{j.numero ? `Jornada ${j.numero} · ` : ''}{jornadaBonita(j.competicion, j.deporte)}</span>
             <span style={{ fontSize: 12, fontWeight: 700, color: j.estado === 'en_juego' ? '#3DDC84' : S.MUTED_2 }}>{terminada ? 'Terminada' : j.estado === 'en_juego' ? '● En juego · puntos en directo' : 'Todavía no ha empezado'}</span>
           </div>
           {equipos === null ? (

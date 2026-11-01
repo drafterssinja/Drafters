@@ -14,6 +14,7 @@ import { jornadaBonita } from '@/components/v2/LigaDuelos';
 import { UsuarioConNivel, useNiveles } from '@/components/v2/Nivel';
 import { etiquetasPosicion } from '@/lib/posicionesEmpate';
 import { cadaXSegundos, mensajeError } from '@/lib/v2';
+import { registrarVistaClasificacion } from '@/lib/actividad';
 
 // ============================================================================
 // LIGA PRIVADA (31/10, Iñi) — SQL 71
@@ -25,7 +26,7 @@ import { cadaXSegundos, mensajeError } from '@/lib/v2';
 // por jornada. Sin contraseña (ya estás dentro), sin nº de jugadores ni premio.
 
 type Resultado = { usuario_id: string; nombre: string; tiene_equipo: boolean; total: number | null; puesto: number | null; puntos_liga: number | null; soy_yo: boolean };
-type Jornada = { id: string; competicion: string; orden: number; cierre: string | null; estado: 'pendiente' | 'en_juego' | 'terminada'; tengo_equipo: boolean; con_jugadores?: boolean; equipos?: number; resultados: Resultado[] };
+type Jornada = { id: string; competicion: string; orden: number; numero?: number; cierre: string | null; estado: 'pendiente' | 'en_juego' | 'terminada'; tengo_equipo: boolean; con_jugadores?: boolean; equipos?: number; resultados: Resultado[] };
 type Disponible = { competicion: string; cierre: string; ya: boolean; con_jugadores: boolean };
 type Info = {
   id: string;
@@ -39,6 +40,8 @@ type Info = {
   soy_miembro: boolean;
   soy_creador: boolean;
   soy_admin?: boolean;
+  /** 01/11: el admin de la web puede verla por dentro sin ser miembro. */
+  puedo_ver?: boolean;
   miembros: { id: string; nombre: string; soy_yo: boolean; es_admin?: boolean; es_creador?: boolean }[];
   jornadas: Jornada[];
 };
@@ -70,6 +73,8 @@ function LigaPrivada() {
   const [copiado, setCopiado] = useState(false);
   const [claveCreada, setClaveCreada] = useState<string | null>(null);
   const [quitar, setQuitar] = useState<string | null>(null);
+  // 01/11 (Iñi): el admin de la web puede ver la liga por dentro sin entrar.
+  const [verAdmin, setVerAdmin] = useState(false);
 
   const cargar = useCallback(async () => {
     const [{ data, error: e }, { data: cl }] = await Promise.all([supabase.rpc('lp_info', { p_liga: id }), supabase.rpc('lp_clasificacion', { p_liga: id })]);
@@ -92,6 +97,10 @@ function LigaPrivada() {
   }, [nueva, id]);
 
   const niveles = useNiveles((info?.miembros ?? []).map((m) => m.id));
+  const veoDentro = !!info && (info.soy_miembro || (verAdmin && !!info.puedo_ver));
+  useEffect(() => {
+    if (info && veoDentro) registrarVistaClasificacion(`lp:${info.id}`, { modo: 'liga_privada', nombre: info.nombre, deporte: info.deporte });
+  }, [info?.id, info?.nombre, info?.deporte, veoDentro]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function entrar() {
     setEntrando(true);
@@ -173,33 +182,43 @@ function LigaPrivada() {
               <p style={{ fontSize: 13.5, color: S.MUTED_2 }}>Esta liga ya ha terminado.</p>
             ))}
 
-          {info.soy_miembro && (
+          {/* 01/11 (Iñi): el admin de la web, además de entrar, puede verla por dentro. */}
+          {!info.soy_miembro && info.puedo_ver && (
+            <button type="button" onClick={() => setVerAdmin(!verAdmin)} style={{ ...S.secondaryLinkButton, marginTop: 0, borderColor: 'rgba(240,185,77,0.5)', color: ORO }}>
+              {verAdmin ? 'Ocultar la liga' : '👁 Ver la liga por dentro (administrador)'}
+            </button>
+          )}
+          {!info.soy_miembro && verAdmin && info.puedo_ver && (
+            <span style={{ fontSize: 12, color: S.MUTED_2 }}>Estás viendo la liga como administrador de Drafters: no estás dentro, no juegas ni gastas créditos.</span>
+          )}
+
+          {veoDentro && (
             <>
               {/* Haz tu equipo */}
-              {info.estado === 'activa' && proxima && proxima.con_jugadores === false && (
+              {info.soy_miembro && info.estado === 'activa' && proxima && proxima.con_jugadores === false && (
                 <Panel style={{ gap: 4 }}>
-                  <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: VERDE }}>Próxima sala</span>
-                  <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 22, color: S.TEXT, lineHeight: 1.1 }}>{jornadaBonita(proxima.competicion, dep)}</span>
+                  <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: VERDE }}>Próxima jornada</span>
+                  <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 22, color: S.TEXT, lineHeight: 1.1 }}>Jornada {proxima.numero ?? proxima.orden} · {jornadaBonita(proxima.competicion, dep)}</span>
                   <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>{dep === 'tenis' ? 'Podrás hacer tu equipo en cuanto salga el cuadro. Te avisamos.' : 'Podrás hacer tu equipo en cuanto estén los jugadores. Te avisamos.'}</span>
                 </Panel>
               )}
-              {info.estado === 'activa' && proxima && proxima.con_jugadores !== false && (
+              {info.soy_miembro && info.estado === 'activa' && proxima && proxima.con_jugadores !== false && (
                 <Link
                   href={`/v2/liga-privada/jornada/${proxima.id}/equipo`}
                   style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: 16, borderRadius: 16, textDecoration: 'none', background: proxima.tengo_equipo ? S.PANEL : 'linear-gradient(160deg, #15241C 0%, #111614 70%)', border: `1px solid ${proxima.tengo_equipo ? S.CARD_BORDER : 'rgba(61,220,132,0.45)'}` }}
                 >
-                  <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: proxima.tengo_equipo ? S.MUTED_2 : VERDE }}>{proxima.tengo_equipo ? '✓ Ya tienes equipo' : 'Próxima sala'}</span>
+                  <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: proxima.tengo_equipo ? S.MUTED_2 : VERDE }}>{proxima.tengo_equipo ? '✓ Ya tienes equipo' : `Próxima jornada · Jornada ${proxima.numero ?? proxima.orden}`}</span>
                   <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 22, color: S.TEXT, lineHeight: 1.1 }}>
                     {proxima.tengo_equipo ? 'Cambiar mi equipo' : 'Haz tu equipo'} · {jornadaBonita(proxima.competicion, dep)}
                   </span>
                   <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>Cierra el {fecha(proxima.cierre)}{proxima.tengo_equipo ? '' : ' · 1 crédito'}</span>
                 </Link>
               )}
-              {info.estado === 'activa' && !proxima && (
+              {info.soy_miembro && info.estado === 'activa' && !proxima && (
                 <Panel style={{ gap: 4 }}>
-                  <span style={{ fontWeight: 800, fontSize: 14, color: S.TEXT }}>Todavía no hay sala para hacer equipo</span>
+                  <span style={{ fontWeight: 800, fontSize: 14, color: S.TEXT }}>Todavía no hay jornada para hacer equipo</span>
                   <span style={{ fontSize: 12.5, color: S.MUTED_2, lineHeight: 1.5 }}>
-                    {info.soy_admin ? `Publícala aquí abajo: solo tienes que elegir ${dep === 'futbol' ? 'la jornada' : 'el torneo'}.` : `La publicará un administrador de la liga (@${info.creador}${info.miembros.filter((m) => m.es_admin && !m.es_creador).map((m) => ` o @${m.nombre}`).join('')}). Te avisamos.`}
+                    {info.soy_admin ? `Créala aquí abajo: solo tienes que elegir ${dep === 'futbol' ? 'la jornada de LaLiga o Champions' : 'el torneo'}.` : `La creará un administrador de la liga (@${info.creador}${info.miembros.filter((m) => m.es_admin && !m.es_creador).map((m) => ` o @${m.nombre}`).join('')}). Te avisamos.`}
                   </span>
                 </Panel>
               )}
@@ -213,32 +232,32 @@ function LigaPrivada() {
                   <Cargando compacto />
                 ) : (
                   <>
-                    <div style={{ display: 'grid', gridTemplateColumns: '34px 1fr 30px 30px 44px', gap: 6, fontSize: 10.5, fontWeight: 800, color: S.MUTED_3, textTransform: 'uppercase', padding: '4px 2px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '30px 1fr 28px 48px 40px', gap: 6, fontSize: 10.5, fontWeight: 800, color: S.MUTED_3, textTransform: 'uppercase', padding: '4px 2px' }}>
                       <span>#</span>
                       <span>Jugador</span>
                       <span style={{ textAlign: 'center' }}>PJ</span>
-                      <span style={{ textAlign: 'center' }}>1º</span>
+                      <span style={{ textAlign: 'right' }}>PF</span>
                       <span style={{ textAlign: 'right' }}>Pts</span>
                     </div>
                     {tabla.map((f, i) => (
-                      <div key={f.usuario_id} style={{ display: 'grid', gridTemplateColumns: '34px 1fr 30px 30px 44px', gap: 6, alignItems: 'center', padding: '8px 2px', borderTop: '1px solid rgba(255,255,255,0.05)', background: f.soy_yo ? 'rgba(61,220,132,0.07)' : 'transparent', borderRadius: f.soy_yo ? 8 : 0 }}>
+                      <div key={f.usuario_id} style={{ display: 'grid', gridTemplateColumns: '30px 1fr 28px 48px 40px', gap: 6, alignItems: 'center', padding: '8px 2px', borderTop: '1px solid rgba(255,255,255,0.05)', background: f.soy_yo ? 'rgba(61,220,132,0.07)' : 'transparent', borderRadius: f.soy_yo ? 8 : 0 }}>
                         <span style={{ fontWeight: 800, fontSize: 13.5, color: posiciones[i].replace('T', '') === '1' && f.pts > 0 ? ORO : S.MUTED }}>{posiciones[i]}</span>
                         <span style={{ minWidth: 0, fontWeight: 700, fontSize: 13.5, color: f.soy_yo ? VERDE : S.TEXT }}>
                           <UsuarioConNivel id={f.usuario_id} nombre={f.nombre} nivel={niveles.get(f.usuario_id)} miId={perfil?.id} modo="popover" />
                         </span>
                         <span style={{ textAlign: 'center', fontSize: 13, color: S.MUTED }}>{f.pj}</span>
-                        <span style={{ textAlign: 'center', fontSize: 13, color: S.MUTED }}>{f.victorias}</span>
+                        <span style={{ textAlign: 'right', fontSize: 12.5, color: S.MUTED }}>{n1(f.puntos_fantasy)}</span>
                         <span style={{ textAlign: 'right', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 18, color: S.TEXT }}>{f.pts}</span>
                       </div>
                     ))}
-                    <span style={{ fontSize: 11, color: S.MUTED_3, marginTop: 4 }}>Cuenta cuando termina cada sala. Empate a puntos: desempatan los puntos de los equipos.</span>
+                    <span style={{ fontSize: 11, color: S.MUTED_3, marginTop: 4 }}>PJ: jornadas jugadas · PF: puntos a favor (los de tus equipos) · Pts: puntos de liga. Cuenta cuando termina cada jornada; si hay empate a puntos, desempatan los puntos a favor.</span>
                   </>
                 )}
               </Panel>
 
               {/* Jornadas */}
               <Panel style={{ gap: 0, padding: '12px 12px 4px' }}>
-                <span style={{ ...S.sectionLabel, marginBottom: 6 }}>Salas de la liga</span>
+                <span style={{ ...S.sectionLabel, marginBottom: 6 }}>Jornadas de la liga</span>
                 {jornadas.length === 0 && <span style={{ fontSize: 13, color: S.MUTED_2, paddingBottom: 8 }}>Todavía no hay ninguna.</span>}
                 {jornadas.map((j, i) => {
                   const yo = j.resultados.find((r) => r.soy_yo);
@@ -247,19 +266,19 @@ function LigaPrivada() {
                     <div key={j.id} style={{ borderTop: i === 0 ? 'none' : '1px solid rgba(255,255,255,0.05)' }}>
                       <button type="button" onClick={() => (j.estado === 'pendiente' ? setAbierta(abiertaJ ? null : j.id) : router.push(`/v2/liga-privada/jornada/${j.id}`))} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 2px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
                         <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
-                          <span style={{ fontWeight: 800, fontSize: 14, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{jornadaBonita(j.competicion, dep)}</span>
+                          <span style={{ fontWeight: 800, fontSize: 14, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Jornada {j.numero ?? j.orden} · {jornadaBonita(j.competicion, dep)}</span>
                           <span style={{ fontSize: 11.5, color: j.estado === 'en_juego' ? VERDE : S.MUTED_3 }}>{j.estado === 'terminada' ? 'Terminada' : j.estado === 'en_juego' ? '● En juego' : `Cierra ${fecha(j.cierre)}`}</span>
                         </span>
                         <span style={{ fontSize: 12, color: S.MUTED_2, textAlign: 'right' }}>
-                          {j.estado === 'pendiente' ? (j.tengo_equipo ? '✓ Equipo hecho' : <span style={{ color: '#FF8A8A' }}>Sin equipo</span>) : yo?.puesto ? `${yo.puesto}º` : 'Sin equipo'}
+                          {!info.soy_miembro ? '' : j.estado === 'pendiente' ? (j.tengo_equipo ? '✓ Equipo hecho' : <span style={{ color: '#FF8A8A' }}>Sin equipo</span>) : yo?.puesto ? `${yo.puesto}º` : 'Sin equipo'}
                         </span>
-                        {j.estado === 'terminada' && <span style={{ minWidth: 40, textAlign: 'right', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 16, color: (yo?.puntos_liga ?? 0) > 0 ? VERDE : S.MUTED_3 }}>+{yo?.puntos_liga ?? 0}</span>}
+                        {j.estado === 'terminada' && info.soy_miembro && <span style={{ minWidth: 40, textAlign: 'right', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 16, color: (yo?.puntos_liga ?? 0) > 0 ? VERDE : S.MUTED_3 }}>+{yo?.puntos_liga ?? 0}</span>}
                         <span style={{ color: S.MUTED_3, fontSize: j.estado === 'pendiente' ? 11 : 16 }}>{j.estado !== 'pendiente' ? '›' : abiertaJ ? '▾' : '▸'}</span>
                       </button>
                       {abiertaJ && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '0 2px 12px' }}>
                           {j.estado === 'pendiente' ? (
-                            <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>Los equipos de los demás se ven cuando empiece la sala.</span>
+                            <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>Los equipos de los demás se ven cuando empiece la jornada.</span>
                           ) : (
                             j.resultados.map((r) => (
                               <div key={r.usuario_id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
@@ -276,7 +295,7 @@ function LigaPrivada() {
                                 Ver los equipos
                               </Link>
                             )}
-                            {j.estado === 'pendiente' && info.estado === 'activa' && j.con_jugadores !== false && j.cierre && new Date(j.cierre).getTime() > Date.now() && (
+                            {j.estado === 'pendiente' && info.soy_miembro && info.estado === 'activa' && j.con_jugadores !== false && j.cierre && new Date(j.cierre).getTime() > Date.now() && (
                               <Link href={`/v2/liga-privada/jornada/${j.id}/equipo`} style={{ ...S.secondaryLinkButton, flex: 1, marginTop: 0, textAlign: 'center', textDecoration: 'none' }}>
                                 {j.tengo_equipo ? 'Cambiar mi equipo' : 'Hacer mi equipo'}
                               </Link>
@@ -285,7 +304,7 @@ function LigaPrivada() {
                           {j.estado === 'pendiente' && info.soy_admin && info.estado === 'activa' && (
                             quitar === j.id ? (
                               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                                <span style={{ flex: 1, fontSize: 12, color: S.MUTED_2 }}>¿Quitar esta sala?{j.equipos ? ` Se devuelve el crédito a los ${j.equipos} que ya hicieron equipo.` : ''}</span>
+                                <span style={{ flex: 1, fontSize: 12, color: S.MUTED_2 }}>¿Quitar esta jornada?{j.equipos ? ` Se devuelve el crédito a los ${j.equipos} que ya hicieron equipo.` : ''}</span>
                                 <button type="button" onClick={() => setQuitar(null)} style={{ background: 'none', border: 'none', color: S.MUTED, fontSize: 12.5, cursor: 'pointer' }}>
                                   No
                                 </button>
@@ -304,7 +323,7 @@ function LigaPrivada() {
                               </div>
                             ) : (
                               <button type="button" onClick={() => setQuitar(j.id)} style={{ alignSelf: 'flex-start', background: 'none', border: 'none', color: S.MUTED_3, fontSize: 12, cursor: 'pointer', padding: '4px 0' }}>
-                                Quitar esta sala
+                                Quitar esta jornada
                               </button>
                             )
                           )}
@@ -341,14 +360,14 @@ function LigaPrivada() {
                     </div>
                   ))}
                 </div>
-                <span style={{ fontSize: 11.5, color: S.MUTED_3 }}>Los administradores publican las salas de la liga.</span>
-                {info.estado === 'activa' && (
+                <span style={{ fontSize: 11.5, color: S.MUTED_3 }}>Los administradores crean las jornadas de la liga.</span>
+                {info.soy_miembro && info.estado === 'activa' && (
                   <>
                     <InvitarAmigos ligaId={info.id} dentro={info.miembros.map((m) => m.id)} />
                     <button type="button" onClick={() => void compartir()} style={{ ...S.secondaryLinkButton, marginTop: 0 }}>
                       {copiado ? '✓ Enlace copiado' : '🔗 Compartir el enlace de la liga'}
                     </button>
-                    <span style={{ fontSize: 11.5, color: S.MUTED_3 }}>Para entrar necesitan la contraseña. Quien entre juega desde la siguiente sala que empiece.</span>
+                    <span style={{ fontSize: 11.5, color: S.MUTED_3 }}>Para entrar necesitan la contraseña. Quien entre juega desde la siguiente jornada que empiece.</span>
                   </>
                 )}
               </Panel>
@@ -356,12 +375,12 @@ function LigaPrivada() {
               <Panel style={{ gap: 6 }}>
                 <span style={S.sectionLabel}>Cómo se puntúa</span>
                 <span style={{ fontSize: 13, color: S.MUTED, lineHeight: 1.5 }}>
-                  En cada sala juegan todos los de la liga y se ordena a todos por los puntos de su equipo: con {Math.max(n, 2)} miembros, el primero suma {Math.max(n, 2)}, el segundo {Math.max(n, 2) - 1}… y el último 1. Quien no hace equipo suma 0. Cada sala cuenta también para tu nivel. La liga no se acaba sola: la termina @{info.creador}.
+                  En cada jornada juegan todos los de la liga y se ordena a todos por los puntos de su equipo: con {Math.max(n, 2)} miembros, el primero suma {Math.max(n, 2)}, el segundo {Math.max(n, 2) - 1}… y el último 1. Quien no hace equipo suma 0. Cada jornada cuenta también para tu nivel. La liga no se acaba sola: la termina @{info.creador}.
                 </span>
               </Panel>
 
               {/* Terminar / salir */}
-              {info.estado === 'activa' &&
+              {info.soy_miembro && info.estado === 'activa' &&
                 (confirmar ? (
                   <Panel style={{ gap: 10, border: '1px solid rgba(255,138,138,0.4)' }}>
                     <span style={{ fontSize: 13.5, color: S.TEXT, lineHeight: 1.5 }}>
@@ -428,9 +447,9 @@ function PublicarSala({ ligaId, deporte, onHecho }: { ligaId: string; deporte: '
   if (!abierto) {
     return (
       <>
-        {hecho && <span style={{ fontSize: 13, color: VERDE, fontWeight: 700 }}>✓ Sala de {hecho} publicada. Ya pueden hacer su equipo.</span>}
+        {hecho && <span style={{ fontSize: 13, color: VERDE, fontWeight: 700 }}>✓ Jornada creada ({hecho}). Ya pueden hacer su equipo.</span>}
         <button type="button" onClick={() => void abrir()} style={{ ...S.primaryButton, background: '#A78BFA', marginTop: 0 }}>
-          ＋ Publicar sala
+          ＋ Crear jornada
         </button>
       </>
     );
@@ -439,12 +458,12 @@ function PublicarSala({ ligaId, deporte, onHecho }: { ligaId: string; deporte: '
   const ya = (lista ?? []).filter((d) => d.ya);
   return (
     <Panel style={{ gap: 10, border: '1.5px solid #A78BFA' }}>
-      <span style={{ fontWeight: 800, fontSize: 15, color: S.TEXT }}>¿{deporte === 'futbol' ? 'De qué jornada' : 'De qué torneo'} es la sala?</span>
-      <span style={{ fontSize: 12, color: S.MUTED_2, lineHeight: 1.45, marginTop: -6 }}>Juegan todos los de la liga y puntúa para la clasificación. Solo puede haber una sala por {deporte === 'futbol' ? 'jornada' : 'torneo'}.</span>
+      <span style={{ fontWeight: 800, fontSize: 15, color: S.TEXT }}>¿{deporte === 'futbol' ? 'Qué jornada de LaLiga o Champions' : 'Qué torneo'} se juega?</span>
+      <span style={{ fontSize: 12, color: S.MUTED_2, lineHeight: 1.45, marginTop: -6 }}>Juegan todos los de la liga y puntúa para la clasificación. Cada {deporte === 'futbol' ? 'jornada' : 'torneo'} solo se puede crear una vez.</span>
       {lista === null ? (
         <Cargando compacto />
       ) : libres.length === 0 ? (
-        <span style={{ fontSize: 13, color: S.MUTED_2 }}>Ahora mismo no hay {deporte === 'futbol' ? 'jornadas' : 'torneos'} disponibles{ya.length ? ' que no tengan ya su sala' : ''}.</span>
+        <span style={{ fontSize: 13, color: S.MUTED_2 }}>Ahora mismo no hay {deporte === 'futbol' ? 'jornadas' : 'torneos'} disponibles{ya.length ? ' que no estén ya creados' : ''}.</span>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {libres.map((d) => (
@@ -466,14 +485,14 @@ function PublicarSala({ ligaId, deporte, onHecho }: { ligaId: string; deporte: '
           ))}
         </div>
       )}
-      {ya.length > 0 && <span style={{ fontSize: 11.5, color: S.MUTED_3 }}>Ya tienen sala: {ya.map((d) => jornadaBonita(d.competicion, deporte)).join(', ')}.</span>}
+      {ya.length > 0 && <span style={{ fontSize: 11.5, color: S.MUTED_3 }}>Ya creadas: {ya.map((d) => jornadaBonita(d.competicion, deporte)).join(', ')}.</span>}
       {error && <p style={S.errorText}>{error}</p>}
       <div style={{ display: 'flex', gap: 8 }}>
         <button type="button" onClick={() => setAbierto(false)} style={{ ...S.secondaryLinkButton, flex: 1, marginTop: 0 }}>
           Cancelar
         </button>
         <button type="button" disabled={!elegida || enviando} onClick={() => void publicar()} style={{ ...S.primaryButton, flex: 1, marginTop: 0, background: '#A78BFA', opacity: !elegida || enviando ? 0.5 : 1 }}>
-          {enviando ? 'Publicando…' : 'Publicar'}
+          {enviando ? 'Creando…' : 'Crear jornada'}
         </button>
       </div>
     </Panel>

@@ -189,7 +189,7 @@ export default function PerfilAmigoPage() {
                     <Link href={href} style={{ display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none' }}>
                       <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
                         <span style={{ fontSize: 10.5, fontWeight: 700, color: '#F0B94D', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                          {e.tipo === 'amistoso' ? 'Amistoso' : e.tipo === 'porra' ? 'Porra' : e.version === 2 ? 'Liga V2' : 'Mesa'} · {e.competicion}
+                          {e.tipo === 'amistoso' ? 'Amistoso' : e.tipo === 'porra' ? 'Porra' : e.version === 2 ? 'Liga' : 'Mesa'} · {e.competicion}
                         </span>
                         <span style={{ fontSize: 14, fontWeight: 700, color: S.TEXT }}>
                           {e.privada ? '🔒 ' : ''}

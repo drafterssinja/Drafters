@@ -14,7 +14,7 @@ import { mensajeError } from '@/lib/v2';
 // CREAR UNA LIGA PRIVADA (31/10, Iñi) — SQL 71 (lp_crear)
 // ============================================================================
 // Quien la crea pone el nombre y la contraseña. Luego él (y los administradores
-// que nombre) publican la sala de cada jornada o torneo que quieran (SQL 72).
+// que nombre) crean cada jornada que quieran (SQL 72).
 // No tiene final: la termina quien la crea.
 
 const ICONO: Record<DeporteV2, string> = { futbol: '⚽', golf: '⛳', tenis: '🎾' };
@@ -80,7 +80,7 @@ function Crear() {
       <Panel style={{ gap: 6 }}>
         <span style={S.sectionLabel}>Cómo se puntúa</span>
         <span style={{ fontSize: 13, color: S.MUTED, lineHeight: 1.5 }}>
-          Tú publicas la sala de cada {deporte === 'futbol' ? 'jornada (de LaLiga o de la Champions, la que queráis)' : 'torneo que elijáis'}, y puedes hacer administradores a otros para que también las publiquen. En cada sala juegan todos y se ordena a todos por los puntos de su equipo: si sois 8, el primero se lleva 8 puntos, el segundo 7… y el último 1. Quien no hace equipo, 0. Cada sala cuesta 1 crédito al hacer el equipo.
+          Tú creas cada jornada de la liga ({deporte === 'futbol' ? 'con la jornada de LaLiga o de la Champions que queráis' : 'con el torneo que elijáis'}), y puedes hacer administradores a otros para que también las creen. En cada jornada juegan todos y se ordena a todos por los puntos de su equipo: si sois 8, el primero se lleva 8 puntos, el segundo 7… y el último 1. Quien no hace equipo, 0. Si hay empate a puntos, desempatan los puntos a favor. Cada jornada cuesta 1 crédito al hacer el equipo.
         </span>
       </Panel>
 

@@ -71,7 +71,7 @@ export default function LoginPage() {
     await supabase.rpc('registrar_evento_actividad', { p_tipo: 'login', p_detalle: { via: 'usuario_y_contrasena', plataforma: plataformaActual() } });
     marcarEntradaRegistrada();
 
-    router.push('/inicio');
+    router.push('/v2/futbol');
   }
 
   return (

@@ -7,7 +7,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: 'Drafters',
     short_name: 'Drafters',
     description: 'Fantasy de fútbol, golf y tenis: salas, porras y draft.',
-    start_url: '/inicio',
+    start_url: '/v2/futbol',
     scope: '/',
     display: 'standalone',
     orientation: 'portrait',

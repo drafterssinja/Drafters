@@ -45,7 +45,7 @@ type EventoActividad = {
   apellido: string | null;
   email: string | null;
   tipo: 'login' | 'inscripcion' | 'recarga' | 'clasificacion' | 'amistoso' | 'liga' | 'amigos';
-  detalle: { modo?: 'sala' | 'porra'; nombre?: string; v2?: boolean; accion?: 'crear' | 'unirse' | 'apuntarse' | 'solicitar' | 'aceptar'; temporada?: number; division?: string | null; grupo?: number; sistema?: boolean; deporte?: string; modalidad?: string; privada?: boolean; num_jugadores?: number; competicion?: string; tipo_recarga?: 'gratuita' | 'video'; via?: 'sesion_guardada' | 'usuario_y_contrasena'; desde?: 'app' | 'navegador'; plataforma?: 'ios' | 'android' | 'otro' } | null;
+  detalle: { modo?: 'sala' | 'porra' | 'liga_privada' | 'liga_drafters' | 'duelo' | 'partida' | 'mesa'; nombre?: string; v2?: boolean; accion?: 'crear' | 'unirse' | 'apuntarse' | 'solicitar' | 'aceptar' | 'crear_privada' | 'unirse_privada' | 'apuntarse_drafters'; temporada?: number; division?: string | null; grupo?: number; sistema?: boolean; deporte?: string; modalidad?: string; privada?: boolean; num_jugadores?: number; competicion?: string; tipo_recarga?: 'gratuita' | 'video'; via?: 'sesion_guardada' | 'usuario_y_contrasena'; desde?: 'app' | 'navegador'; plataforma?: 'ios' | 'android' | 'otro' } | null;
   creado_en: string;
 };
 
@@ -241,22 +241,28 @@ export default function AdminActividadPage() {
       const dep = e.detalle?.deporte === 'golf' ? 'golf' : e.detalle?.deporte === 'tenis' ? 'tenis' : 'fútbol';
       const mod = e.detalle?.modalidad === 'draft' ? 'draft' : e.detalle?.modalidad === 'libre' ? 'libre' : 'con presupuesto';
       const extra = ` (${dep} · ${mod}${e.detalle?.privada ? ' · privada' : ''}${e.detalle?.accion === 'crear' && e.detalle?.num_jugadores ? ` · ${e.detalle.num_jugadores} jugadores` : ''})`;
-      return e.detalle?.accion === 'crear' ? `Ha creado el amistoso "${nombreObjetivo}"${extra}` : `Se ha unido al amistoso "${nombreObjetivo}"${e.detalle?.sistema ? ' (sala de Drafters)' : ''}${extra}`;
+      return e.detalle?.accion === 'crear' ? `Ha creado la sala${e.detalle?.privada ? ' privada' : ' pública'} "${nombreObjetivo}"${extra}` : `Se ha unido a la sala "${nombreObjetivo}"${e.detalle?.sistema ? ' (sala de Drafters)' : ''}${extra}`;
     }
     if (e.tipo === 'amigos') {
       return e.detalle?.accion === 'aceptar' ? `Ahora es amigo de @${nombreObjetivo}` : `Ha pedido amistad a @${nombreObjetivo}`;
     }
     if (e.tipo === 'liga') {
       const dep = e.detalle?.deporte === 'golf' ? 'golf' : e.detalle?.deporte === 'tenis' ? 'tenis' : 'fútbol';
+      // 01/11 (Iñi): ligas privadas y Liga Drafters.
+      if (e.detalle?.accion === 'crear_privada') return `Ha creado la liga privada "${nombreObjetivo}" (${dep})`;
+      if (e.detalle?.accion === 'unirse_privada') return `Ha entrado en la liga privada "${nombreObjetivo}" (${dep})`;
+      if (e.detalle?.accion === 'apuntarse_drafters') return `Se ha apuntado a la Liga Drafters de ${dep}`;
       return `Se ha apuntado a "${nombreObjetivo}" · Temporada ${e.detalle?.temporada ?? '?'} (${dep}${e.detalle?.division ? ` · ${e.detalle.division}` : ''}${e.detalle?.grupo && e.detalle.grupo > 1 ? ` · grupo ${e.detalle.grupo}` : ''})`;
     }
     if (e.tipo === 'inscripcion' && e.detalle?.v2) {
-      return `Se ha inscrito en la mesa de liga V2 "${nombreObjetivo}"${e.detalle?.competicion ? ` · ${e.detalle.competicion}` : ''} (1 crédito)`;
+      return `Se ha inscrito en la mesa de liga "${nombreObjetivo}"${e.detalle?.competicion ? ` · ${e.detalle.competicion}` : ''} (1 crédito)`;
     }
     if (e.tipo === 'clasificacion') {
-      return e.detalle?.modo === 'sala'
-        ? `Ha visto la clasificación de la mesa "${nombreObjetivo}"`
-        : `Ha visto la clasificación de la porra "${nombreObjetivo}"`;
+      // 01/11 (Iñi): cualquier clasificación, se entre por donde se entre.
+      const que = { sala: 'la sala', mesa: 'la mesa', porra: 'la porra', liga_privada: 'la liga privada', liga_drafters: 'la', duelo: 'el duelo', partida: 'la partida' }[e.detalle?.modo ?? 'sala'] ?? 'la mesa';
+      if (e.detalle?.modo === 'liga_drafters') return `Ha visto la clasificación de la Liga Drafters${e.detalle?.deporte ? ` (${e.detalle.deporte})` : ''}`;
+      if (e.detalle?.modo === 'duelo') return `Ha visto el duelo ${nombreObjetivo}`;
+      return `Ha visto la clasificación de ${que} "${nombreObjetivo}"`;
     }
     if (e.detalle?.modo === 'porra') return `Se ha inscrito en la porra "${nombreObjetivo}"`;
     if (e.detalle?.modo === 'sala') return `Se ha inscrito en la mesa "${nombreObjetivo}"`;
@@ -272,9 +278,9 @@ export default function AdminActividadPage() {
     if (e.tipo === 'recarga') return { texto: 'Recarga', color: '#F0B94D', fondo: 'rgba(240,185,77,0.14)' };
     if (e.tipo === 'clasificacion') return { texto: 'Clasificación', color: '#7AA7FF', fondo: 'rgba(122,167,255,0.14)' };
     if (e.tipo === 'amigos') return { texto: 'Amigos', color: '#7AA7FF', fondo: 'rgba(122,167,255,0.16)' };
-    if (e.tipo === 'liga') return { texto: 'V2 · Se apunta a la liga', color: '#F0B94D', fondo: 'rgba(240,185,77,0.16)' };
-    if (e.tipo === 'amistoso') return { texto: e.detalle?.accion === 'crear' ? 'V2 · Crea amistoso' : 'V2 · Entra amistoso', color: '#A78BFA', fondo: 'rgba(167,139,250,0.16)' };
-    if (e.tipo === 'inscripcion' && e.detalle?.v2) return { texto: 'V2 · Inscripción', color: '#A78BFA', fondo: 'rgba(167,139,250,0.16)' };
+    if (e.tipo === 'liga') return { texto: e.detalle?.accion === 'crear_privada' ? 'Crea liga privada' : e.detalle?.accion === 'unirse_privada' ? 'Entra liga privada' : 'Se apunta a la liga', color: '#F0B94D', fondo: 'rgba(240,185,77,0.16)' };
+    if (e.tipo === 'amistoso') return { texto: e.detalle?.accion === 'crear' ? (e.detalle?.privada ? 'Crea sala privada' : 'Crea sala pública') : 'Entra en sala', color: '#A78BFA', fondo: 'rgba(167,139,250,0.16)' };
+    if (e.tipo === 'inscripcion' && e.detalle?.v2) return { texto: 'Inscripción', color: '#A78BFA', fondo: 'rgba(167,139,250,0.16)' };
     return { texto: 'Inscripción', color: S.ACCENT, fondo: 'rgba(61,220,132,0.12)' };
   }
 
@@ -319,8 +325,8 @@ export default function AdminActividadPage() {
               <option value="inscripcion">Inscripción</option>
               <option value="recarga">Recarga</option>
               <option value="clasificacion">Clasificación</option>
-              <option value="amistoso">Amistosos (V2)</option>
-              <option value="liga">Ligas (V2)</option>
+              <option value="amistoso">Salas</option>
+              <option value="liga">Ligas (Drafters y privadas)</option>
               <option value="amigos">Amigos</option>
             </select>
           </div>

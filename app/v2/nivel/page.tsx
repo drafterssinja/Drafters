@@ -8,6 +8,7 @@ import MarcoV2, { Panel, Titulo } from '@/components/v2/MarcoV2';
 import { useSesionV2 } from '@/components/v2/useSesionV2';
 import Cargando from '@/components/Cargando';
 import { BarraNivel, NivelBadge, UsuarioConNivel, useNiveles } from '@/components/v2/Nivel';
+import { registrarVistaClasificacion } from '@/lib/actividad';
 
 // ============================================================================
 // MI NIVEL (31/10, Iñi) — como en Ludoteka (SQL 71)
@@ -111,7 +112,8 @@ function PartidaAbierta({ u }: { u: Ultima }) {
   const niveles = useNiveles((filas ?? []).map((f) => f.usuario_id));
   useEffect(() => {
     void supabase.rpc('partida_clasificacion', { p_tipo: u.ref_tipo, p_id: u.ref_id, p_sub: u.ref_sub }).then(({ data }) => setFilas((data as FilaPartida[]) ?? []));
-  }, [u.ref_tipo, u.ref_id, u.ref_sub]);
+    registrarVistaClasificacion(`partida:${u.ref_tipo}:${u.ref_id}:${u.ref_sub}`, { modo: 'partida', nombre: u.titulo, deporte: u.deporte });
+  }, [u.ref_tipo, u.ref_id, u.ref_sub, u.titulo, u.deporte]);
   const d = u.detalle;
   const miId = filas?.find((f) => f.soy_yo)?.usuario_id;
   return (

@@ -906,7 +906,6 @@ export default function CrearEquipoPorraPage() {
               <h1 style={{ fontSize: 24, fontWeight: 800, color: S.TEXT }}>{modoEdicion ? 'Confirma los cambios' : 'Confirma tu equipo'}</h1>
               <p style={{ fontSize: 13, color: S.MUTED_2 }}>
                 {PORRA_FORMATO_LABELS[porra.formato]}
-                {modoEdicion ? ' · sin coste adicional, ya está pagado' : ` · ${formatEuros(porra.precio)} por equipo`}
               </p>
             </div>
 

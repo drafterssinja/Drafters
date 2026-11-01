@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AjustesNotificaciones from '@/components/AjustesNotificaciones';
-import { supabase, Perfil, Movimiento } from '@/lib/supabaseClient';
+import { supabase, Perfil } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
 import InstalarApp from '@/components/InstalarApp';
 import * as S from '@/lib/mockupStyles';
@@ -38,7 +38,6 @@ export default function CuentaPage() {
   const router = useRouter();
   const [perfil, setPerfil] = useState<Perfil | null>(null);
   const [historial, setHistorial] = useState<FilaHistorial[]>([]);
-  const [movimientos, setMovimientos] = useState<Movimiento[]>([]);
   const [cargando, setCargando] = useState(true);
   // 16/10: solicitudes de amistad pendientes (para el aviso en la tarjeta de Amigos).
   const [solicitudesAmigos, setSolicitudesAmigos] = useState(0);
@@ -83,7 +82,6 @@ export default function CuentaPage() {
       const [
         { data: perfilData, error: perfilError },
         { data: historialData, error: historialError },
-        { data: movimientosData, error: movimientosError },
       ] = await Promise.all([
         supabase.from('perfiles').select('*').eq('id', session.user.id).single(),
         supabase
@@ -93,11 +91,6 @@ export default function CuentaPage() {
           )
           .eq('usuario_id', session.user.id)
           .order('created_at', { ascending: false }),
-        supabase
-          .from('movimientos')
-          .select('id, usuario_id, tipo, importe, creado_en')
-          .eq('usuario_id', session.user.id)
-          .order('creado_en', { ascending: false }),
       ]);
 
       if (!activo) return;
@@ -116,9 +109,6 @@ export default function CuentaPage() {
 
       if (historialError) setError('No se ha podido cargar tu historial de partidas.');
       else setHistorial((historialData as unknown as FilaHistorial[]) ?? []);
-
-      if (movimientosError) setError('No se ha podido cargar tu historial de movimientos.');
-      else setMovimientos((movimientosData as Movimiento[]) ?? []);
 
       setCargando(false);
     }
@@ -266,33 +256,7 @@ export default function CuentaPage() {
 
           <InstalarApp variante="tarjeta" />
 
-          <Link href="/recargar" style={S.card}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_2, fontWeight: 700 }}>
-                Saldo disponible
-              </span>
-              <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 22, color: S.TEXT }}>
-                {saldoLabel}
-              </span>
-            </div>
-            <span
-              style={{
-                flexShrink: 0,
-                fontFamily: "'Barlow Condensed', sans-serif",
-                fontWeight: 700,
-                fontSize: 12,
-                textTransform: 'uppercase',
-                letterSpacing: '0.03em',
-                color: '#04140B',
-                background: S.ACCENT,
-                borderRadius: 8,
-                padding: '9px 14px',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              Recargar
-            </span>
-          </Link>
+          {/* 01/11: sin saldo en euros. */}
 
           {/* 16/10 (Iñi): gestor de amigos en "Mi perfil". */}
           <Link href="/amigos" style={S.card}>
@@ -384,38 +348,7 @@ export default function CuentaPage() {
             </div>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <span style={S.sectionLabel}>Historial de ingresos y retiradas</span>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {movimientos.length === 0 && (
-                <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>Todavía no tienes movimientos de saldo.</p>
-              )}
-              {movimientos.map((mv) => (
-                <div
-                  key={mv.id}
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: '11px 14px' }}
-                >
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 13, color: S.TEXT }}>
-                      {mv.tipo === 'deposito' ? 'Ingreso' : 'Retirada'}
-                    </span>
-                    <span style={{ fontSize: 11, color: S.FAINT }}>{new Date(mv.creado_en).toLocaleDateString('es-ES')}</span>
-                  </div>
-                  <span
-                    style={{
-                      flexShrink: 0,
-                      fontFamily: "'Barlow Condensed', sans-serif",
-                      fontWeight: 800,
-                      fontSize: 15,
-                      color: mv.tipo === 'deposito' ? S.ACCENT : S.ERROR,
-                    }}
-                  >
-                    {mv.tipo === 'deposito' ? '+' : '-'}{Number(mv.importe).toFixed(2)} €
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
+
 
           <div style={S.fieldGroup}>
             <div style={S.field}>

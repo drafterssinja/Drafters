@@ -11,6 +11,7 @@ import { jornadaBonita } from '@/components/v2/LigaDuelos';
 import { mensajeError } from '@/lib/v2';
 import { esLineaDuelos } from '@/lib/futbolPuntuacion';
 import { ContadorDuelos } from '@/components/ClasificacionMesaFutbol';
+import { registrarVistaClasificacion } from '@/lib/actividad';
 
 // ============================================================================
 // LIGA DRAFTERS — UN ENFRENTAMIENTO (27/10, Iñi)
@@ -70,6 +71,12 @@ export default function DueloPagina() {
   const resV = d ? resultado(d.visitante, d.local, tv, tl) : null;
   const ganaLocal = resL === 'G';
   const ganaVisit = resV === 'G';
+  // 01/11 (Iñi): registro de actividad al ver un duelo de la Liga Drafters.
+  const nombreDuelo = d ? `${d.local?.nombre ?? 'Descanso'} vs ${d.visitante?.nombre ?? 'Descanso'} · ${d.competicion}` : null;
+  useEffect(() => {
+    if (nombreDuelo) registrarVistaClasificacion(`duelo:${id}`, { modo: 'duelo', nombre: nombreDuelo, deporte: d?.deporte ?? 'futbol' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nombreDuelo, id]);
   const visto = d ? (lado === 'local' ? d.local : d.visitante) : null;
 
   return (

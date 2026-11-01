@@ -369,7 +369,7 @@ export default function V2Sala() {
                     />
                   )}
                   {/* 16/10 (Iñi): entrar en un amistoso cuesta 1 crédito Drafters (SQL 45). */}
-                  {amistoso.deporte !== 'tenis' && <CosteCredito deporte={amistoso.deporte} />}
+                  <CosteCredito deporte={amistoso.deporte} />
                   {jornadaParaEquipo && (
                     <span style={{ fontSize: 12.5, color: S.MUTED_2, lineHeight: 1.5 }}>
                       Al pulsar verás cómo puntúan los jugadores y harás tu equipo. <b style={{ color: S.TEXT }}>Entras en la sala (y se usa el crédito) cuando guardas tu equipo.</b>

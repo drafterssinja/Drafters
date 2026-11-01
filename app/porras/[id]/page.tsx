@@ -511,11 +511,18 @@ export default function PorraDetallePage() {
                   usa "Buy-in" en /salas/[id]: "18 € + 2 €" en vez del total
                   seguido de la palabra "comisión" — se entiende sin más
                   aclaración (mismo pedido de Iñi, 25/09, aplicado aquí). */}
-              <InfoRow
-                label="Precio de entrada"
-                value={`${formatEuros(parteParaPremios(porra.precio))} + ${formatEuros(parteComision(porra.precio))}`}
-                accent
-              />
+              {porra.precio > 0 && (
+                <InfoRow
+                  label="Precio de entrada"
+                  value={`${formatEuros(parteParaPremios(porra.precio))} + ${formatEuros(parteComision(porra.precio))}`}
+                  accent
+                />
+              )}
+              {porra.precio > 0 && (
+                <span style={{ fontSize: 12, color: S.MUTED_3, lineHeight: 1.45 }}>
+                  Drafters no tiene saldo en euros: aquí no se cobra nada. El dinero de esta porra va aparte; en Premios ves lo que se gana.
+                </span>
+              )}
               {!esFutbol && <InfoRow label="Competición" value={porra.competicion ?? '—'} />}
               <InfoRow label={esFutbol ? 'Equipos inscritos' : 'Jugadores inscritos'} value={String(signedUp)} />
 
@@ -581,6 +588,7 @@ export default function PorraDetallePage() {
                 <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#C9A257' }}>Bote total</span>
                 <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 30, color: '#F0B94D' }}>{formatEuros(bote)}</span>
                 <span style={{ fontSize: 11, color: S.MUTED_3 }}>Se actualiza según entran inscritos</span>
+                <span style={{ fontSize: 11, color: S.MUTED_3, textAlign: 'center' }}>Es lo que se gana en esta porra. Se entrega aparte: no se suma a ningún saldo.</span>
               </div>
               {tramos.length === 0 && <p style={{ fontSize: 13, color: S.MUTED_2 }}>Todavía no hay suficientes inscritos para calcular el reparto.</p>}
               {tramos.map((t, i) => (
@@ -653,7 +661,7 @@ export default function PorraDetallePage() {
                 textDecoration: 'none',
               }}
             >
-              {misEquipos.length > 0 ? 'Crear otro equipo' : 'Elegir equipo'} · {formatEuros(porra.precio)}
+              {misEquipos.length > 0 ? 'Crear otro equipo' : 'Elegir equipo'}
             </Link>
           )}
         </div>
@@ -681,8 +689,9 @@ function BorrarEquipoPorra({ equipoId, precio }: { equipoId: string; precio: num
       setBorrando(false);
       return;
     }
-    const importe = typeof data === 'number' ? data : Number(data ?? precio);
-    setHecho(`Te has desapuntado. Te hemos devuelto ${formatEuros(importe)}.`);
+    void data;
+    void precio;
+    setHecho('Te has desapuntado.');
     setBorrando(false);
     window.setTimeout(() => window.location.reload(), 1800);
   }
@@ -698,7 +707,7 @@ function BorrarEquipoPorra({ equipoId, precio }: { equipoId: string; precio: num
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '12px 14px', background: 'rgba(255,92,92,0.08)', border: '1px solid rgba(255,92,92,0.35)', borderRadius: 10 }}>
         <span style={{ fontSize: 13, color: S.TEXT, lineHeight: 1.4 }}>
-          ¿Seguro que quieres borrar este equipo y desapuntarte de la porra? Te devolvemos tu inscripción íntegra ({formatEuros(precio)}).
+          ¿Seguro que quieres borrar este equipo y desapuntarte de la porra?
         </span>
         {error && <span style={{ fontSize: 12, color: '#FF5C5C', fontWeight: 600 }}>{error}</span>}
         <div style={{ display: 'flex', gap: 8 }}>

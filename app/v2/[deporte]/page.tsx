@@ -155,9 +155,7 @@ export default function V2Deporte() {
         </>
       )}
 
-      <Link href="/inicio" style={{ fontSize: 12, color: S.MUTED_3, textAlign: 'center', marginTop: 10 }}>
-        Volver a Drafters clásico
-      </Link>
+      {/* 01/11: ya no hay "Drafters clásico". */}
     </MarcoV2>
   );
 }

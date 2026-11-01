@@ -37,7 +37,7 @@ function VerificarForm() {
       return;
     }
 
-    router.push('/inicio');
+    router.push('/v2/futbol');
   }
 
   async function reenviarCodigo() {

@@ -1517,8 +1517,8 @@ export default function PorraClasificacionPage() {
                         Cómo se paga el premio
                       </h3>
                       <p style={{ fontSize: 12.5, lineHeight: 1.55, color: S.MUTED_2, margin: 0 }}>
-                        Si tu equipo queda en un puesto premiado, el importe se refleja como saldo en tu cuenta de Drafters — es dinero ficticio, dentro de la propia plataforma. El
-                        pago real te lo hace Iñi aparte, en función de ese resultado.
+                        Si tu equipo queda en un puesto premiado, aquí ves lo que has ganado. Drafters no tiene saldo en euros: el
+                        pago te lo hace Iñi aparte, en función de ese resultado.
                       </p>
                     </div>
                   </div>
