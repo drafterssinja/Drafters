@@ -138,7 +138,7 @@ export default function AdminLigaDuelos() {
                   )}
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: S.TEXT }}>
                     <input type="checkbox" checked={sinFin} onChange={(e) => setSinFin(e.target.checked)} />
-                    Sin fin (pruebas): no se cierra y los nuevos entran en la siguiente jornada
+                    Sin fin: no se cierra y los nuevos entran en la siguiente jornada
                   </label>
                   <button
                     type="button"
@@ -167,7 +167,7 @@ export default function AdminLigaDuelos() {
                   </div>
                   {t.estado !== 'terminada' && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: 12.5, fontWeight: 800, color: t.sin_fin ? '#F0B94D' : S.MUTED_2 }}>{t.sin_fin ? '∞ Sin fin (pruebas)' : `Termina en la J${t.hasta}`}</span>
+                      <span style={{ fontSize: 12.5, fontWeight: 800, color: t.sin_fin ? '#F0B94D' : S.MUTED_2 }}>{t.sin_fin ? '∞ Sin fin' : `Termina en la J${t.hasta}`}</span>
                       <button type="button" disabled={ocupado} onClick={() => void llamar('duelos_poner_sin_fin', { p_temporada: t.id, p_sin_fin: !t.sin_fin }, t.sin_fin ? 'Ahora la temporada termina en su última jornada.' : 'Ahora la temporada no tiene fin.')} style={{ ...boton, padding: '5px 10px', fontSize: 12, background: 'transparent', color: S.TEXT, border: `1px solid ${S.BORDER}` }}>
                         {t.sin_fin ? `Poner final (J${t.hasta})` : 'Quitar el final'}
                       </button>

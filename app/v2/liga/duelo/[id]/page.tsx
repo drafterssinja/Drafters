@@ -103,7 +103,7 @@ export default function DueloPagina() {
                 <span key="vs" style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 18, color: S.MUTED_3 }}>VS</span>
               ) : (
                 <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, minWidth: 0 }}>
-                  <span style={{ maxWidth: '100%', fontWeight: 800, fontSize: 15, color: l?.soy_yo ? VERDE : S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l ? (l.soy_yo ? `${l.nombre} (tú)` : l.nombre) : 'Descanso'}</span>
+                  <span style={{ maxWidth: '100%', fontWeight: 800, fontSize: 15, color: l?.soy_yo ? VERDE : S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l ? (l.soy_yo ? `${l.nombre} (tú)` : l.nombre) : d.estado === 'pendiente' ? 'Esperando rival' : 'Descanso'}</span>
                   <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 38, lineHeight: 1, color: (i === 0 ? ganaLocal : ganaVisit) ? VERDE : S.TEXT }}>{l ? (l.tiene_equipo ? (d.estado === 'pendiente' ? '–' : n1(l.total)) : '–') : ''}</span>
                   {l && !l.tiene_equipo && <span style={{ fontSize: 11, color: ROJO }}>{d.estado === 'pendiente' ? 'Aún sin equipo' : 'Sin equipo'}</span>}
                   {d.estado === 'terminada' && l && <span style={{ fontSize: 11.5, fontWeight: 800, color: (i === 0 ? ganaLocal : ganaVisit) ? VERDE : S.MUTED_2 }}>{{ G: 'Gana · +3', E: 'Empate · +1', P: 'Pierde' }[(i === 0 ? resL : resV) ?? 'P']}</span>}

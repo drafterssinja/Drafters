@@ -223,6 +223,38 @@ function LigaPrivada() {
                 </Panel>
               )}
 
+              {/* 01/11 (Iñi): todos los de la liga (y el admin de Drafters) ven quién ha hecho ya equipo para la siguiente jornada y quién falta. Solo eso: los equipos no se ven hasta que empieza. */}
+              {info.estado === 'activa' && proxima && proxima.resultados.length > 0 && (() => {
+                const hechos = proxima.resultados.filter((r) => r.tiene_equipo).sort((x, y) => x.nombre.localeCompare(y.nombre));
+                const faltan = proxima.resultados.filter((r) => !r.tiene_equipo).sort((x, y) => x.nombre.localeCompare(y.nombre));
+                const chip = (r: Resultado, ok: boolean) => (
+                  <span key={r.usuario_id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 9px', borderRadius: 999, fontSize: 12.5, fontWeight: 700, color: ok ? VERDE : '#FF8A8A', background: ok ? 'rgba(61,220,132,0.10)' : 'rgba(255,92,92,0.08)', border: `1px solid ${ok ? 'rgba(61,220,132,0.35)' : 'rgba(255,92,92,0.30)'}`, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {ok ? '✓' : '·'} @{r.nombre}{r.soy_yo ? ' (tú)' : ''}
+                  </span>
+                );
+                return (
+                  <Panel style={{ gap: 8 }}>
+                    <span style={S.sectionLabel}>Jornada {proxima.numero ?? proxima.orden} · ¿Quién ha hecho equipo?</span>
+                    <span style={{ fontSize: 12, color: S.MUTED_2, marginTop: -4 }}>
+                      {hechos.length} de {proxima.resultados.length} · cierra el {fecha(proxima.cierre)}
+                    </span>
+                    {hechos.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                        <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase', color: VERDE }}>Ya tienen equipo ({hechos.length})</span>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>{hechos.map((r) => chip(r, true))}</div>
+                      </div>
+                    )}
+                    {faltan.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                        <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#FF8A8A' }}>Faltan por hacerlo ({faltan.length})</span>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>{faltan.map((r) => chip(r, false))}</div>
+                      </div>
+                    )}
+                    {faltan.length === 0 && <span style={{ fontSize: 12.5, color: VERDE, fontWeight: 700 }}>¡Todos tienen equipo!</span>}
+                  </Panel>
+                );
+              })()}
+
               {info.estado === 'activa' && info.soy_admin && <PublicarSala ligaId={info.id} deporte={dep} onHecho={() => void cargar()} />}
 
               {/* Clasificación */}
@@ -270,7 +302,7 @@ function LigaPrivada() {
                           <span style={{ fontSize: 11.5, color: j.estado === 'en_juego' ? VERDE : S.MUTED_3 }}>{j.estado === 'terminada' ? 'Terminada' : j.estado === 'en_juego' ? '● En juego' : `Cierra ${fecha(j.cierre)}`}</span>
                         </span>
                         <span style={{ fontSize: 12, color: S.MUTED_2, textAlign: 'right' }}>
-                          {!info.soy_miembro ? '' : j.estado === 'pendiente' ? (j.tengo_equipo ? '✓ Equipo hecho' : <span style={{ color: '#FF8A8A' }}>Sin equipo</span>) : yo?.puesto ? `${yo.puesto}º` : 'Sin equipo'}
+                          {!info.soy_miembro ? (j.estado === 'pendiente' ? `${j.resultados.filter((r) => r.tiene_equipo).length}/${j.resultados.length} con equipo` : '') : j.estado === 'pendiente' ? (j.tengo_equipo ? '✓ Equipo hecho' : <span style={{ color: '#FF8A8A' }}>Sin equipo</span>) : yo?.puesto ? `${yo.puesto}º` : 'Sin equipo'}
                         </span>
                         {j.estado === 'terminada' && info.soy_miembro && <span style={{ minWidth: 40, textAlign: 'right', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 16, color: (yo?.puntos_liga ?? 0) > 0 ? VERDE : S.MUTED_3 }}>+{yo?.puntos_liga ?? 0}</span>}
                         <span style={{ color: S.MUTED_3, fontSize: j.estado === 'pendiente' ? 11 : 16 }}>{j.estado !== 'pendiente' ? '›' : abiertaJ ? '▾' : '▸'}</span>
@@ -278,7 +310,20 @@ function LigaPrivada() {
                       {abiertaJ && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '0 2px 12px' }}>
                           {j.estado === 'pendiente' ? (
-                            <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>Los equipos de los demás se ven cuando empiece la jornada.</span>
+                            <>
+                              {/* 01/11 (Iñi): en una jornada sin empezar se ve quién ha hecho ya su equipo (no el equipo). */}
+                              <span style={{ fontSize: 12, color: S.MUTED_3, marginBottom: 2 }}>
+                                {j.resultados.filter((r) => r.tiene_equipo).length} de {j.resultados.length} han hecho equipo · los equipos se ven cuando empiece la jornada.
+                              </span>
+                              {[...j.resultados]
+                                .sort((x, y) => Number(y.tiene_equipo) - Number(x.tiene_equipo) || x.nombre.localeCompare(y.nombre))
+                                .map((r) => (
+                                  <div key={r.usuario_id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                                    <span style={{ flex: 1, minWidth: 0, color: r.soy_yo ? VERDE : S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>@{r.nombre}</span>
+                                    <span style={{ fontSize: 12, fontWeight: 700, color: r.tiene_equipo ? VERDE : '#FF8A8A' }}>{r.tiene_equipo ? '✓ Equipo hecho' : 'Sin equipo'}</span>
+                                  </div>
+                                ))}
+                            </>
                           ) : (
                             j.resultados.map((r) => (
                               <div key={r.usuario_id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
@@ -292,7 +337,7 @@ function LigaPrivada() {
                           <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
                             {j.estado !== 'pendiente' && (
                               <Link href={`/v2/liga-privada/jornada/${j.id}`} style={{ ...S.secondaryLinkButton, flex: 1, marginTop: 0, textAlign: 'center', textDecoration: 'none' }}>
-                                Ver los equipos
+                                {info.soy_miembro ? 'Ver los equipos' : 'Ver la clasificación de la jornada'}
                               </Link>
                             )}
                             {j.estado === 'pendiente' && info.soy_miembro && info.estado === 'activa' && j.con_jugadores !== false && j.cierre && new Date(j.cierre).getTime() > Date.now() && (

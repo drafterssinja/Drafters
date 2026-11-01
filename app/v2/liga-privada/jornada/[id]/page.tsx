@@ -72,7 +72,7 @@ export default function JornadaLigaPrivada() {
           <span style={{ minWidth: 40, textAlign: 'right', fontWeight: 800, color: (r.puntos_liga ?? 0) > 0 ? '#3DDC84' : S.MUTED_3 }}>{terminada ? `+${r.puntos_liga ?? 0}` : ''}</span>
         </div>
       ))}
-      <span style={{ fontSize: 11, color: S.MUTED_3 }}>{terminada ? 'A la derecha, los puntos de liga de esta sala.' : 'Los puntos de liga se reparten cuando termina la sala.'}</span>
+      <span style={{ fontSize: 11, color: S.MUTED_3 }}>{terminada ? 'A la derecha, los puntos de liga de esta jornada.' : 'Los puntos de liga se reparten cuando termina la jornada.'}</span>
     </div>
   ) : null;
 
