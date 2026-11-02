@@ -17,8 +17,9 @@ import { UsuarioConNivel, useNiveles } from '@/components/v2/Nivel';
 //    liga que le darían su puesto actual en la jornada (n − puesto + 1), los
 //    puntos de su equipo a PF y la jornada a PJ.
 //  · Visual: insignia "EN DIRECTO" con latido, flechas ▲▼ de lo que sube o
-//    baja respecto a antes de la jornada, "+4" en verde junto a los Pts, y
-//    los puntos que lleva su equipo en la jornada en una pastilla verde.
+//    baja respecto a antes de la jornada y, junto a los Pts, un "+4" pequeño
+//    con el puntito que late. 02/11 v10: sin la pastilla de puntos junto al
+//    nombre (lo tapaba); título "Clasificación de la liga"; columnas juntas.
 
 export type ResultadoJornada = { usuario_id: string; nombre: string; tiene_equipo: boolean; total: number | null; puesto: number | null; puntos_liga: number | null; soy_yo: boolean };
 export type JornadaLP = { id: string; estado: 'pendiente' | 'en_juego' | 'terminada'; resultados: ResultadoJornada[] };
@@ -27,9 +28,11 @@ type Fila = { usuario_id: string; nombre: string; pj: number; pts: number; victo
 const VERDE = '#3DDC84';
 const ROJO = '#FF6B6B';
 const ORO = '#F0B94D';
+// 02/11 v10 (Iñi): lo importante es el nombre; PJ, PF y Pts más juntos.
+const COLS = '30px minmax(0,1fr) 20px 38px 50px';
 const n1 = (x: number | null | undefined) => String(Math.round(Number(x ?? 0) * 10) / 10).replace('.', ',');
 
-export default function ClasificacionLigaPrivada({ ligaId, jornadas, miId, titulo = 'Clasificación', terminada = false }: { ligaId: string; jornadas: JornadaLP[]; miId?: string; titulo?: string; terminada?: boolean }) {
+export default function ClasificacionLigaPrivada({ ligaId, jornadas, miId, titulo = 'Clasificación de la liga', terminada = false }: { ligaId: string; jornadas: JornadaLP[]; miId?: string; titulo?: string; terminada?: boolean }) {
   const [base, setBase] = useState<Fila[] | null>(null);
   useEffect(() => {
     const cargar = () => void supabase.rpc('lp_clasificacion', { p_liga: ligaId }).then(({ data }) => setBase((data as Fila[]) ?? []));
@@ -73,7 +76,7 @@ export default function ClasificacionLigaPrivada({ ligaId, jornadas, miId, titul
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '12px 12px 8px', borderRadius: 14, background: S.PANEL, border: `1px solid ${hayDirecto ? 'rgba(61,220,132,0.45)' : S.CARD_BORDER}` }}>
       <style>{'@keyframes clp-latido{50%{opacity:.25}} @keyframes clp-entra{from{background:rgba(61,220,132,.25)}to{background:transparent}}'}</style>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
-        <span style={S.sectionLabel}>{terminada ? 'Clasificación final' : titulo}</span>
+        <span style={S.sectionLabel}>{terminada ? 'Clasificación final de la liga' : titulo}</span>
         {hayDirecto && (
           <span style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 9px', borderRadius: 999, background: 'rgba(61,220,132,0.14)', border: '1px solid rgba(61,220,132,0.5)', fontSize: 10.5, fontWeight: 800, letterSpacing: '0.07em', color: VERDE }}>
             <span style={{ width: 7, height: 7, borderRadius: '50%', background: VERDE, animation: 'clp-latido 1.2s ease-in-out infinite' }} />
@@ -81,7 +84,7 @@ export default function ClasificacionLigaPrivada({ ligaId, jornadas, miId, titul
           </span>
         )}
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '34px 1fr 26px 46px 52px', gap: 6, padding: '0 2px 4px', fontSize: 10.5, fontWeight: 700, color: S.MUTED_3, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: COLS, gap: 4, padding: '0 2px 4px', fontSize: 10.5, fontWeight: 700, color: S.MUTED_3, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
         <span>#</span>
         <span>Jugador</span>
         <span style={{ textAlign: 'center' }}>PJ</span>
@@ -94,33 +97,31 @@ export default function ClasificacionLigaPrivada({ ligaId, jornadas, miId, titul
         return (
           <div
             key={f.usuario_id}
-            style={{ display: 'grid', gridTemplateColumns: '34px 1fr 26px 46px 52px', gap: 6, alignItems: 'center', padding: '8px 2px', borderTop: '1px solid rgba(255,255,255,0.05)', background: soyYo ? 'rgba(61,220,132,0.07)' : 'transparent', borderRadius: soyYo ? 8 : 0, boxShadow: f.vivo ? `inset 3px 0 0 ${VERDE}` : 'none' }}
+            style={{ display: 'grid', gridTemplateColumns: COLS, gap: 4, alignItems: 'center', padding: '8px 2px', borderTop: '1px solid rgba(255,255,255,0.05)', background: soyYo ? 'rgba(61,220,132,0.07)' : 'transparent', borderRadius: soyYo ? 8 : 0, boxShadow: f.vivo ? `inset 3px 0 0 ${VERDE}` : 'none' }}
           >
-            <span style={{ display: 'flex', alignItems: 'center', gap: 3, paddingLeft: f.vivo ? 5 : 0 }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 2, paddingLeft: f.vivo ? 5 : 0 }}>
               <span style={{ fontWeight: 800, fontSize: 13.5, color: puestos[i] === 1 && f.ptsT > 0 ? ORO : S.MUTED }}>{puestos[i]}</span>
-              {mov !== 0 && <span style={{ fontSize: 9, fontWeight: 800, color: mov > 0 ? VERDE : ROJO }}>{mov > 0 ? '▲' : '▼'}{Math.abs(mov)}</span>}
+              {mov !== 0 && <span style={{ fontSize: 8, fontWeight: 800, color: mov > 0 ? VERDE : ROJO }}>{mov > 0 ? '▲' : '▼'}{Math.abs(mov)}</span>}
             </span>
-            <span style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ minWidth: 0, fontWeight: 700, fontSize: 13.5, color: soyYo ? VERDE : S.TEXT, overflow: 'hidden' }}>
+            <span style={{ minWidth: 0, display: 'flex', alignItems: 'center' }}>
+              <span style={{ minWidth: 0, fontWeight: 700, fontSize: 13.5, color: soyYo ? VERDE : S.TEXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 <UsuarioConNivel id={f.usuario_id} nombre={f.nombre} nivel={niveles.get(f.usuario_id)} miId={miId} modo="popover" />
               </span>
-              {f.vivo && (
-                <span title="Puntos de su equipo en la jornada en juego" style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4, padding: '1px 6px', borderRadius: 999, background: 'rgba(61,220,132,0.12)', color: VERDE, fontSize: 10.5, fontWeight: 800 }}>
-                  <span style={{ width: 5, height: 5, borderRadius: '50%', background: VERDE, animation: 'clp-latido 1.2s ease-in-out infinite' }} />
-                  {n1(f.vivo.pf)}
+            </span>
+            <span style={{ textAlign: 'center', fontSize: 12, color: S.MUTED_2 }}>{f.pjT}</span>
+            <span style={{ textAlign: 'right', fontSize: 11.5, color: S.MUTED_2 }}>{n1(f.pfT)}</span>
+            <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
+              {f.vivo && f.vivo.pts > 0 && (
+                <span title="Lo que suma en la jornada en juego" style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '0 4px', borderRadius: 999, background: 'rgba(61,220,132,0.12)', color: VERDE, fontSize: 9, fontWeight: 800, lineHeight: '14px' }}>
+                  <span style={{ width: 4, height: 4, borderRadius: '50%', background: VERDE, animation: 'clp-latido 1.2s ease-in-out infinite' }} />+{f.vivo.pts}
                 </span>
               )}
-            </span>
-            <span style={{ textAlign: 'center', fontSize: 13, color: f.vivo ? VERDE : S.MUTED }}>{f.pjT}</span>
-            <span style={{ textAlign: 'right', fontSize: 12.5, color: f.vivo ? '#BDF5D6' : S.MUTED }}>{n1(f.pfT)}</span>
-            <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
-              {f.vivo && f.vivo.pts > 0 && <span style={{ fontSize: 10, fontWeight: 800, color: '#04140B', background: VERDE, borderRadius: 6, padding: '1px 4px' }}>+{f.vivo.pts}</span>}
-              <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 18, color: S.TEXT }}>{f.ptsT}</span>
+              <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 19, color: S.TEXT }}>{f.ptsT}</span>
             </span>
           </div>
         );
       })}
-      <span style={{ fontSize: 10.5, color: S.MUTED_3, marginTop: 4 }}>PJ: jornadas jugadas · PF: puntos a favor · Pts: puntos de liga · empate a Pts: desempata PF</span>
+      <span style={{ fontSize: 10.5, color: S.MUTED_3, marginTop: 4 }}>PJ: jornadas jugadas · PF: puntos a favor · Pts: puntos de liga</span>
     </div>
   );
 }
