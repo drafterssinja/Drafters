@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase, Perfil } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
+import CabeceraV2 from '@/components/v2/CabeceraV2';
 import * as S from '@/lib/mockupStyles';
 import { formatEuros } from '@/lib/salaShared';
 import Cargando from '@/components/Cargando';
@@ -113,7 +114,7 @@ export default function NotificacionesPage() {
   return (
     <main style={S.mainReset}>
       <div style={S.pageFrame}>
-        <DraftersHeader saldoLabel={saldoLabel} accountInitials={initials} />
+        <CabeceraV2 perfil={perfil} deporte="futbol" sinDeporte />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '28px 20px 60px' }}>
           <h1 style={{ fontSize: 22, fontWeight: 800, color: S.TEXT, fontFamily: "'Barlow Condensed', sans-serif", margin: 0 }}>
             Notificaciones

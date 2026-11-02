@@ -7,6 +7,7 @@ import Link from 'next/link';
 import AjustesNotificaciones from '@/components/AjustesNotificaciones';
 import { supabase, Perfil } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
+import CabeceraV2 from '@/components/v2/CabeceraV2';
 import InstalarApp from '@/components/InstalarApp';
 import * as S from '@/lib/mockupStyles';
 import Cargando from '@/components/Cargando';
@@ -47,6 +48,11 @@ export default function CuentaPage() {
     });
   }, []);
   const [error, setError] = useState<string | null>(null);
+  // 02/11: apartado abierto en Mi perfil.
+  const [abierto, setAbierto] = useState<'avisos' | 'datos' | null>(null);
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.location.hash === '#notificaciones') setAbierto('avisos');
+  }, []);
 
   // Formulario de datos de la cuenta
   const [nombre, setNombre] = useState('');
@@ -220,194 +226,126 @@ export default function CuentaPage() {
     );
   }
 
-  const saldoLabel = `${perfil.saldo_simulado.toFixed(2)} €`;
   const initials = S.iniciales(perfil.nombre, perfil.apellido);
+
+  // 02/11 (Iñi): "Mi perfil" súper compacto. Fuera el listado de salas; cada
+  // apartado es una fila que se abre al pulsarla.
+  const fila = (abierta: boolean): React.CSSProperties => ({ width: '100%', fontFamily: "'Manrope', sans-serif", display: 'flex', alignItems: 'center', gap: 12, padding: '13px 14px', background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left', color: S.TEXT, textDecoration: 'none', borderBottom: abierta ? '1px solid #1E2723' : 'none' });
+  const icono = (e: string) => <span style={{ width: 22, textAlign: 'center', fontSize: 17 }}>{e}</span>;
+  const titulo = (t: string, sub?: string) => (
+    <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+      <span style={{ fontWeight: 700, fontSize: 14.5 }}>{t}</span>
+      {sub && <span style={{ fontSize: 11.5, color: S.MUTED_2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub}</span>}
+    </span>
+  );
+  const flecha = (abierta?: boolean) => <span style={{ color: S.MUTED_3, fontSize: 13 }}>{abierta === undefined ? '›' : abierta ? '▾' : '▸'}</span>;
+  const caja: React.CSSProperties = { borderRadius: 14, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, overflow: 'hidden' };
+  const separador: React.CSSProperties = { height: 1, background: '#1E2723', margin: '0 14px' };
 
   return (
     <main style={S.mainReset}>
       <div style={S.pageFrame}>
-        <DraftersHeader saldoLabel={saldoLabel} accountInitials={initials} />
-        <div style={S.accountSection}>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
-            <span
-              style={{
-                width: 64,
-                height: 64,
-                borderRadius: '50%',
-                background: S.ACCENT,
-                color: '#04140B',
-                fontFamily: "'Barlow Condensed', sans-serif",
-                fontWeight: 800,
-                fontSize: 22,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              {initials}
+        <CabeceraV2 perfil={perfil} deporte="futbol" sinDeporte />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '16px 16px 40px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ width: 46, height: 46, borderRadius: '50%', background: S.ACCENT, color: '#04140B', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 17, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{initials}</span>
+            <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+              <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 22, color: S.TEXT, lineHeight: 1.1 }}>Mi perfil</span>
+              {perfil.nombre_usuario && <span style={{ fontSize: 13, color: S.MUTED_2 }}>@{perfil.nombre_usuario}</span>}
             </span>
-            <h1 style={{ fontSize: 20, fontWeight: 800, color: S.TEXT, fontFamily: "'Barlow Condensed', sans-serif", margin: 0 }}>
-              Mi cuenta
-            </h1>
-            {perfil.nombre_usuario && (
-              <span style={{ fontSize: 13, color: S.MUTED_2 }}>@{perfil.nombre_usuario}</span>
-            )}
           </div>
 
-          <InstalarApp variante="tarjeta" />
+          <InstalarApp variante="aviso" />
 
-          {/* 01/11: sin saldo en euros. */}
-
-          {/* 16/10 (Iñi): gestor de amigos en "Mi perfil". */}
-          <Link href="/amigos" style={S.card}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_2, fontWeight: 700 }}>👥 Amigos</span>
-              <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 15, color: S.TEXT }}>
-                {solicitudesAmigos > 0 ? `Tienes ${solicitudesAmigos} solicitud${solicitudesAmigos === 1 ? '' : 'es'} de amistad` : 'Mis amigos y qué ven de mí'}
-              </span>
-            </div>
-            {solicitudesAmigos > 0 ? (
-              <span style={{ flexShrink: 0, minWidth: 24, height: 24, borderRadius: 999, background: '#FF5C5C', color: '#FFF', fontSize: 12, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 6px' }}>{solicitudesAmigos}</span>
-            ) : (
-              <span style={{ flexShrink: 0, color: S.FAINT, fontSize: 18 }}>›</span>
-            )}
-          </Link>
-
-          {/* 18/10 (Iñi): activar o desactivar las notificaciones push y elegir cuáles. */}
-          <div id="notificaciones" style={{ ...S.card, flexDirection: 'column', alignItems: 'stretch', gap: 10, scrollMarginTop: 80 }}>
-            <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_2, fontWeight: 700 }}>🔔 Notificaciones</span>
-            <AjustesNotificaciones />
-          </div>
-
-          {perfil.rol === 'admin' && (
-            <Link href="/admin" style={S.card}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_2, fontWeight: 700 }}>
-                  Solo tú
-                </span>
-                <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 15, color: S.TEXT }}>
-                  Panel de administración
-                </span>
-              </div>
-              <span style={{ flexShrink: 0, color: S.FAINT, fontSize: 18 }}>›</span>
+          <div style={caja}>
+            <Link href="/v2/nivel" style={fila(false)}>
+              {icono('🎖️')}
+              {titulo('Mi nivel', 'Tu insignia, tus últimas partidas y cómo se sube')}
+              {flecha()}
             </Link>
-          )}
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <span style={S.sectionLabel}>Historial de partidas</span>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {historial.length === 0 && (
-                <p style={{ fontSize: 13, color: S.MUTED_2, margin: 0 }}>Todavía no te has inscrito en ninguna mesa ni porra.</p>
+            <div style={separador} />
+            <Link href="/amigos" style={fila(false)}>
+              {icono('👥')}
+              {titulo('Amigos', solicitudesAmigos > 0 ? `Tienes ${solicitudesAmigos} solicitud${solicitudesAmigos === 1 ? '' : 'es'} de amistad` : 'Mis amigos y qué ven de mí')}
+              {solicitudesAmigos > 0 ? (
+                <span style={{ minWidth: 22, height: 22, borderRadius: 999, background: '#FF5C5C', color: '#FFF', fontSize: 11.5, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 6px' }}>{solicitudesAmigos}</span>
+              ) : (
+                flecha()
               )}
-              {historial.map((fila) => {
-                const nombreMesa = fila.salas?.nombre ?? fila.porras?.major ?? 'Mesa';
-                const deporteLabel = fila.salas?.deporte ?? 'Porra';
-                const competicionLabel = fila.porras?.codigo ?? fila.salas?.codigo ?? '';
-                const estado = fila.salas?.estado ?? fila.porras?.estado ?? 'abierta';
-                const finalizada = estado === 'finalizada';
-                return (
-                  <div
-                    key={fila.id}
-                    style={{ display: 'flex', flexDirection: 'column', gap: 8, background: S.PANEL, border: `1px solid ${S.CARD_BORDER}`, borderRadius: 12, padding: '12px 14px' }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-                        <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 13.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {fila.nombre_equipo ?? nombreMesa}
-                        </span>
-                        <span style={{ fontSize: 11, color: S.FAINT }}>
-                          {deporteLabel} · {competicionLabel} · {haceDiasLabel(fila.created_at)}
-                        </span>
-                      </div>
-                      <span
-                        style={{
-                          flexShrink: 0,
-                          fontFamily: "'Manrope', sans-serif",
-                          fontWeight: 700,
-                          fontSize: 10.5,
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.04em',
-                          color: S.MUTED_2,
-                          background: 'rgba(139,149,143,0.12)',
-                          borderRadius: 999,
-                          padding: '5px 10px',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {finalizada ? 'Finalizada' : 'En curso'}
-                      </span>
-                    </div>
-                    <span style={{ fontSize: 12.5, color: '#F0B94D', fontWeight: 700 }}>
-                      {finalizada
-                        ? `Posición: ${fila.posicion_final ?? '—'} · Puntos: ${fila.puntos_totales ?? '—'}`
-                        : 'Resultado pendiente de cierre'}
-                    </span>
+            </Link>
+            <div style={separador} />
+            <div id="notificaciones" style={{ scrollMarginTop: 80 }}>
+              <button type="button" onClick={() => setAbierto(abierto === 'avisos' ? null : 'avisos')} style={fila(abierto === 'avisos')}>
+                {icono('🔔')}
+                {titulo('Notificaciones', 'Actívalas y elige cuáles quieres recibir')}
+                {flecha(abierto === 'avisos')}
+              </button>
+              {abierto === 'avisos' && (
+                <div style={{ padding: '12px 14px 14px' }}>
+                  <AjustesNotificaciones compacto />
+                </div>
+              )}
+            </div>
+            <div style={separador} />
+            <button type="button" onClick={() => setAbierto(abierto === 'datos' ? null : 'datos')} style={fila(abierto === 'datos')}>
+              {icono('✏️')}
+              {titulo('Mis datos', 'Nombre, usuario, email, fecha de nacimiento y contraseña')}
+              {flecha(abierto === 'datos')}
+            </button>
+            {abierto === 'datos' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '12px 14px 16px' }}>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <div style={{ ...S.field, flex: 1, minWidth: 0 }}>
+                    <span style={S.label}>Nombre</span>
+                    <input value={nombre} onChange={(e) => setNombre(e.target.value)} style={S.input} />
                   </div>
-                );
-              })}
-            </div>
+                  <div style={{ ...S.field, flex: 1, minWidth: 0 }}>
+                    <span style={S.label}>Apellido</span>
+                    <input value={apellido} onChange={(e) => setApellido(e.target.value)} style={S.input} />
+                  </div>
+                </div>
+                <div style={S.field}>
+                  <span style={S.label}>Nombre de usuario</span>
+                  <input value={nombreUsuario} onChange={(e) => setNombreUsuario(e.target.value)} onBlur={comprobarUsuario} style={S.input} />
+                  {comprobandoUsuario && <span style={{ fontSize: 11.5, color: S.MUTED_3 }}>Comprobando...</span>}
+                  {!comprobandoUsuario && usuarioDisponible === true && <span style={{ fontSize: 11.5, color: S.ACCENT }}>Disponible.</span>}
+                  {!comprobandoUsuario && usuarioDisponible === false && <span style={{ fontSize: 11.5, color: S.ERROR }}>Ese nombre de usuario ya está en uso.</span>}
+                  <span style={{ fontSize: 11, color: S.MUTED_3 }}>Es el nombre que ven los demás, nunca tu nombre real.</span>
+                </div>
+                <div style={S.field}>
+                  <span style={S.label}>Email</span>
+                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} style={S.input} />
+                </div>
+                <div style={S.field}>
+                  <span style={S.label}>Fecha de nacimiento</span>
+                  <FechaNacimientoSelect value={fechaNacimiento ?? ''} onChange={setFechaNacimiento} />
+                </div>
+                <div style={S.field}>
+                  <span style={S.label}>Cambiar contraseña</span>
+                  <input type="password" placeholder="Déjalo en blanco para no cambiarla" value={nuevaPassword} onChange={(e) => setNuevaPassword(e.target.value)} style={S.input} />
+                </div>
+                {error && <p style={S.errorText}>{error}</p>}
+                {guardadoOk && <p style={S.infoText}>{guardadoOk}</p>}
+                <button type="button" onClick={guardarCambios} disabled={guardando} style={{ ...S.primaryButton, opacity: guardando ? 0.7 : 1 }}>
+                  {guardando ? 'Guardando...' : 'Guardar cambios'}
+                </button>
+              </div>
+            )}
+            {perfil.rol === 'admin' && (
+              <>
+                <div style={separador} />
+                <Link href="/admin" style={fila(false)}>
+                  {icono('🛠️')}
+                  {titulo('Panel de administración', 'Solo tú')}
+                  {flecha()}
+                </Link>
+              </>
+            )}
           </div>
 
+          {error && abierto !== 'datos' && <p style={S.errorText}>{error}</p>}
 
-
-          <div style={S.fieldGroup}>
-            <div style={S.field}>
-              <span style={S.label}>Nombre</span>
-              <input value={nombre} onChange={(e) => setNombre(e.target.value)} style={S.input} />
-            </div>
-            <div style={S.field}>
-              <span style={S.label}>Apellido</span>
-              <input value={apellido} onChange={(e) => setApellido(e.target.value)} style={S.input} />
-            </div>
-            <div style={S.field}>
-              <span style={S.label}>Nombre de usuario</span>
-              <input
-                value={nombreUsuario}
-                onChange={(e) => setNombreUsuario(e.target.value)}
-                onBlur={comprobarUsuario}
-                style={S.input}
-              />
-              {comprobandoUsuario && <span style={{ fontSize: 11.5, color: S.MUTED_3 }}>Comprobando...</span>}
-              {!comprobandoUsuario && usuarioDisponible === true && (
-                <span style={{ fontSize: 11.5, color: S.ACCENT }}>Disponible.</span>
-              )}
-              {!comprobandoUsuario && usuarioDisponible === false && (
-                <span style={{ fontSize: 11.5, color: S.ERROR }}>Ese nombre de usuario ya está en uso.</span>
-              )}
-              <span style={{ fontSize: 11, color: S.MUTED_3 }}>Es el nombre que verán el resto de jugadores — nunca tu nombre real.</span>
-            </div>
-            <div style={S.field}>
-              <span style={S.label}>Email</span>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} style={S.input} />
-            </div>
-            <div style={S.field}>
-              <span style={S.label}>Fecha de nacimiento</span>
-              <FechaNacimientoSelect value={fechaNacimiento ?? ''} onChange={setFechaNacimiento} />
-            </div>
-            <div style={S.field}>
-              <span style={S.label}>Cambiar contraseña</span>
-              <input
-                type="password"
-                placeholder="Déjalo en blanco para no cambiarla"
-                value={nuevaPassword}
-                onChange={(e) => setNuevaPassword(e.target.value)}
-                style={S.input}
-              />
-            </div>
-          </div>
-
-          {error && <p style={S.errorText}>{error}</p>}
-          {guardadoOk && <p style={S.infoText}>{guardadoOk}</p>}
-
-          <button type="button" onClick={guardarCambios} disabled={guardando} style={{ ...S.primaryButton, opacity: guardando ? 0.7 : 1 }}>
-            {guardando ? 'Guardando...' : 'Guardar cambios'}
-          </button>
-
-          <button
-            type="button"
-            onClick={cerrarSesion}
-            style={{ ...S.secondaryLinkButton, marginTop: -6 }}
-          >
+          <button type="button" onClick={cerrarSesion} style={{ ...S.secondaryLinkButton, marginTop: 4 }}>
             Cerrar sesión
           </button>
         </div>
