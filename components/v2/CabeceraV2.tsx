@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import LogoDrafters from '@/components/LogoDrafters';
 import { supabase, type Perfil } from '@/lib/supabaseClient';
@@ -9,6 +9,7 @@ import * as S from '@/lib/mockupStyles';
 import { DEPORTES_V2, DEPORTE_NOMBRE, IconoCartas, IconoCredito, PelotaDeporte, type DeporteV2 } from '@/components/v2/IconosV2';
 import { FichaCreditos, useCreditosV2 } from '@/components/v2/creditos';
 import { NivelBadge, tramoNivel, useNiveles } from '@/components/v2/Nivel';
+import AnimacionNivel from '@/components/v2/AnimacionNivel';
 
 // ============================================================================
 // CABECERA DE DRAFTERS V2 (15/10)
@@ -26,7 +27,11 @@ export default function CabeceraV2({ perfil, deporte: deporteOPocha, volverA }: 
   const { creditos } = useCreditosV2(!!perfil);
   // 31/10 (Iñi): mi nivel en la cabecera, delante de mi cuenta.
   const misNiveles = useNiveles(perfil ? [perfil.id] : []);
-  const miNivel = perfil ? misNiveles.get(perfil.id) : undefined;
+  // 02/11 (Iñi): al cambiar tu nivel, animación desde la insignia (AnimacionNivel).
+  const [nivelAnim, setNivelAnim] = useState<number | null>(null);
+  const [brilloNivel, setBrilloNivel] = useState(false);
+  const cabeceraRef = useRef<HTMLDivElement>(null);
+  const miNivel = nivelAnim ?? (perfil ? misNiveles.get(perfil.id) : undefined);
   const [ficha, setFicha] = useState(false);
   const [noLeidas, setNoLeidas] = useState(0);
   // 19/10 (Iñi): el icono de cartas (pocha) solo lo ven Iñi y Javier.
@@ -58,7 +63,7 @@ export default function CabeceraV2({ perfil, deporte: deporteOPocha, volverA }: 
 
   return (
     <div className="v2">
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: estrecho ? 4 : 6, minHeight: 68, padding: `18px ${t.pad}px`, borderBottom: '1px solid #1A211D' }}>
+      <div ref={cabeceraRef} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: estrecho ? 4 : 6, minHeight: 68, padding: `18px ${t.pad}px`, borderBottom: '1px solid #1A211D' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: estrecho ? 4 : 6, minWidth: 0 }}>
           <Link href="/v2/futbol" style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }} aria-label="Drafters">
             <LogoDrafters size={pocha ? t.logo - 2 : t.logo} />
@@ -147,7 +152,11 @@ export default function CabeceraV2({ perfil, deporte: deporteOPocha, volverA }: 
             </button>
             {miNivel ? (
               // 01/11 (Iñi): que se vea que es el nivel sin ocupar más: la insignia y debajo, en pequeño, "NIVEL".
-              <Link href="/v2/nivel" aria-label={`Mi nivel: ${miNivel}`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1, flexShrink: 0, height: t.boton, textDecoration: 'none' }}>
+              <Link
+                href="/v2/nivel"
+                aria-label={`Mi nivel: ${miNivel}`}
+                style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1, flexShrink: 0, height: t.boton, textDecoration: 'none', borderRadius: 8, animation: brilloNivel ? 'dnv-glow 1.4s ease-in-out infinite' : undefined, ['--dnv-c' as string]: tramoNivel(miNivel).color } as React.CSSProperties}
+              >
                 <NivelBadge nivel={miNivel} size={t.boton - 8} />
                 <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 7, lineHeight: 1, letterSpacing: '0.02em', color: tramoNivel(miNivel).color }}>NIVEL</span>
               </Link>
@@ -166,6 +175,7 @@ export default function CabeceraV2({ perfil, deporte: deporteOPocha, volverA }: 
         </div>
       )}
       {ficha && <FichaCreditos deporte={deporte} info={info} onCerrar={() => setFicha(false)} />}
+      <AnimacionNivel usuarioId={perfil?.id} anclaRef={cabeceraRef} onNivel={setNivelAnim} onBrillo={setBrilloNivel} />
     </div>
   );
 }

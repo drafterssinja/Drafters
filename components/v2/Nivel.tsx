@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
+import { insigniaSvg, rango } from '@/components/v2/Insignia';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
@@ -10,73 +11,27 @@ import * as S from '@/lib/mockupStyles';
 // NIVELES (31/10, Iñi) — SQL 71
 // ============================================================================
 // Cada usuario tiene un nivel (empieza en el 1) que sube con los puntos de
-// nivel que da cada partida terminada. Al lado del nombre se ve su insignia:
-// cada 10 niveles cambia la forma y el color:
-//   1-10 círculo · 11-20 cuadrado · 21-30 triángulo · 31-40 rombo ·
-//   41-50 pentágono · 51-60 hexágono · 61+ estrella
-// Al pulsar un usuario: su nivel y tu historial contra él (ganadas/perdidas)
-// con el botón "Ver historial".
+// nivel que da cada partida terminada. Al lado del nombre se ve su insignia
+// (02/11, components/v2/Insignia.ts): una distinta por nivel; cada 10 niveles
+// cambia el marco (Bronce, Plata, Oro… Diamante). Al pulsar un usuario: su
+// nivel y tu historial contra él.
 
-const TRAMOS = [
-  { forma: 'circulo', color: '#3DDC84' },
-  { forma: 'cuadrado', color: '#4FA3FF' },
-  { forma: 'triangulo', color: '#A78BFA' },
-  { forma: 'rombo', color: '#F0B94D' },
-  { forma: 'pentagono', color: '#FF8A4C' },
-  { forma: 'hexagono', color: '#FF5C8A' },
-  { forma: 'estrella', color: '#FFD84D' },
-] as const;
-
+/** Color (metal) y nombre del rango de un nivel. */
 export function tramoNivel(nivel: number) {
-  return TRAMOS[Math.min(TRAMOS.length - 1, Math.floor((Math.max(1, nivel) - 1) / 10))];
+  const r = rango(Math.max(1, nivel || 1));
+  return { color: r.metal[0], nombre: r.nombre };
 }
 
-function poligono(lados: number, r: number, c: number, giro = -Math.PI / 2): string {
-  return Array.from({ length: lados }, (_, i) => {
-    const a = giro + (i * 2 * Math.PI) / lados;
-    return `${(c + r * Math.cos(a)).toFixed(2)},${(c + r * Math.sin(a)).toFixed(2)}`;
-  }).join(' ');
-}
-function estrella(r: number, c: number): string {
-  return Array.from({ length: 10 }, (_, i) => {
-    const a = -Math.PI / 2 + (i * Math.PI) / 5;
-    const rr = i % 2 === 0 ? r : r * 0.55;
-    return `${(c + rr * Math.cos(a)).toFixed(2)},${(c + rr * Math.sin(a)).toFixed(2)}`;
-  }).join(' ');
-}
-
-/** Insignia de nivel: la forma y el color según el tramo, con el número dentro. */
+/** Insignia de nivel: el número arriba y el distintivo del rango debajo. */
 export function NivelBadge({ nivel, size = 22 }: { nivel: number | null | undefined; size?: number }) {
+  const id = useId();
   if (!nivel) return null;
-  const t = tramoNivel(nivel);
-  const c = 50;
-  const relleno = `${t.color}26`;
-  const forma = (() => {
-    switch (t.forma) {
-      case 'circulo':
-        return <circle cx={c} cy={c} r={44} fill={relleno} stroke={t.color} strokeWidth={7} />;
-      case 'cuadrado':
-        return <rect x={9} y={9} width={82} height={82} rx={14} fill={relleno} stroke={t.color} strokeWidth={7} />;
-      case 'triangulo':
-        return <polygon points={poligono(3, 50, c, -Math.PI / 2)} transform="translate(0,8)" fill={relleno} stroke={t.color} strokeWidth={7} strokeLinejoin="round" />;
-      case 'rombo':
-        return <polygon points={poligono(4, 46, c)} fill={relleno} stroke={t.color} strokeWidth={7} strokeLinejoin="round" />;
-      case 'pentagono':
-        return <polygon points={poligono(5, 46, c)} fill={relleno} stroke={t.color} strokeWidth={7} strokeLinejoin="round" />;
-      case 'hexagono':
-        return <polygon points={poligono(6, 46, c)} fill={relleno} stroke={t.color} strokeWidth={7} strokeLinejoin="round" />;
-      default:
-        return <polygon points={estrella(48, c)} fill={relleno} stroke={t.color} strokeWidth={6} strokeLinejoin="round" />;
-    }
-  })();
-  const fs = nivel >= 100 ? 30 : nivel >= 10 ? 38 : 44;
   return (
-    <svg width={size} height={size} viewBox="0 0 100 100" style={{ flexShrink: 0, display: 'inline-block', verticalAlign: 'middle' }} aria-label={`Nivel ${nivel}`}>
-      {forma}
-      <text x={c} y={t.forma === 'triangulo' ? 70 : 54} textAnchor="middle" dominantBaseline="middle" fontFamily="'Barlow Condensed', sans-serif" fontWeight={800} fontSize={t.forma === 'triangulo' ? fs * 0.92 : fs} fill="#FFFFFF">
-        {nivel}
-      </text>
-    </svg>
+    <span
+      aria-label={`Nivel ${nivel} · ${rango(nivel).nombre}`}
+      style={{ display: 'inline-flex', flexShrink: 0, width: size, height: size, verticalAlign: 'middle', lineHeight: 0 }}
+      dangerouslySetInnerHTML={{ __html: insigniaSvg(nivel, size, `ins${id}`) }}
+    />
   );
 }
 
