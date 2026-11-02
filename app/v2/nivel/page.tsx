@@ -87,7 +87,7 @@ export default function MiNivel() {
               ['⚖️', 'Cuanto más alto es tu nivel, más se reduce lo que ganas (no lo que pierdes), así que arriba cuesta más subir.'],
               ['🎁', 'Y por jugar, un pequeño valor añadido: más en los primeros niveles y casi nada en los altos.'],
               ['🙅', 'Si no haces equipo, esa partida no cuenta para tu nivel.'],
-              ['🔷', 'Cada 10 niveles cambia tu insignia: círculo, cuadrado, triángulo, rombo, pentágono, hexágono y estrella.'],
+              ['🎖️', 'Cada nivel tiene su insignia: galones, barras, estrellas y laurel. Cada 10 niveles cambia el marco: Bronce, Plata, Oro, Platino, Esmeralda, Zafiro, Amatista, Rubí, Ónix y Diamante.'],
             ].map(([i, t]) => (
               <div key={t} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
                 <span style={{ fontSize: 16 }}>{i}</span>
@@ -95,7 +95,7 @@ export default function MiNivel() {
               </div>
             ))}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
-              {[1, 11, 21, 31, 41, 51, 61].map((x) => (
+              {[1, 12, 23, 34, 45, 56, 67, 78, 89, 100].map((x) => (
                 <NivelBadge key={x} nivel={x} size={28} />
               ))}
             </div>
