@@ -323,6 +323,9 @@ export default function ClasificacionMesaFutbol({
   embebido = false,
   externo,
   premios,
+  etiquetaMesa,
+  etiquetaPremios,
+  bajoMesa,
 }: {
   sala: SalaMin;
   saldoLabel?: string;
@@ -330,6 +333,10 @@ export default function ClasificacionMesaFutbol({
   embebido?: boolean;
   externo?: { equipos: EquipoExterno[]; misJugadores: string[] };
   premios?: ReactNode;
+  // 02/11 (Iñi, ligas privadas): "Mesa" → "Jornada", "Premios" → "Liga", y debajo de la jornada la liga en directo.
+  etiquetaMesa?: string;
+  etiquetaPremios?: string;
+  bajoMesa?: ReactNode;
 }) {
   const [cargando, setCargando] = useState(true);
   const [jugadores, setJugadores] = useState<JugadorF[]>([]);
@@ -605,25 +612,25 @@ export default function ClasificacionMesaFutbol({
             {mesaFinalizada ? (
               <>
                 <button type="button" onClick={() => setVista('premios')} style={vistaPillStyle(vista === 'premios')}>
-                  Clasificación final
+                  {etiquetaPremios ?? 'Clasificación final'}
                 </button>
                 <button type="button" onClick={() => setVista('eventos')} style={vistaPillStyle(vista === 'eventos')}>
                   Eventos
                 </button>
                 <button type="button" onClick={() => setVista('mesa')} style={vistaPillStyle(vista === 'mesa')}>
-                  Ver detalles
+                  {etiquetaMesa ?? 'Ver detalles'}
                 </button>
               </>
             ) : (
               <>
                 <button type="button" onClick={() => setVista('mesa')} style={vistaPillStyle(vista === 'mesa')}>
-                  Mesa
+                  {etiquetaMesa ?? 'Mesa'}
                 </button>
                 <button type="button" onClick={() => setVista('eventos')} style={vistaPillStyle(vista === 'eventos')}>
                   Eventos
                 </button>
                 <button type="button" onClick={() => setVista('premios')} style={vistaPillStyle(vista === 'premios')}>
-                  Premios
+                  {etiquetaPremios ?? 'Premios'}
                 </button>
               </>
             )}
@@ -880,6 +887,7 @@ export default function ClasificacionMesaFutbol({
             </div>
           )}
 
+          {vista === 'mesa' && bajoMesa}
           {vista === 'premios' && premios}
 
           {/* Mesas de la liga V2 (16/10): premios en draftis. */}

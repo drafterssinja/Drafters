@@ -118,11 +118,17 @@ export default function ClasificacionSala({
   externo,
   embebido = false,
   premios,
+  etiquetaMesa,
+  etiquetaPremios,
+  bajoMesa,
 }: {
   salaFija?: SalaRow;
   externo?: { equipos: EquipoExternoGolf[]; misJugadores: string[] };
   embebido?: boolean;
   premios?: ReactNode;
+  etiquetaMesa?: string;
+  etiquetaPremios?: string;
+  bajoMesa?: ReactNode;
 } = {}) {
   const router = useRouter();
   const params = useParams<{ id: string }>();
@@ -647,14 +653,14 @@ export default function ClasificacionSala({
                 Eventos. */}
             {!torneoFinalizado && (
               <button type="button" onClick={() => setVista('mesa')} style={vistaPillStyle(vista === 'mesa')}>
-                Mesa
+                {etiquetaMesa ?? 'Mesa'}
               </button>
             )}
             <button type="button" onClick={() => setVista('torneo')} style={vistaPillStyle(vista === 'torneo')}>
               Torneo
             </button>
             <button type="button" onClick={() => setVista('premios')} style={vistaPillStyle(vista === 'premios')}>
-              {torneoFinalizado ? 'Clasificación final' : 'Premios'}
+              {etiquetaPremios ?? (torneoFinalizado ? 'Clasificación final' : 'Premios')}
             </button>
             {/* Pestaña Eventos (nueva, 04/10, pedido de Iñi, mismo criterio
                 que app/porras/[id]/clasificacion/page.tsx — ver el
@@ -669,7 +675,7 @@ export default function ClasificacionSala({
                 de cada uno y los puntos de cada jugador. */}
             {torneoFinalizado && (
               <button type="button" onClick={() => setVista('mesa')} style={vistaPillStyle(vista === 'mesa')}>
-                Ver detalles
+                {etiquetaMesa ?? 'Ver detalles'}
               </button>
             )}
           </div>
@@ -931,6 +937,7 @@ export default function ClasificacionSala({
               puntuación automático (ver cabecera del archivo) y el pago
               real se decide a mano en /admin/pagos-pendientes, que puede
               resolver un empate real de otra forma. */}
+          {vista === 'mesa' && bajoMesa}
           {vista === 'premios' && premios}
 
           {/* Mesas de la liga V2 (18/10): premios en draftis. */}

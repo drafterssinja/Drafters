@@ -50,11 +50,17 @@ export default function ClasificacionMesaTenis({
   terminada,
   externo,
   premios,
+  etiquetaMesa,
+  etiquetaPremios,
+  bajoMesa,
 }: {
   competicion: string;
   terminada: boolean;
   externo: { equipos: EquipoExternoTenis[]; misJugadores: string[] };
   premios?: ReactNode;
+  etiquetaMesa?: string;
+  etiquetaPremios?: string;
+  bajoMesa?: ReactNode;
 }) {
   const [jugadores, setJugadores] = useState<Map<string, Jugador>>(new Map());
   const [puntos, setPuntos] = useState<Map<string, Puntos>>(new Map());
@@ -217,13 +223,13 @@ export default function ClasificacionMesaTenis({
       {ficha}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         <button type="button" onClick={() => setVista('mesa')} style={pill(vista === 'mesa')}>
-          Mesa
+          {etiquetaMesa ?? 'Mesa'}
         </button>
         <button type="button" onClick={() => setVista('torneo')} style={pill(vista === 'torneo')}>
           Torneo
         </button>
         <button type="button" onClick={() => setVista('premios')} style={pill(vista === 'premios')}>
-          {terminada ? 'Clasificación final' : 'Premios'}
+          {etiquetaPremios ?? (terminada ? 'Clasificación final' : 'Premios')}
         </button>
       </div>
 
@@ -283,6 +289,7 @@ export default function ClasificacionMesaTenis({
         </div>
       )}
 
+      {vista === 'mesa' && bajoMesa}
       {vista === 'premios' && premios}
 
       <span style={{ fontSize: 10.5, color: S.MUTED_3, lineHeight: 1.4 }}>

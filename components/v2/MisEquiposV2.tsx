@@ -28,8 +28,11 @@ type MesaLiga = {
   inscripciones: { estado: string }[];
 };
 type FilaAmistoso = { id: string; nombre: string; deporte: string; modalidad: Modalidad; competiciones: string[]; soy_participante: boolean; estado: string; created_at: string; tramos?: string[] | null };
+// 02/11 (Iñi): también los equipos de las ligas privadas (SQL 88, lp_mis_equipos).
+type FilaLp = { jornada_id: string; liga_id: string; liga_nombre: string; numero: number; competicion: string; estado: 'pendiente' | 'en_juego' | 'terminada'; cierre: string | null; mi_puesto: number | null; mi_total: number | null; con_equipo: number; creado: string };
 type Item =
   | { tipo: 'mesa'; key: string; orden: number; finalizada: boolean; empezada: boolean; mesa: MesaLiga }
+  | { tipo: 'lp'; key: string; orden: number; finalizada: boolean; empezada: boolean; lp: FilaLp }
   | { tipo: 'amistoso'; key: string; orden: number; finalizada: boolean; empezada: boolean; am: FilaAmistoso; resumen: Resumen };
 
 const LIMITE = 2;
@@ -64,7 +67,7 @@ export default function MisEquiposV2({ deporte, miId, solo }: { deporte: Deporte
   }
 
   const cargar = useCallback(async () => {
-    const [{ data: mesas }, { data: lista }] = await Promise.all([
+    const [{ data: mesas }, { data: lista }, { data: lps }] = await Promise.all([
       solo === 'amistosos'
         ? Promise.resolve({ data: [] as unknown[] })
         : supabase
@@ -76,6 +79,7 @@ export default function MisEquiposV2({ deporte, miId, solo }: { deporte: Deporte
         .order('created_at', { ascending: false })
         .limit(30),
       solo === 'liga' ? Promise.resolve({ data: [] as unknown[] }) : supabase.rpc('amistosos_v2_lista'),
+      solo === 'liga' ? Promise.resolve({ data: [] as unknown[] }) : supabase.rpc('lp_mis_equipos', { p_deporte: deporte }),
     ]);
     const ahora = Date.now();
     const out: Item[] = [];
@@ -94,6 +98,9 @@ export default function MisEquiposV2({ deporte, miId, solo }: { deporte: Deporte
       const empezada = r.jornadas.some((j) => j.empezada);
       out.push({ tipo: 'amistoso', key: `a-${a.id}`, orden: new Date(a.created_at).getTime(), finalizada: terminada, empezada, am: a, resumen: r });
     });
+    for (const f of (lps as FilaLp[] | null) ?? []) {
+      out.push({ tipo: 'lp', key: `lp-${f.jornada_id}`, orden: new Date(f.cierre ?? f.creado).getTime(), finalizada: f.estado === 'terminada', empezada: f.estado !== 'pendiente', lp: f });
+    }
     // En juego primero las que ya han empezado; dentro, las más recientes.
     out.sort((x, y) => Number(y.empezada) - Number(x.empezada) || y.orden - x.orden);
     setItems(out);
@@ -166,6 +173,38 @@ export default function MisEquiposV2({ deporte, miId, solo }: { deporte: Deporte
                 </Link>
                 {(it.empezada || it.finalizada) && (
                   <Link href={`/salas/${s.id}/clasificacion`} style={botonClasif}>
+                    <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#FF7A45', flexShrink: 0 }} />
+                    {it.finalizada ? 'Clasificación final' : 'Clasificación en directo'}
+                  </Link>
+                )}
+              </div>
+            </div>
+          );
+        }
+        if (it.tipo === 'lp') {
+          const f = it.lp;
+          return (
+            <div key={it.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, background: S.PANEL, border: '1px solid rgba(167,139,250,0.45)', borderRadius: 12, padding: '12px 14px' }}>
+              <Link href={`/v2/liga-privada/${f.liga_id}`} style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1, textDecoration: 'none' }}>
+                <span style={{ fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#A78BFA' }}>🔒 Liga privada</span>
+                <span style={{ fontSize: 13.5, fontWeight: 800, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.liga_nombre}</span>
+                <span style={{ fontSize: 12, color: S.MUTED_2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  Jornada {f.numero} · {etiquetaComp(deporte, f.competicion)}
+                </span>
+                {it.empezada && f.mi_puesto ? (
+                  <span style={{ fontSize: 12.5, fontWeight: 700, color: it.finalizada ? S.MUTED_2 : S.ACCENT }}>
+                    {it.finalizada ? 'Quedaste' : 'Vas'} {f.mi_puesto}º de {f.con_equipo} · {String(Math.round(Number(f.mi_total ?? 0) * 10) / 10).replace('.', ',')} pts
+                  </span>
+                ) : (
+                  <span style={{ fontSize: 12, color: S.MUTED_2 }}>✓ Equipo hecho · empieza {f.cierre ? new Date(f.cierre).toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' }) : 'pronto'}</span>
+                )}
+              </Link>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
+                <Link href={it.empezada ? `/v2/liga-privada/jornada/${f.jornada_id}` : `/v2/liga-privada/jornada/${f.jornada_id}/equipo`} style={botonVer}>
+                  {it.empezada ? 'Ver mi equipo' : 'Cambiar equipo'}
+                </Link>
+                {it.empezada && (
+                  <Link href={`/v2/liga-privada/jornada/${f.jornada_id}`} style={botonClasif}>
                     <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#FF7A45', flexShrink: 0 }} />
                     {it.finalizada ? 'Clasificación final' : 'Clasificación en directo'}
                   </Link>

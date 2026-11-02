@@ -10,6 +10,7 @@ import { DEPORTE_NOMBRE, IconoCredito, PelotaDeporte, type DeporteV2 } from '@/c
 import { FichaCreditos, useCreditosV2 } from '@/components/v2/creditos';
 import { NivelBadge, tramoNivel, useNiveles } from '@/components/v2/Nivel';
 import AnimacionNivel from '@/components/v2/AnimacionNivel';
+import AvisoEquiposPendientes from '@/components/v2/AvisoEquiposPendientes';
 
 // ============================================================================
 // CABECERA DE DRAFTERS V2 (15/10)
@@ -162,6 +163,8 @@ export default function CabeceraV2({ perfil, deporte: deporteOPocha, volverA, si
       )}
       {ficha && <FichaCreditos deporte={deporte} info={info} onCerrar={() => setFicha(false)} />}
       <AnimacionNivel usuarioId={perfil?.id} anclaRef={cabeceraRef} onNivel={setNivelAnim} onBrillo={setBrilloNivel} onXp={setXpNivel} />
+      {/* 02/11 (Iñi): a menos de 24 h, la hoja con los equipos que te faltan. */}
+      <AvisoEquiposPendientes usuarioId={perfil?.id} />
     </div>
   );
 }
