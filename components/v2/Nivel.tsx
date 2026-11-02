@@ -161,16 +161,44 @@ type Nivel = { nivel: number; xp: number; xp_en_nivel: number; xp_siguiente: num
 type H2H = { ganadas: number; perdidas: number; empates: number; total: number; ultima?: string | null };
 
 // 31/10 (Iñi, como en Ludoteka): puntuación de nivel; cada 100 puntos, un nivel (3821 = nivel 38).
+// 02/11 (Iñi): cada vez que se entra, la barra se llena desde 0 hasta tu
+// puntuación (con brillo) y la puntuación cuenta hasta la de verdad.
 export function BarraNivel({ n }: { n: Pick<Nivel, 'nivel' | 'xp' | 'xp_en_nivel' | 'xp_siguiente' | 'para_subir'> }) {
   const t = tramoNivel(n.nivel);
   const pct = Math.max(2, Math.min(100, Math.round((n.xp_en_nivel / Math.max(1, n.xp_siguiente)) * 100)));
+  const xp = Math.floor(Number(n.xp));
+  const [ancho, setAncho] = useState(0);
+  const [cuenta, setCuenta] = useState(Math.max(0, xp - Math.round(n.xp_en_nivel)));
+  useEffect(() => {
+    const desde = Math.max(0, xp - Math.round(n.xp_en_nivel));
+    setAncho(0);
+    setCuenta(desde);
+    let raf = 0;
+    const arranque = window.setTimeout(() => {
+      setAncho(pct);
+      const t0 = performance.now();
+      const paso = (ahora: number) => {
+        const k = Math.min(1, (ahora - t0) / 1100);
+        setCuenta(Math.round(desde + (xp - desde) * (1 - Math.pow(1 - k, 3))));
+        if (k < 1) raf = requestAnimationFrame(paso);
+      };
+      raf = requestAnimationFrame(paso);
+    }, 150);
+    return () => {
+      window.clearTimeout(arranque);
+      cancelAnimationFrame(raf);
+    };
+  }, [pct, xp, n.xp_en_nivel]);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <style>{'@keyframes dnv-barra-brillo{0%{transform:translateX(-100%)}60%,100%{transform:translateX(250%)}}'}</style>
       <div style={{ height: 8, borderRadius: 999, background: 'rgba(255,255,255,0.07)', overflow: 'hidden' }}>
-        <div style={{ width: `${pct}%`, height: '100%', borderRadius: 999, background: t.color }} />
+        <div style={{ position: 'relative', overflow: 'hidden', width: `${ancho}%`, height: '100%', borderRadius: 999, background: t.color, transition: 'width 1.1s cubic-bezier(.35,0,.25,1)' }}>
+          <span style={{ position: 'absolute', top: 0, bottom: 0, width: '40%', background: 'linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent)', animation: 'dnv-barra-brillo 2.2s ease-out 1.1s 2 both' }} />
+        </div>
       </div>
       <span style={{ fontSize: 11.5, color: S.MUTED_2 }}>
-        Puntuación {Math.floor(Number(n.xp))} · para subir al nivel {n.nivel + 1} necesitas {n.para_subir ?? 100 * (n.nivel + 1)}
+        Puntuación {cuenta} · te faltan {Math.max(0, Math.ceil(Number(n.xp) + (n.xp_siguiente - n.xp_en_nivel) - cuenta))} para llegar al nivel {n.nivel + 1}
       </span>
     </div>
   );

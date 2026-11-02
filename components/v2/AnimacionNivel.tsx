@@ -286,7 +286,7 @@ export default function AnimacionNivel({ usuarioId, anclaRef, onNivel, onBrillo 
             <span>
               Puntuación <b style={{ color: '#F5F7F5', fontFamily: "'Barlow Condensed', sans-serif", fontSize: 17 }}>{Math.floor(pts)}</b>
             </span>
-            <span>{abierto ? `faltan ${falta} para subir` : ''}</span>
+            <span>{abierto ? `te faltan ${falta} para el nivel ${nv + 1}` : ''}</span>
           </div>
           <div
             onClick={(e) => {
