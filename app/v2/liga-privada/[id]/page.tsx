@@ -15,6 +15,7 @@ import { UsuarioConNivel, useNiveles } from '@/components/v2/Nivel';
 import { etiquetasPosicion } from '@/lib/posicionesEmpate';
 import { cadaXSegundos, mensajeError } from '@/lib/v2';
 import { registrarVistaClasificacion } from '@/lib/actividad';
+import ClasificacionLigaPrivada, { type JornadaLP } from '@/components/v2/ClasificacionLigaPrivada';
 
 // ============================================================================
 // LIGA PRIVADA (31/10, Iñi) — SQL 71
@@ -139,6 +140,9 @@ function LigaPrivada() {
 
   const dep = info?.deporte ?? 'futbol';
   const jornadas = info?.jornadas ?? [];
+  const enJuego = jornadas.filter((j) => j.estado === 'en_juego');
+  const pendientes = jornadas.filter((j) => j.estado === 'pendiente');
+  const jugadas = jornadas.filter((j) => j.estado !== 'pendiente');
   const proxima = [...jornadas].filter((j) => j.estado === 'pendiente' && j.cierre && new Date(j.cierre).getTime() > Date.now()).sort((a, b) => a.orden - b.orden)[0] ?? null;
   const posiciones = tabla ? etiquetasPosicion(tabla, (f) => f.pts * 1e6 + Number(f.puntos_fantasy)) : [];
   const n = info?.miembros.length ?? 0;
@@ -194,6 +198,33 @@ function LigaPrivada() {
 
           {veoDentro && (
             <>
+              {/* 02/11 (Iñi): lo más importante, la jornada que está en juego, arriba del todo. */}
+              {enJuego.map((j) => {
+                const yo = j.resultados.find((r) => r.soy_yo);
+                return (
+                  <Link
+                    key={j.id}
+                    href={`/v2/liga-privada/jornada/${j.id}`}
+                    style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 14px', borderRadius: 16, textDecoration: 'none', background: 'linear-gradient(135deg, rgba(61,220,132,0.22) 0%, rgba(61,220,132,0.05) 100%)', border: '1px solid rgba(61,220,132,0.55)' }}
+                  >
+                    <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: VERDE }}>
+                        <span style={{ width: 8, height: 8, borderRadius: '50%', background: VERDE, animation: 'lp-latido 1.4s ease-in-out infinite' }} />
+                        En juego ahora
+                      </span>
+                      <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 22, color: S.TEXT, lineHeight: 1.1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        Jornada {j.numero ?? j.orden} · {jornadaBonita(j.competicion, dep)}
+                      </span>
+                      <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>
+                        {yo?.puesto ? `Vas ${yo.puesto}º de ${j.resultados.filter((r) => r.tiene_equipo).length} · ${n1(yo.total)} pts` : 'Clasificación en directo'}
+                      </span>
+                    </span>
+                    <span style={{ flexShrink: 0, padding: '10px 12px', borderRadius: 12, background: VERDE, color: '#04140B', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, textTransform: 'uppercase' }}>Ver ›</span>
+                  </Link>
+                );
+              })}
+              <style>{'@keyframes lp-latido{50%{opacity:.3}}'}</style>
+
               {/* Haz tu equipo */}
               {info.soy_miembro && info.estado === 'activa' && proxima && proxima.con_jugadores === false && (
                 <Panel style={{ gap: 4 }}>
@@ -255,43 +286,16 @@ function LigaPrivada() {
                 );
               })()}
 
-              {info.estado === 'activa' && info.soy_admin && <PublicarSala ligaId={info.id} deporte={dep} onHecho={() => void cargar()} />}
+              {/* Clasificación (02/11: en directo con la jornada en juego) */}
+              <ClasificacionLigaPrivada ligaId={info.id} jornadas={jornadas as unknown as JornadaLP[]} miId={perfil?.id} terminada={info.estado === 'terminada'} />
 
-              {/* Clasificación */}
-              <Panel style={{ gap: 4, padding: '12px 12px 8px' }}>
-                <span style={S.sectionLabel}>{info.estado === 'terminada' ? 'Clasificación final' : 'Clasificación'}</span>
-                {tabla === null ? (
-                  <Cargando compacto />
-                ) : (
-                  <>
-                    <div style={{ display: 'grid', gridTemplateColumns: '30px 1fr 28px 48px 40px', gap: 6, fontSize: 10.5, fontWeight: 800, color: S.MUTED_3, textTransform: 'uppercase', padding: '4px 2px' }}>
-                      <span>#</span>
-                      <span>Jugador</span>
-                      <span style={{ textAlign: 'center' }}>PJ</span>
-                      <span style={{ textAlign: 'right' }}>PF</span>
-                      <span style={{ textAlign: 'right' }}>Pts</span>
-                    </div>
-                    {tabla.map((f, i) => (
-                      <div key={f.usuario_id} style={{ display: 'grid', gridTemplateColumns: '30px 1fr 28px 48px 40px', gap: 6, alignItems: 'center', padding: '8px 2px', borderTop: '1px solid rgba(255,255,255,0.05)', background: f.soy_yo ? 'rgba(61,220,132,0.07)' : 'transparent', borderRadius: f.soy_yo ? 8 : 0 }}>
-                        <span style={{ fontWeight: 800, fontSize: 13.5, color: posiciones[i].replace('T', '') === '1' && f.pts > 0 ? ORO : S.MUTED }}>{posiciones[i]}</span>
-                        <span style={{ minWidth: 0, fontWeight: 700, fontSize: 13.5, color: f.soy_yo ? VERDE : S.TEXT }}>
-                          <UsuarioConNivel id={f.usuario_id} nombre={f.nombre} nivel={niveles.get(f.usuario_id)} miId={perfil?.id} modo="popover" />
-                        </span>
-                        <span style={{ textAlign: 'center', fontSize: 13, color: S.MUTED }}>{f.pj}</span>
-                        <span style={{ textAlign: 'right', fontSize: 12.5, color: S.MUTED }}>{n1(f.puntos_fantasy)}</span>
-                        <span style={{ textAlign: 'right', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 18, color: S.TEXT }}>{f.pts}</span>
-                      </div>
-                    ))}
-                    <span style={{ fontSize: 11, color: S.MUTED_3, marginTop: 4 }}>PJ: jornadas jugadas · PF: puntos a favor (los de tus equipos) · Pts: puntos de liga. Cuenta cuando termina cada jornada; si hay empate a puntos, desempatan los puntos a favor.</span>
-                  </>
-                )}
-              </Panel>
-
-              {/* Jornadas */}
+              {/* 02/11 (Iñi): próximas jornadas (sin empezar) aparte; las jugadas, abajo, con su clasificación. */}
+              {/* Si solo hay una y ya sale arriba ("Haz tu equipo"), no se repite; los admins sí la ven (para poder quitarla). */}
+              {(jornadas.length === 0 || (pendientes.length > 0 && (pendientes.length > 1 || info.soy_admin || !info.soy_miembro))) && (
               <Panel style={{ gap: 0, padding: '12px 12px 4px' }}>
-                <span style={{ ...S.sectionLabel, marginBottom: 6 }}>Jornadas de la liga</span>
+                <span style={{ ...S.sectionLabel, marginBottom: 6 }}>{pendientes.length === 1 ? 'Próxima jornada' : 'Próximas jornadas'}</span>
                 {jornadas.length === 0 && <span style={{ fontSize: 13, color: S.MUTED_2, paddingBottom: 8 }}>Todavía no hay ninguna.</span>}
-                {jornadas.map((j, i) => {
+                {pendientes.map((j, i) => {
                   const yo = j.resultados.find((r) => r.soy_yo);
                   const abiertaJ = abierta === j.id;
                   return (
@@ -378,6 +382,41 @@ function LigaPrivada() {
                   );
                 })}
               </Panel>
+              )}
+
+              {/* 02/11 (Iñi): histórico de jornadas, como en la Liga Drafters: número, a qué pertenecía y su clasificación con puntos. */}
+              {jugadas.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 20, color: S.TEXT }}>Jornadas jugadas</span>
+                  {jugadas.map((j) => (
+                    <Panel key={j.id} style={{ padding: 12, gap: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+                        <span style={{ fontSize: 14.5, fontWeight: 800, color: S.TEXT, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          Jornada {j.numero ?? j.orden} <span style={{ fontWeight: 600, fontSize: 12.5, color: S.MUTED_2 }}>({jornadaBonita(j.competicion, dep)})</span>
+                        </span>
+                        <span style={{ fontSize: 11.5, fontWeight: 700, color: j.estado === 'en_juego' ? VERDE : S.MUTED_3, whiteSpace: 'nowrap' }}>{j.estado === 'en_juego' ? '● En juego' : 'Terminada'}</span>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', borderRadius: 12, background: '#0E1311', border: '1px solid #1A221E', overflow: 'hidden' }}>
+                        {j.resultados.map((r, k) => (
+                          <div key={r.usuario_id} style={{ display: 'grid', gridTemplateColumns: '30px 1fr auto 40px', alignItems: 'center', gap: 8, padding: '8px 10px', borderTop: k === 0 ? 'none' : '1px solid #161D1A', background: r.soy_yo ? 'rgba(61,220,132,0.07)' : 'transparent' }}>
+                            <span style={{ fontWeight: 800, fontSize: 13, color: r.puesto === 1 ? ORO : S.MUTED_2 }}>{r.puesto ? `${r.puesto}º` : '–'}</span>
+                            <span style={{ minWidth: 0, fontSize: 13.5, fontWeight: 700, color: r.soy_yo ? VERDE : S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>@{r.nombre}</span>
+                            <span style={{ fontSize: 12.5, color: S.MUTED_2, whiteSpace: 'nowrap' }}>{r.tiene_equipo ? `${n1(r.total)} pts` : 'sin equipo'}</span>
+                            <span style={{ textAlign: 'right', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 16, color: j.estado === 'terminada' && (r.puntos_liga ?? 0) > 0 ? VERDE : S.MUTED_3 }}>{j.estado === 'terminada' ? `+${r.puntos_liga ?? 0}` : ''}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <Link href={`/v2/liga-privada/jornada/${j.id}`} style={{ alignSelf: 'center', fontSize: 12.5, fontWeight: 800, color: VERDE, textDecoration: 'none', padding: '2px 0' }}>
+                        Ver los detalles de la clasificación ›
+                      </Link>
+                    </Panel>
+                  ))}
+                  <span style={{ fontSize: 11, color: S.MUTED_3 }}>A la derecha, los puntos de liga de cada jornada (cuentan cuando termina).</span>
+                </div>
+              )}
+
+              {/* 02/11 (Iñi): crear jornada, más abajo (es cosa de los administradores de la liga). */}
+              {info.estado === 'activa' && info.soy_admin && <PublicarSala ligaId={info.id} deporte={dep} onHecho={() => void cargar()} />}
 
               {/* Miembros e invitar */}
               <Panel style={{ gap: 8 }}>
