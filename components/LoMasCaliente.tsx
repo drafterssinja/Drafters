@@ -22,7 +22,7 @@ import { formatPuntos } from '@/lib/futbolLaLiga';
 const ACCENT = '#3DDC84';
 // 13/10 (Iñi): más tiempo en cada deporte, para que dé tiempo a leerlo.
 const SEGUNDOS_POR_DEPORTE = 10;
-const ORDEN: Deporte[] = ['futbol', 'golf', 'tenis'];
+const ORDEN: Deporte[] = ['futbol', 'tenis', 'golf'];
 const NOMBRE_DEPORTE: Record<Deporte, string> = { futbol: 'Fútbol', golf: 'Golf', tenis: 'Tenis' };
 
 type Deporte = 'futbol' | 'golf' | 'tenis';
@@ -153,7 +153,8 @@ export default function LoMasCaliente({ titulo = 'Lo más caliente, ahora.' }: {
   const hayReales = !!reales && Object.keys(reales).length > 0;
   // Deportes que entran en la rotación: con datos reales, solo los que tienen
   // datos; sin ninguno, el ejemplo de los tres.
-  const disponibles = useMemo<Deporte[]>(() => (hayReales ? ORDEN.filter((d) => reales?.[d]) : ORDEN), [hayReales, reales]);
+  // 02/11 (Iñi): nada de nombres de ejemplo; solo lo que está pasando de verdad.
+  const disponibles = useMemo<Deporte[]>(() => ORDEN.filter((d) => reales?.[d]), [reales]);
 
   useEffect(() => {
     if (!disponibles.includes(deporte)) setDeporte(disponibles[0] ?? 'futbol');
@@ -170,7 +171,8 @@ export default function LoMasCaliente({ titulo = 'Lo más caliente, ahora.' }: {
 
   useEffect(() => setAbierto(null), [deporte]);
 
-  const activo: Bloque = (hayReales ? reales?.[deporte] : EJEMPLO[deporte]) ?? EJEMPLO[deporte];
+  const activo: Bloque | undefined = reales?.[deporte] ?? (disponibles[0] ? reales?.[disponibles[0]] : undefined);
+  if (!hayReales || !activo) return null;
   const etiquetaEstado = activo.enVivo ? 'En vivo' : deporte === 'futbol' ? 'Última jornada' : 'Último torneo';
 
   return (
@@ -179,8 +181,8 @@ export default function LoMasCaliente({ titulo = 'Lo más caliente, ahora.' }: {
       <h2 style={{ fontSize: 20, fontWeight: 700, color: '#F5F7F5', margin: 0 }}>{titulo}</h2>
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        {ORDEN.map((d) => {
-          const deshabilitado = !disponibles.includes(d);
+        {disponibles.map((d) => {
+          const deshabilitado = false;
           return (
             <button
               key={d}

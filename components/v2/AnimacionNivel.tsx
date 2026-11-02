@@ -61,7 +61,7 @@ const CSS = `
  * enseñar en la insignia de la cabecera mientras dura la animación (null al
  * terminar) y `onBrillo` si la insignia de la cabecera tiene que brillar.
  */
-export default function AnimacionNivel({ usuarioId, anclaRef, onNivel, onBrillo }: { usuarioId: string | null | undefined; anclaRef: React.RefObject<HTMLElement>; onNivel: (n: number | null) => void; onBrillo: (b: boolean) => void }) {
+export default function AnimacionNivel({ usuarioId, anclaRef, onNivel, onBrillo, onXp }: { usuarioId: string | null | undefined; anclaRef: React.RefObject<HTMLElement>; onNivel: (n: number | null) => void; onBrillo: (b: boolean) => void; onXp?: (xp: number) => void }) {
   const router = useRouter();
   const id = useId().replace(/[^a-zA-Z0-9]/g, '');
   const [montado, setMontado] = useState(false);
@@ -101,6 +101,9 @@ export default function AnimacionNivel({ usuarioId, anclaRef, onNivel, onBrillo 
           const xp = Number(n.xp);
           if (!Number.isFinite(xp)) return;
           const visto = leer(k);
+          // La barrita del nivel de la cabecera: al acabar la animación, si la hay.
+          if (!visto || Math.abs(xp - visto.xp) < 0.05) onXp?.(xp);
+          else window.setTimeout(() => onXp?.(xp), 6000);
           const ahora = Date.now();
           if (!visto) return guardar(k, { xp, t: ahora });
           if (Math.abs(xp - visto.xp) < 0.05) return;

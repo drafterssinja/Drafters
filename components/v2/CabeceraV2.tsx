@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import LogoDrafters from '@/components/LogoDrafters';
 import { supabase, type Perfil } from '@/lib/supabaseClient';
 import * as S from '@/lib/mockupStyles';
-import { DEPORTES_V2, DEPORTE_NOMBRE, IconoCartas, IconoCredito, PelotaDeporte, type DeporteV2 } from '@/components/v2/IconosV2';
+import { DEPORTE_NOMBRE, IconoCredito, PelotaDeporte, type DeporteV2 } from '@/components/v2/IconosV2';
 import { FichaCreditos, useCreditosV2 } from '@/components/v2/creditos';
 import { NivelBadge, tramoNivel, useNiveles } from '@/components/v2/Nivel';
 import AnimacionNivel from '@/components/v2/AnimacionNivel';
@@ -19,7 +19,7 @@ import AnimacionNivel from '@/components/v2/AnimacionNivel';
 // por separado). Lo de la derecha: avisos, créditos del deporte en el que
 // estás (al pulsarlo, la ficha con las reglas y el vídeo de recarga) y Mi cuenta.
 
-export default function CabeceraV2({ perfil, deporte: deporteOPocha, volverA }: { perfil: Perfil | null; deporte: DeporteV2 | 'pocha'; volverA?: string }) {
+export default function CabeceraV2({ perfil, deporte: deporteOPocha, volverA, sinDeporte = false }: { perfil: Perfil | null; deporte: DeporteV2 | 'pocha'; volverA?: string; sinDeporte?: boolean }) {
   // 19/10 (Iñi): en la hoja de la pocha no hay deporte; los créditos son los de fútbol.
   const enPocha = deporteOPocha === 'pocha';
   const deporte: DeporteV2 = enPocha ? 'futbol' : (deporteOPocha as DeporteV2);
@@ -30,13 +30,13 @@ export default function CabeceraV2({ perfil, deporte: deporteOPocha, volverA }: 
   // 02/11 (Iñi): al cambiar tu nivel, animación desde la insignia (AnimacionNivel).
   const [nivelAnim, setNivelAnim] = useState<number | null>(null);
   const [brilloNivel, setBrilloNivel] = useState(false);
+  const [xpNivel, setXpNivel] = useState<number | null>(null);
+  const [menu, setMenu] = useState(false);
   const cabeceraRef = useRef<HTMLDivElement>(null);
   const miNivel = nivelAnim ?? (perfil ? misNiveles.get(perfil.id) : undefined);
   const [ficha, setFicha] = useState(false);
   const [noLeidas, setNoLeidas] = useState(0);
-  // 19/10 (Iñi): el icono de cartas (pocha) solo lo ven Iñi y Javier.
-  // 01/11 (Iñi): de momento, fuera las cartas para todos (ocupaban sitio arriba).
-  const pocha = false;
+  // 01/11 (Iñi): de momento, fuera las cartas (pocha) para todos.
   // 15/10 (Iñi: "la parte superior está muy achatada"): más alta, y tres
   // tamaños según el ancho del móvil para que todo quepa sin aplastarse.
   const [ancho, setAncho] = useState(400);
@@ -57,115 +57,101 @@ export default function CabeceraV2({ perfil, deporte: deporteOPocha, volverA }: 
   }, [perfil]);
 
   const info = creditos?.[deporte] ?? null;
-  const t = ancho >= 400 ? { logo: 26, bola: 30, icono: 21, boton: 32, pad: 16 } : ancho >= 370 ? { logo: 22, bola: 26, icono: 19, boton: 30, pad: 12 } : { logo: 21, bola: 25, icono: 18, boton: 29, pad: 10 };
-  // 01/11: con la insignia de nivel arriba, todo un poco más junto para que quepan las tres pelotas.
-  const estrecho = ancho < 420;
+  // 02/11 (Iñi, "Mezcla 1"): dos líneas, con más aire.
+  //  · Arriba: DRAFTERS (separado del resto) · mi nivel (insignia + "NIVEL N"
+  //    + barrita) · créditos del deporte · mi cuenta (con el número de avisos
+  //    en rojo; al pulsarla, un desplegable: Notificaciones / Mi perfil).
+  //  · Debajo: pestañas Fútbol · Tenis · Golf.
+  const estrecho = ancho < 375;
+  const pctNivel = xpNivel === null ? null : Math.max(3, Math.min(100, xpNivel - Math.max(1, Math.floor(xpNivel / 100)) * 100));
+  const colorNivel = miNivel ? tramoNivel(miNivel).color : S.ACCENT;
+  const ORDEN_TABS: DeporteV2[] = ['futbol', 'tenis', 'golf'];
 
   return (
     <div className="v2">
-      <div ref={cabeceraRef} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: estrecho ? 4 : 6, minHeight: 68, padding: `18px ${t.pad}px`, borderBottom: '1px solid #1A211D' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: estrecho ? 4 : 6, minWidth: 0 }}>
+      <div ref={cabeceraRef} style={{ borderBottom: '1px solid #1A211D' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: estrecho ? 6 : 8, padding: `14px ${estrecho ? 12 : 16}px 8px` }}>
           <Link href="/v2/futbol" style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }} aria-label="Drafters">
-            <LogoDrafters size={pocha ? t.logo - 2 : t.logo} />
+            <LogoDrafters size={estrecho ? 27 : 30} />
           </Link>
-          <nav style={{ display: 'flex', alignItems: 'center', gap: pocha ? 0 : 2, flexShrink: 0 }} aria-label="Deportes">
-            {DEPORTES_V2.map((d) => {
-              const activo = !enPocha && d === deporte;
-              return (
+          <span style={{ flex: 1 }} />
+          {perfil && (
+            <>
+              {miNivel ? (
                 <Link
-                  key={d}
-                  href={`/v2/${d}`}
-                  aria-label={DEPORTE_NOMBRE[d]}
-                  aria-current={activo ? 'page' : undefined}
-                  style={{
-                    height: pocha ? t.icono + 7 : t.bola + 2,
-                    minWidth: pocha ? t.icono + 3 : t.bola,
-                    flexShrink: 0,
-                    padding: activo && !pocha ? (estrecho ? '0 8px 0 3px' : '0 10px 0 4px') : 0,
-                    borderRadius: 999,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 5,
-                    background: activo ? 'rgba(61,220,132,0.16)' : 'transparent',
-                    border: `1.5px solid ${activo ? S.ACCENT : 'transparent'}`,
-                    opacity: activo ? 1 : 0.5,
-                    textDecoration: 'none',
-                    transition: 'all 0.15s',
-                  }}
+                  href="/v2/nivel"
+                  aria-label={`Mi nivel: ${miNivel}`}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, height: 38, padding: '0 9px 0 4px', borderRadius: 11, background: '#111715', border: '1px solid #2A3733', textDecoration: 'none', animation: brilloNivel ? 'dnv-glow 1.4s ease-in-out infinite' : undefined, ['--dnv-c' as string]: colorNivel } as React.CSSProperties}
                 >
-                  <PelotaDeporte deporte={d} size={t.icono} />
-                  {/* 15/10 (Iñi): el nombre del deporte solo junto a la pelota seleccionada. */}
-                  {activo && !pocha && <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: ancho >= 400 ? 13 : 12, color: S.ACCENT, whiteSpace: 'nowrap' }}>{DEPORTE_NOMBRE[d]}</span>}
+                  <NivelBadge nivel={miNivel} size={30} />
+                  <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 10, letterSpacing: '0.05em', color: colorNivel, whiteSpace: 'nowrap' }}>NIVEL {miNivel}</span>
+                    <span style={{ width: estrecho ? 34 : 42, height: 4, borderRadius: 9, background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+                      <span style={{ display: 'block', width: `${pctNivel ?? 0}%`, height: '100%', borderRadius: 9, background: colorNivel, transition: 'width .8s' }} />
+                    </span>
+                  </span>
                 </Link>
-              );
-            })}
-            {pocha && (
-              <Link
-                href="/pocha"
-                aria-label="Pocha"
-                aria-current={enPocha ? 'page' : undefined}
-                style={{
-                  height: pocha ? t.icono + 7 : t.bola + 2,
-                  minWidth: pocha ? t.icono + 3 : t.bola,
-                  flexShrink: 0,
-                  padding: 0,
-                  borderRadius: 999,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 5,
-                  background: enPocha ? 'rgba(61,220,132,0.16)' : 'transparent',
-                  border: `1.5px solid ${enPocha ? S.ACCENT : 'transparent'}`,
-                  opacity: enPocha ? 1 : 0.5,
-                  textDecoration: 'none',
-                  transition: 'all 0.15s',
-                }}
+              ) : null}
+              <button
+                type="button"
+                onClick={() => setFicha(true)}
+                aria-label={`Créditos de ${DEPORTE_NOMBRE[deporte]}`}
+                style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, width: 'auto', height: 38, background: '#131917', border: '1px solid #2A3733', borderRadius: 10, padding: '0 9px', cursor: 'pointer' }}
               >
-                <IconoCartas size={t.icono} />
-              </Link>
-            )}
-          </nav>
+                <IconoCredito size={16} />
+                <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 14, color: S.TEXT }}>{info ? info.saldo : '–'}</span>
+              </button>
+              <div style={{ position: 'relative', flexShrink: 0 }}>
+                <button
+                  type="button"
+                  onClick={() => setMenu(!menu)}
+                  aria-label="Mi cuenta y notificaciones"
+                  style={{ position: 'relative', width: 38, height: 38, padding: 0, borderRadius: '50%', border: 'none', background: S.ACCENT, color: '#04140B', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                >
+                  {S.iniciales(perfil.nombre, perfil.apellido)}
+                  {noLeidas > 0 && (
+                    <span style={{ position: 'absolute', top: -4, right: -4, minWidth: 17, height: 17, padding: '0 4px', borderRadius: 999, background: '#FF5C5C', color: '#FFF', fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 9.5, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1.5px solid #0B0F0E' }}>
+                      {noLeidas > 99 ? '99+' : noLeidas}
+                    </span>
+                  )}
+                </button>
+                {menu && (
+                  <>
+                    <div onClick={() => setMenu(false)} style={{ position: 'fixed', inset: 0, zIndex: 90 }} />
+                    <div style={{ position: 'absolute', right: 0, top: 46, zIndex: 91, width: 220, borderRadius: 14, background: '#141B18', border: '1px solid #2A3733', boxShadow: '0 14px 34px rgba(0,0,0,.55)', overflow: 'hidden' }}>
+                      {[
+                        { href: '/notificaciones', icono: '🔔', texto: 'Notificaciones', extra: noLeidas > 0 ? String(noLeidas > 99 ? '99+' : noLeidas) : null },
+                        { href: '/cuenta', icono: '👤', texto: 'Mi perfil', extra: null },
+                      ].map((o, k) => (
+                        <Link key={o.href} href={o.href} onClick={() => setMenu(false)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '13px 14px', borderTop: k === 0 ? 'none' : '1px solid #1E2723', textDecoration: 'none', color: S.TEXT, fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 14 }}>
+                          <span style={{ fontSize: 16 }}>{o.icono}</span>
+                          <span style={{ flex: 1 }}>{o.texto}</span>
+                          {o.extra && <span style={{ minWidth: 20, height: 20, padding: '0 6px', borderRadius: 999, background: '#FF5C5C', color: '#FFF', fontSize: 11, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{o.extra}</span>}
+                        </Link>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            </>
+          )}
         </div>
-
-        {perfil && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: estrecho ? 3 : 5, flexShrink: 0 }}>
-            <Link href="/notificaciones" aria-label="Notificaciones" style={{ position: 'relative', flexShrink: 0, width: t.boton, height: t.boton, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#C9D2CC', background: '#131917', border: '1px solid #2A3733', borderRadius: 8 }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-              </svg>
-              {noLeidas > 0 && (
-                <span style={{ position: 'absolute', top: -5, right: -5, minWidth: 15, height: 15, padding: '0 3px', borderRadius: 999, background: '#FF5C5C', color: '#FFF', fontWeight: 800, fontSize: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1.5px solid #0B0F0E' }}>
-                  {noLeidas > 99 ? '99+' : noLeidas}
-                </span>
-              )}
-            </Link>
-            <button
-              type="button"
-              onClick={() => setFicha(true)}
-              aria-label={`Créditos de ${DEPORTE_NOMBRE[deporte]}`}
-              style={{ display: 'flex', alignItems: 'center', gap: estrecho ? 4 : 6, flexShrink: 0, height: t.boton, background: '#131917', border: '1px solid #2A3733', borderRadius: 8, padding: estrecho ? '0 6px' : '0 9px', cursor: 'pointer' }}
-            >
-              <IconoCredito size={15} />
-              <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13, color: S.TEXT }}>{info ? info.saldo : '–'}</span>
-            </button>
-            {miNivel ? (
-              // 01/11 (Iñi): que se vea que es el nivel sin ocupar más: la insignia y debajo, en pequeño, "NIVEL".
+        <nav style={{ display: 'flex' }} aria-label="Deportes">
+          {ORDEN_TABS.map((d) => {
+            const activo = !enPocha && !sinDeporte && d === deporte;
+            return (
               <Link
-                href="/v2/nivel"
-                aria-label={`Mi nivel: ${miNivel}`}
-                style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1, flexShrink: 0, height: t.boton, textDecoration: 'none', borderRadius: 8, animation: brilloNivel ? 'dnv-glow 1.4s ease-in-out infinite' : undefined, ['--dnv-c' as string]: tramoNivel(miNivel).color } as React.CSSProperties}
+                key={d}
+                href={`/v2/${d}`}
+                aria-current={activo ? 'page' : undefined}
+                style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, padding: '9px 0 8px', borderBottom: `3px solid ${activo ? S.ACCENT : 'transparent'}`, textDecoration: 'none' }}
               >
-                <NivelBadge nivel={miNivel} size={t.boton - 8} />
-                <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 7, lineHeight: 1, letterSpacing: '0.02em', color: tramoNivel(miNivel).color }}>NIVEL</span>
+                <PelotaDeporte deporte={d} size={22} />
+                <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 18, color: activo ? S.TEXT : S.MUTED_2 }}>{DEPORTE_NOMBRE[d]}</span>
               </Link>
-            ) : null}
-            <Link href="/cuenta" aria-label="Mi cuenta" style={{ flexShrink: 0, width: t.boton, height: t.boton, borderRadius: '50%', background: S.ACCENT, color: '#04140B', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 12.5, display: 'flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none' }}>
-              {S.iniciales(perfil.nombre, perfil.apellido)}
-            </Link>
-          </div>
-        )}
+            );
+          })}
+        </nav>
       </div>
       {volverA && (
         <div style={{ padding: '6px 16px 0' }}>
@@ -175,7 +161,7 @@ export default function CabeceraV2({ perfil, deporte: deporteOPocha, volverA }: 
         </div>
       )}
       {ficha && <FichaCreditos deporte={deporte} info={info} onCerrar={() => setFicha(false)} />}
-      <AnimacionNivel usuarioId={perfil?.id} anclaRef={cabeceraRef} onNivel={setNivelAnim} onBrillo={setBrilloNivel} />
+      <AnimacionNivel usuarioId={perfil?.id} anclaRef={cabeceraRef} onNivel={setNivelAnim} onBrillo={setBrilloNivel} onXp={setXpNivel} />
     </div>
   );
 }
