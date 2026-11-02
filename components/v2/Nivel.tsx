@@ -37,6 +37,10 @@ export function NivelBadge({ nivel, size = 22 }: { nivel: number | null | undefi
 
 // Caché sencilla de niveles para no pedirlos una y otra vez.
 const cache = new Map<string, number>();
+/** 02/11: tras la animación de nivel, que todas las pantallas enseñen ya el nivel nuevo. */
+export function fijarNivelEnCache(usuarioId: string, nivel: number) {
+  cache.set(usuarioId, nivel);
+}
 export function useNiveles(ids: string[]): Map<string, number> {
   const [mapa, setMapa] = useState<Map<string, number>>(new Map(ids.filter((i) => cache.has(i)).map((i) => [i, cache.get(i) as number])));
   const clave = Array.from(new Set(ids)).sort().join(',');

@@ -483,7 +483,7 @@ export default function ClasificacionSala({
             )}
 
             <div style={{ width: '100%', maxWidth: 420 }}>
-              <AnuncioVideoInline ubicacion="clasificacion" />
+              <AnuncioVideoInline ubicacion="clasificacion" deporte="golf" />
             </div>
           </div>
     );
@@ -505,7 +505,7 @@ export default function ClasificacionSala({
             )}
 
             <div style={{ width: '100%', maxWidth: 420 }}>
-              <AnuncioVideoInline ubicacion="clasificacion" />
+              <AnuncioVideoInline ubicacion="clasificacion" deporte="golf" />
             </div>
           </div>
     );
@@ -1082,7 +1082,7 @@ export default function ClasificacionSala({
           {/* Vídeo publicitario debajo de todo — mismo criterio que en
               porras/[id]/clasificacion/page.tsx. */}
           <div style={{ width: '100%' }}>
-            <AnuncioVideoInline ubicacion="clasificacion" />
+            <AnuncioVideoInline ubicacion="clasificacion" deporte="golf" />
           </div>
         </div>
   );

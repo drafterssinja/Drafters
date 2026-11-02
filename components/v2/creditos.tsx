@@ -51,11 +51,12 @@ export function RecargaVideo({ deporte, salaId, onCerrar, onRecargado }: { depor
   const hecho = useRef(false);
 
   useEffect(() => {
-    supabase.rpc('elegir_anuncio_video', { p_ubicacion: 'recarga' }).then(({ data }) => {
+    // 02/11 (Iñi): solo vídeos marcados para el deporte de los créditos (SQL 85).
+    supabase.rpc('elegir_anuncio_video', { p_ubicacion: 'recarga', p_deporte: deporte }).then(({ data }) => {
       const d = data as { id: string; url: string }[] | null;
       setVideo(d && d.length > 0 ? { id: d[0].id, url: d[0].url } : null);
     });
-  }, []);
+  }, [deporte]);
 
   async function alTerminar() {
     if (hecho.current || !video || video === 'cargando') return;

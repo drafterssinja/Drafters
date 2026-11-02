@@ -574,7 +574,7 @@ export default function ClasificacionMesaFutbol({
               </Link>
             )}
             <div style={{ width: '100%', maxWidth: 420 }}>
-              <AnuncioVideoInline ubicacion="clasificacion" />
+              <AnuncioVideoInline ubicacion="clasificacion" deporte="futbol" />
             </div>
           </div>
     );
@@ -969,7 +969,7 @@ export default function ClasificacionMesaFutbol({
             </Link>
           )}
           <div style={{ width: '100%', maxWidth: 420, alignSelf: 'center' }}>
-            <AnuncioVideoInline ubicacion="clasificacion" />
+            <AnuncioVideoInline ubicacion="clasificacion" deporte="futbol" />
           </div>
         </div>
   );

@@ -45,7 +45,7 @@ import * as S from '@/lib/mockupStyles';
 // encima del vídeo para que un toque del usuario lo arranque manualmente
 // (un gesto del usuario siempre está permitido por los navegadores, aunque
 // el autoplay esté bloqueado).
-export default function AnuncioVideoInline({ ubicacion }: { ubicacion: 'clasificacion' | 'mesas' }) {
+export default function AnuncioVideoInline({ ubicacion, deporte }: { ubicacion: 'clasificacion' | 'mesas'; deporte?: 'futbol' | 'golf' | 'tenis' }) {
   const [video, setVideo] = useState<{ id: string; url: string; enlace: string | null } | null | 'cargando'>('cargando');
   const [silenciado, setSilenciado] = useState(true);
   const [necesitaToque, setNecesitaToque] = useState(false);
@@ -57,7 +57,8 @@ export default function AnuncioVideoInline({ ubicacion }: { ubicacion: 'clasific
   useEffect(() => {
     let activo = true;
     async function cargar() {
-      const { data } = await supabase.rpc('elegir_anuncio_video', { p_ubicacion: ubicacion });
+      // 02/11 (Iñi): con deporte, solo vídeos marcados para ese deporte (SQL 85).
+      const { data } = await supabase.rpc('elegir_anuncio_video', deporte ? { p_ubicacion: ubicacion, p_deporte: deporte } : { p_ubicacion: ubicacion });
       if (!activo) return;
       setVideo(data && data.length > 0 ? { id: data[0].id, url: data[0].url, enlace: data[0].enlace_destino ?? null } : null);
     }
@@ -65,7 +66,7 @@ export default function AnuncioVideoInline({ ubicacion }: { ubicacion: 'clasific
     return () => {
       activo = false;
     };
-  }, [ubicacion]);
+  }, [ubicacion, deporte]);
 
   // Arranque explícito de la reproducción (ver nota de más arriba) — se
   // repite cada vez que cambia el vídeo elegido. Si el navegador bloquea el

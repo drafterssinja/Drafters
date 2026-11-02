@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import { insigniaSvg, rango } from '@/components/v2/Insignia';
+import { fijarNivelEnCache } from '@/components/v2/Nivel';
 
 // ============================================================================
 // ANIMACIÓN DE NIVEL (02/11, Iñi)
@@ -80,27 +81,52 @@ export default function AnimacionNivel({ usuarioId, anclaRef, onNivel, onBrillo 
 
   useEffect(() => setMontado(true), []);
 
+  // 02/11 (Iñi): se comprueba al entrar en cualquier pantalla, cada minuto
+  // mientras la app está abierta y al volver a ella (si estaba en segundo
+  // plano). Así, si una partida (sala, liga privada o Liga Drafters) se cierra
+  // mientras estás dentro, la animación sale sola.
   useEffect(() => {
-    if (!usuarioId || enMarcha.current) return;
+    if (!usuarioId) return;
     const k = `drafters_nivel_visto:${usuarioId}`;
     let vivo = true;
-    void supabase.rpc('mi_nivel').then(({ data }) => {
-      if (!vivo || !data) return;
-      const n = data as MiNivel;
-      const xp = Number(n.xp);
-      if (!Number.isFinite(xp)) return;
-      const visto = leer(k);
-      const ahora = Date.now();
-      if (!visto) return guardar(k, { xp, t: ahora });
-      if (Math.abs(xp - visto.xp) < 0.05) return;
-      guardar(k, { xp, t: ahora });
-      const nuevas = (n.ultimas ?? []).filter((u) => new Date(u.terminado_en).getTime() > visto.t);
-      const etiqueta = nuevas.length === 1 ? nuevas[0].titulo : nuevas.length > 1 ? `${nuevas.length} partidas terminadas` : n.ultimas?.[0]?.titulo ?? 'Tu nivel';
-      enMarcha.current = true;
-      void animar(visto.xp, xp, etiqueta);
-    });
+    let pidiendo = false;
+    const comprobar = () => {
+      if (!vivo || enMarcha.current || pidiendo || document.visibilityState !== 'visible') return;
+      pidiendo = true;
+      void supabase.rpc('mi_nivel').then(
+        ({ data }) => {
+          pidiendo = false;
+          if (!vivo || !data || enMarcha.current) return;
+          const n = data as MiNivel;
+          const xp = Number(n.xp);
+          if (!Number.isFinite(xp)) return;
+          const visto = leer(k);
+          const ahora = Date.now();
+          if (!visto) return guardar(k, { xp, t: ahora });
+          if (Math.abs(xp - visto.xp) < 0.05) return;
+          guardar(k, { xp, t: ahora });
+          const nuevas = (n.ultimas ?? []).filter((u) => new Date(u.terminado_en).getTime() > visto.t);
+          const etiqueta = nuevas.length === 1 ? nuevas[0].titulo : nuevas.length > 1 ? `${nuevas.length} partidas terminadas` : n.ultimas?.[0]?.titulo ?? 'Tu nivel';
+          enMarcha.current = true;
+          void animar(visto.xp, xp, etiqueta);
+        },
+        () => {
+          pidiendo = false;
+        }
+      );
+    };
+    comprobar();
+    const cada = window.setInterval(comprobar, 60_000);
+    const alVolver = () => {
+      if (document.visibilityState === 'visible') comprobar();
+    };
+    document.addEventListener('visibilitychange', alVolver);
+    window.addEventListener('focus', alVolver);
     return () => {
       vivo = false;
+      window.clearInterval(cada);
+      document.removeEventListener('visibilitychange', alVolver);
+      window.removeEventListener('focus', alVolver);
     };
   }, [usuarioId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -207,7 +233,9 @@ export default function AnimacionNivel({ usuarioId, anclaRef, onNivel, onBrillo 
     setAbierto(false);
     onBrillo(false);
     await espera(600);
-    onNivel(null);
+    if (usuarioId) fijarNivelEnCache(usuarioId, n);
+    window.dispatchEvent(new Event('drafters:nivel-cambiado'));
+    onNivel(n);
     enMarcha.current = false;
   }
 
