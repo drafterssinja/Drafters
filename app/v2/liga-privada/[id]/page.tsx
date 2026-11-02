@@ -155,7 +155,7 @@ function LigaPrivada() {
         <>
           {/* Cabecera */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#A78BFA' }}>🔒 Liga privada · {ICONO[dep]} {DEPORTE[dep]}</span>
+            <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#F5C94A' }}>🔒 Liga privada · {ICONO[dep]} {DEPORTE[dep]}</span>
             <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 30, color: S.TEXT, lineHeight: 1.05 }}>{info.nombre}</span>
             <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>
               Creada por @{info.creador} · {n} {n === 1 ? 'miembro' : 'miembros'}
@@ -532,7 +532,7 @@ function PublicarSala({ ligaId, deporte, onHecho }: { ligaId: string; deporte: '
     return (
       <>
         {hecho && <span style={{ fontSize: 13, color: VERDE, fontWeight: 700 }}>✓ Jornada creada ({hecho}). Ya pueden hacer su equipo.</span>}
-        <button type="button" onClick={() => void abrir()} style={{ ...S.primaryButton, background: '#A78BFA', marginTop: 0 }}>
+        <button type="button" onClick={() => void abrir()} style={{ ...S.primaryButton, background: 'linear-gradient(180deg,#FFE08A 0%,#E9B532 55%,#C9921E 100%)', marginTop: 0 }}>
           ＋ Crear jornada
         </button>
       </>
@@ -541,7 +541,7 @@ function PublicarSala({ ligaId, deporte, onHecho }: { ligaId: string; deporte: '
   const libres = (lista ?? []).filter((d) => !d.ya);
   const ya = (lista ?? []).filter((d) => d.ya);
   return (
-    <Panel style={{ gap: 10, border: '1.5px solid #A78BFA' }}>
+    <Panel style={{ gap: 10, border: '1.5px solid #F5C94A' }}>
       <span style={{ fontWeight: 800, fontSize: 15, color: S.TEXT }}>¿{deporte === 'futbol' ? 'Qué jornada de LaLiga o Champions' : 'Qué torneo'} se juega?</span>
       <span style={{ fontSize: 12, color: S.MUTED_2, lineHeight: 1.45, marginTop: -6 }}>Juegan todos los de la liga y puntúa para la clasificación. Cada {deporte === 'futbol' ? 'jornada' : 'torneo'} solo se puede crear una vez.</span>
       {lista === null ? (
@@ -555,7 +555,7 @@ function PublicarSala({ ligaId, deporte, onHecho }: { ligaId: string; deporte: '
               key={d.competicion}
               type="button"
               onClick={() => setElegida(d.competicion)}
-              style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 12px', borderRadius: 10, cursor: 'pointer', textAlign: 'left', background: elegida === d.competicion ? 'rgba(167,139,250,0.14)' : 'transparent', border: `1.5px solid ${elegida === d.competicion ? '#A78BFA' : S.BORDER}` }}
+              style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 12px', borderRadius: 10, cursor: 'pointer', textAlign: 'left', background: elegida === d.competicion ? 'rgba(40,70,140,0.42)' : 'transparent', border: `1.5px solid ${elegida === d.competicion ? '#F5C94A' : S.BORDER}` }}
             >
               <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
                 <span style={{ fontWeight: 800, fontSize: 14, color: S.TEXT }}>{jornadaBonita(d.competicion, deporte)}</span>
@@ -564,7 +564,7 @@ function PublicarSala({ ligaId, deporte, onHecho }: { ligaId: string; deporte: '
                   {!d.con_jugadores ? (deporte === 'tenis' ? ' · cuadro pendiente' : ' · jugadores pendientes') : ''}
                 </span>
               </span>
-              <span style={{ width: 18, height: 18, borderRadius: '50%', border: `2px solid ${elegida === d.competicion ? '#A78BFA' : S.BORDER}`, background: elegida === d.competicion ? '#A78BFA' : 'transparent', flexShrink: 0 }} />
+              <span style={{ width: 18, height: 18, borderRadius: '50%', border: `2px solid ${elegida === d.competicion ? '#F5C94A' : S.BORDER}`, background: elegida === d.competicion ? '#F5C94A' : 'transparent', flexShrink: 0 }} />
             </button>
           ))}
         </div>
@@ -575,7 +575,7 @@ function PublicarSala({ ligaId, deporte, onHecho }: { ligaId: string; deporte: '
         <button type="button" onClick={() => setAbierto(false)} style={{ ...S.secondaryLinkButton, flex: 1, marginTop: 0 }}>
           Cancelar
         </button>
-        <button type="button" disabled={!elegida || enviando} onClick={() => void publicar()} style={{ ...S.primaryButton, flex: 1, marginTop: 0, background: '#A78BFA', opacity: !elegida || enviando ? 0.5 : 1 }}>
+        <button type="button" disabled={!elegida || enviando} onClick={() => void publicar()} style={{ ...S.primaryButton, flex: 1, marginTop: 0, background: 'linear-gradient(180deg,#FFE08A 0%,#E9B532 55%,#C9921E 100%)', opacity: !elegida || enviando ? 0.5 : 1 }}>
           {enviando ? 'Creando…' : 'Crear jornada'}
         </button>
       </div>

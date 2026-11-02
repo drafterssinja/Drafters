@@ -79,7 +79,7 @@ export default function JornadaLigaPrivada() {
       {j && (
         <>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <Link href={`/v2/liga-privada/${j.ligaId}`} style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#A78BFA', textDecoration: 'none' }}>
+            <Link href={`/v2/liga-privada/${j.ligaId}`} style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#F5C94A', textDecoration: 'none' }}>
               🔒 {j.nombre}
             </Link>
             <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 26, color: S.TEXT }}>{j.numero ? `Jornada ${j.numero} · ` : ''}{jornadaBonita(j.competicion, j.deporte)}</span>

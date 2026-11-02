@@ -7,7 +7,7 @@ import { useParams, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import { todasLasFilas } from '@/lib/paginar';
 import * as S from '@/lib/mockupStyles';
-import MarcoV2, { EtiquetaBeta, Panel, Titulo, V2_COLOR } from '@/components/v2/MarcoV2';
+import MarcoV2, { EtiquetaBeta, Panel, Titulo, V2_COLOR, V2_ORO } from '@/components/v2/MarcoV2';
 import { useSesionV2 } from '@/components/v2/useSesionV2';
 import SorteoDraft from '@/components/v2/SorteoDraft';
 import CampoAlineacion from '@/components/v2/CampoAlineacion';
@@ -304,7 +304,7 @@ export default function V2Draft() {
                     Hueco libre
                   </div>
                 ))}
-                <label style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 12, border: `1.5px solid ${estoyListo ? S.ACCENT : V2_COLOR}`, background: estoyListo ? 'rgba(61,220,132,0.1)' : 'rgba(167,139,250,0.08)', cursor: 'pointer', marginTop: 6 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 12, border: `1.5px solid ${estoyListo ? S.ACCENT : V2_COLOR}`, background: estoyListo ? 'rgba(61,220,132,0.1)' : 'rgba(40,70,140,0.24)', cursor: 'pointer', marginTop: 6 }}>
                   <input type="checkbox" checked={estoyListo} onChange={(e) => marcarListo(e.target.checked)} style={{ width: 22, height: 22, accentColor: S.ACCENT }} />
                   <span style={{ fontWeight: 800, fontSize: 14.5, color: S.TEXT }}>Estoy listo para el draft</span>
                 </label>
@@ -358,7 +358,7 @@ export default function V2Draft() {
                 <Panel style={{ borderColor: S.ACCENT }}>
                   <span style={{ fontWeight: 800, fontSize: 16, color: S.ACCENT }}>✅ Draft terminado</span>
                   <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>Los equipos ya están hechos. La clasificación se ve en la sala cuando empiece la jornada.</span>
-                  <Link href={`/v2/sala/${id}`} style={{ ...S.primaryButton, background: V2_COLOR, textAlign: 'center', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Link href={`/v2/sala/${id}`} style={{ ...S.primaryButton, background: V2_ORO, textAlign: 'center', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     Volver a la sala
                   </Link>
                 </Panel>

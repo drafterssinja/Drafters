@@ -197,8 +197,8 @@ export default function AdminUsuariosPage() {
                     {new Date(u.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })}
                   </span>
                 </div>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: u.acceso_v2 ? '#A78BFA' : S.MUTED_2, cursor: 'pointer', marginTop: 4 }}>
-                  <input type="checkbox" checked={!!u.acceso_v2} disabled={cambiandoV2 === u.id} onChange={() => cambiarAccesoV2(u)} style={{ width: 18, height: 18, accentColor: '#A78BFA' }} />
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: u.acceso_v2 ? '#F5C94A' : S.MUTED_2, cursor: 'pointer', marginTop: 4 }}>
+                  <input type="checkbox" checked={!!u.acceso_v2} disabled={cambiandoV2 === u.id} onChange={() => cambiarAccesoV2(u)} style={{ width: 18, height: 18, accentColor: '#F5C94A' }} />
                   Acceso a Drafters V2 (amistosos){u.rol === 'admin' ? ' · los admin lo tienen siempre' : ''}
                 </label>
 

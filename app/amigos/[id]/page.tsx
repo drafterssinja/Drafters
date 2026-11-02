@@ -148,7 +148,7 @@ export default function PerfilAmigoPage() {
                   {cifra(datos.resumen.mesas_premiadas, 'Mesas con premio', S.ACCENT)}
                   {cifra(datos.resumen.victorias, 'Victorias (1º)', '#F0B94D')}
                   {cifra(datos.resumen.porras_jugadas, 'Porras jugadas')}
-                  {cifra(datos.resumen.amistosos_jugados, 'Amistosos jugados', '#A78BFA')}
+                  {cifra(datos.resumen.amistosos_jugados, 'Amistosos jugados', '#F5C94A')}
                 </div>
                 {datos.resumen.liga.length > 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>

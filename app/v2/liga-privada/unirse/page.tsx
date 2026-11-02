@@ -52,7 +52,7 @@ function Unirse() {
           onChange={(e) => setQ(e.target.value)}
           placeholder="🔎 Buscar por nombre o creador"
           autoComplete="off"
-          style={{ ...S.input, fontSize: 16, border: `1.5px solid #A78BFA` }}
+          style={{ ...S.input, fontSize: 16, border: `1.5px solid #F5C94A` }}
         />
       </div>
 

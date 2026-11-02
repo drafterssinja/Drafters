@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import { todasLasFilas } from '@/lib/paginar';
 import * as S from '@/lib/mockupStyles';
-import MarcoV2, { EtiquetaBeta, Panel, Titulo, V2_COLOR } from '@/components/v2/MarcoV2';
+import MarcoV2, { EtiquetaBeta, Panel, Titulo, V2_COLOR, V2_ORO } from '@/components/v2/MarcoV2';
 import EditorPremio, { PREMIO_VACIO } from '@/components/v2/EditorPremio';
 import SelectorJugadores from '@/components/v2/SelectorJugadores';
 import { useSesionV2 } from '@/components/v2/useSesionV2';
@@ -328,7 +328,7 @@ function V2CrearInner() {
   }
   const continuar = (n: number) =>
     paso === n ? (
-      <button type="button" onClick={() => avanzar(n)} style={{ ...S.primaryButton, background: V2_COLOR, opacity: okPaso[n] ? 0.5 : 1 }}>
+      <button type="button" onClick={() => avanzar(n)} style={{ ...S.primaryButton, background: V2_ORO, opacity: okPaso[n] ? 0.5 : 1 }}>
         Continuar
       </button>
     ) : null;
@@ -407,7 +407,7 @@ function V2CrearInner() {
                       type="button"
                       disabled={!hay}
                       onClick={() => setLiga(l)}
-                      style={{ flex: 1, textAlign: 'center', padding: '12px 8px', borderRadius: 12, cursor: hay ? 'pointer' : 'default', border: `1.5px solid ${on ? V2_COLOR : S.BORDER}`, background: on ? 'rgba(167,139,250,0.14)' : 'transparent', opacity: hay ? 1 : 0.45, display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'center' }}
+                      style={{ flex: 1, textAlign: 'center', padding: '12px 8px', borderRadius: 12, cursor: hay ? 'pointer' : 'default', border: `1.5px solid ${on ? V2_COLOR : S.BORDER}`, background: on ? 'rgba(40,70,140,0.42)' : 'transparent', opacity: hay ? 1 : 0.45, display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'center' }}
                     >
                       <span style={{ fontWeight: 800, fontSize: 15, color: on ? V2_COLOR : S.TEXT }}>{NOMBRE_COMPETICION[l] ?? l}</span>
                       <span style={{ fontSize: 11, color: S.MUTED_2 }}>{hay ? `Próxima: J${numeroJornada(futbol.filter((c) => ligaDe(c.competicion) === l).sort((x, y) => numeroJornada(x.competicion) - numeroJornada(y.competicion))[0]?.competicion ?? '')}` : 'Sin jornada abierta'}</span>
@@ -469,7 +469,7 @@ function V2CrearInner() {
                       key={String(valor)}
                       type="button"
                       onClick={() => setEquipoFijo(valor)}
-                      style={{ textAlign: 'left', background: equipoFijo === valor ? 'rgba(167,139,250,0.12)' : 'transparent', border: `1px solid ${equipoFijo === valor ? V2_COLOR : S.BORDER}`, borderRadius: 12, padding: '11px 14px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 3 }}
+                      style={{ textAlign: 'left', background: equipoFijo === valor ? 'rgba(40,70,140,0.36)' : 'transparent', border: `1px solid ${equipoFijo === valor ? V2_COLOR : S.BORDER}`, borderRadius: 12, padding: '11px 14px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 3 }}
                     >
                       <span style={{ fontWeight: 800, fontSize: 13.5, color: equipoFijo === valor ? V2_COLOR : S.TEXT }}>{titulo}</span>
                       <span style={{ fontSize: 12, color: S.MUTED_2 }}>{desc}</span>
@@ -517,7 +517,7 @@ function V2CrearInner() {
                   type="button"
                   disabled={!t.ok}
                   onClick={() => setTramo(t.tramo)}
-                  style={{ textAlign: 'left', background: on ? 'rgba(167,139,250,0.12)' : 'transparent', border: `1px solid ${on ? V2_COLOR : S.BORDER}`, borderRadius: 12, padding: '10px 14px', cursor: t.ok ? 'pointer' : 'default', opacity: t.ok ? 1 : 0.45, display: 'flex', flexDirection: 'column', gap: 2 }}
+                  style={{ textAlign: 'left', background: on ? 'rgba(40,70,140,0.36)' : 'transparent', border: `1px solid ${on ? V2_COLOR : S.BORDER}`, borderRadius: 12, padding: '10px 14px', cursor: t.ok ? 'pointer' : 'default', opacity: t.ok ? 1 : 0.45, display: 'flex', flexDirection: 'column', gap: 2 }}
                 >
                   <span style={{ fontWeight: 800, fontSize: 13.5, color: on ? V2_COLOR : S.TEXT }}>{etiquetaTramo(t.tramo, deporte, t.partidos)}</span>
                   <span style={{ fontSize: 11.5, color: S.MUTED_2 }}>{t.ok ? (t.cierre ? `Empieza ${fechaCorta(t.cierre)}` : '') : 'Ya ha empezado'}</span>
@@ -611,7 +611,7 @@ function V2CrearInner() {
               onClick={() => setModalidad(m)}
               style={{
                 textAlign: 'left',
-                background: modalidad === m ? 'rgba(167,139,250,0.12)' : 'transparent',
+                background: modalidad === m ? 'rgba(40,70,140,0.36)' : 'transparent',
                 border: `1px solid ${modalidad === m ? V2_COLOR : S.BORDER}`,
                 borderRadius: 12,
                 padding: '12px 14px',
@@ -646,7 +646,7 @@ function V2CrearInner() {
                 key={o.t}
                 type="button"
                 onClick={() => setPrivada(o.v)}
-                style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, padding: '12px 8px', borderRadius: 12, cursor: 'pointer', background: privada === o.v ? 'rgba(167,139,250,0.14)' : 'transparent', border: `1.5px solid ${privada === o.v ? V2_COLOR : S.BORDER}` }}
+                style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, padding: '12px 8px', borderRadius: 12, cursor: 'pointer', background: privada === o.v ? 'rgba(40,70,140,0.42)' : 'transparent', border: `1.5px solid ${privada === o.v ? V2_COLOR : S.BORDER}` }}
               >
                 <span style={{ fontWeight: 800, fontSize: 15, color: privada === o.v ? V2_COLOR : S.TEXT }}>{o.t}</span>
                 <span style={{ fontSize: 11.5, color: S.MUTED_2 }}>{o.d}</span>
@@ -678,7 +678,7 @@ function V2CrearInner() {
           {/* 16/10 (Iñi): crear la sala (y entrar en ella) cuesta 1 crédito Drafters (SQL 45). */}
           <CosteCredito deporte={deporte} accion="Crear la sala (y entrar en ella)" />
           {error && <p style={S.errorText}>{error}</p>}
-          <button type="button" onClick={crear} disabled={enviando} style={{ ...S.primaryButton, background: V2_COLOR, opacity: enviando ? 0.6 : 1 }}>
+          <button type="button" onClick={crear} disabled={enviando} style={{ ...S.primaryButton, background: V2_ORO, opacity: enviando ? 0.6 : 1 }}>
             {enviando ? 'Creando...' : 'Crear sala · 1 crédito'}
           </button>
         </>

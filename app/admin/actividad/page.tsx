@@ -279,8 +279,8 @@ export default function AdminActividadPage() {
     if (e.tipo === 'clasificacion') return { texto: 'Clasificación', color: '#7AA7FF', fondo: 'rgba(122,167,255,0.14)' };
     if (e.tipo === 'amigos') return { texto: 'Amigos', color: '#7AA7FF', fondo: 'rgba(122,167,255,0.16)' };
     if (e.tipo === 'liga') return { texto: e.detalle?.accion === 'crear_privada' ? 'Crea liga privada' : e.detalle?.accion === 'unirse_privada' ? 'Entra liga privada' : 'Se apunta a la liga', color: '#F0B94D', fondo: 'rgba(240,185,77,0.16)' };
-    if (e.tipo === 'amistoso') return { texto: e.detalle?.accion === 'crear' ? (e.detalle?.privada ? 'Crea sala privada' : 'Crea sala pública') : 'Entra en sala', color: '#A78BFA', fondo: 'rgba(167,139,250,0.16)' };
-    if (e.tipo === 'inscripcion' && e.detalle?.v2) return { texto: 'Inscripción', color: '#A78BFA', fondo: 'rgba(167,139,250,0.16)' };
+    if (e.tipo === 'amistoso') return { texto: e.detalle?.accion === 'crear' ? (e.detalle?.privada ? 'Crea sala privada' : 'Crea sala pública') : 'Entra en sala', color: '#F5C94A', fondo: 'rgba(40,70,140,0.48)' };
+    if (e.tipo === 'inscripcion' && e.detalle?.v2) return { texto: 'Inscripción', color: '#F5C94A', fondo: 'rgba(40,70,140,0.48)' };
     return { texto: 'Inscripción', color: S.ACCENT, fondo: 'rgba(61,220,132,0.12)' };
   }
 

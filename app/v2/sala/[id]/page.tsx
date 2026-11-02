@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import * as S from '@/lib/mockupStyles';
-import MarcoV2, { EtiquetaBeta, Panel, Titulo, V2_COLOR } from '@/components/v2/MarcoV2';
+import MarcoV2, { EtiquetaBeta, Panel, Titulo, V2_COLOR, V2_ORO } from '@/components/v2/MarcoV2';
 import { useSesionV2 } from '@/components/v2/useSesionV2';
 import { IconoCandado } from '@/components/v2/IconosV2';
 import ChatAmistoso from '@/components/v2/ChatAmistoso';
@@ -297,7 +297,7 @@ export default function V2Sala() {
               Código de la sala: <b style={{ color: S.TEXT, letterSpacing: '0.15em' }}>{amistoso!.codigo}</b>
             </span>
           )}
-          <button type="button" onClick={compartir} style={{ ...S.primaryButton, background: V2_COLOR, marginTop: 0 }}>
+          <button type="button" onClick={compartir} style={{ ...S.primaryButton, background: V2_ORO, marginTop: 0 }}>
             {copiado ? '¡Copiado!' : 'Invitar amigos'}
           </button>
           {/* 16/10 (Iñi): invitar directamente a tus amigos de Drafters. */}
@@ -379,7 +379,7 @@ export default function V2Sala() {
                     type="button"
                     onClick={() => void unirseOHacerEquipo()}
                     disabled={amistoso.privada && !contrasena.trim()}
-                    style={{ ...S.primaryButton, background: V2_COLOR, fontSize: 16, minHeight: 52, opacity: amistoso.privada && !contrasena.trim() ? 0.5 : 1 }}
+                    style={{ ...S.primaryButton, background: V2_ORO, fontSize: 16, minHeight: 52, opacity: amistoso.privada && !contrasena.trim() ? 0.5 : 1 }}
                   >
                     {amistoso.privada ? (contrasena.trim() ? '🔓 Entrar con esta contraseña · 1 crédito' : 'Escribe la contraseña para entrar') : 'Unirme a la sala · 1 crédito'}
                   </button>
@@ -497,7 +497,7 @@ export default function V2Sala() {
                                       ? `Esperando a que se llene la sala (${n}/${amistoso.num_jugadores})`
                                       : `Listos ${d?.listos.length ?? 0} de ${n}`}
                               </span>
-                              <Link href={`/v2/sala/${id}/draft?c=${encodeURIComponent(j.competicion)}`} style={{ ...S.primaryButton, background: V2_COLOR, textAlign: 'center', textDecoration: 'none', marginTop: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <Link href={`/v2/sala/${id}/draft?c=${encodeURIComponent(j.competicion)}`} style={{ ...S.primaryButton, background: V2_ORO, textAlign: 'center', textDecoration: 'none', marginTop: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                 {d?.iniciado_en && !d.terminado_en ? 'Entrar al draft' : d?.terminado_en ? 'Ver el draft' : 'Ir a la sala del draft'}
                               </Link>
                             </>
@@ -553,7 +553,7 @@ export default function V2Sala() {
                       <>
                         <EditorPremio premio={editandoPremio} onChange={setEditandoPremio} participantes={amistoso.num_jugadores} />
                         <div style={{ display: 'flex', gap: 8 }}>
-                          <button type="button" onClick={guardarPremio} style={{ ...S.primaryButton, background: V2_COLOR, marginTop: 0 }}>
+                          <button type="button" onClick={guardarPremio} style={{ ...S.primaryButton, background: V2_ORO, marginTop: 0 }}>
                             Guardar
                           </button>
                           <button type="button" onClick={() => setEditandoPremio(null)} style={S.secondaryLinkButton}>

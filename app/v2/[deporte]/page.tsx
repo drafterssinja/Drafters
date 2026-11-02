@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import * as S from '@/lib/mockupStyles';
-import MarcoV2, { EtiquetaBeta, Titulo, V2_COLOR } from '@/components/v2/MarcoV2';
+import MarcoV2, { EtiquetaBeta, Titulo, V2_COLOR, V2_ORO } from '@/components/v2/MarcoV2';
 import { useSesionV2 } from '@/components/v2/useSesionV2';
 import { BolaTenis, DEPORTE_NOMBRE, esDeporteV2, type DeporteV2 } from '@/components/v2/IconosV2';
 import MesasLiga from '@/components/v2/MesasLiga';
@@ -96,7 +96,7 @@ export default function V2Deporte() {
                     borderRadius: 9,
                     border: 'none',
                     cursor: 'pointer',
-                    background: activo ? color : 'transparent',
+                    background: activo ? (m.id === 'privadas' ? V2_ORO : color) : 'transparent',
                     color: activo ? '#0B0F0E' : S.MUTED,
                     fontFamily: "'Barlow Condensed', sans-serif",
                     fontWeight: 800,
@@ -121,7 +121,7 @@ export default function V2Deporte() {
                   { href: `/v2/crear?deporte=${deporte}`, icono: '🏟️', t: 'Crear sala', d: 'Privada o pública, para una jornada o un fin de semana' },
                   { href: `/v2/liga-privada/crear?deporte=${deporte}`, icono: '🏆', t: 'Crear liga privada', d: 'Con tus amigos, todas las jornadas' },
                 ].map((b) => (
-                  <Link key={b.t} href={b.href} style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '14px 12px', borderRadius: 14, textDecoration: 'none', background: 'rgba(167,139,250,0.10)', border: `1.5px solid ${V2_COLOR}` }}>
+                  <Link key={b.t} href={b.href} style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '14px 12px', borderRadius: 14, textDecoration: 'none', background: 'rgba(40,70,140,0.3)', border: `1.5px solid ${V2_COLOR}` }}>
                     <span style={{ fontSize: 22 }}>{b.icono}</span>
                     <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 18, color: S.TEXT, lineHeight: 1.1 }}>＋ {b.t}</span>
                     <span style={{ fontSize: 11.5, color: S.MUTED_2, lineHeight: 1.35 }}>{b.d}</span>
