@@ -1600,7 +1600,7 @@ export default function PorraClasificacionPage() {
               alguna parte que sea accesible pero que tampoco moleste,
               vamos a meter los ítems de publicidad"). */}
           <div style={{ width: '100%' }}>
-            <AnuncioVideoInline ubicacion="clasificacion" />
+            <AnuncioVideoInline ubicacion="clasificacion" deporte="golf" />
           </div>
         </div>
       </div>

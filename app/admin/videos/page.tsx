@@ -42,6 +42,8 @@ type VideoRow = {
   mostrar_en_recarga: boolean;
   mostrar_en_clasificacion: boolean;
   mostrar_en_mesas: boolean;
+  // 02/11 (Iñi): deportes en los que sale (recarga de créditos y clasificaciones). SQL 85.
+  deportes: string[] | null;
   fecha_inicio: string;
   fecha_fin: string | null;
   creado_at: string;
@@ -105,6 +107,7 @@ export default function AdminPublicidadPage() {
   const [mostrarEnRecarga, setMostrarEnRecarga] = useState(true);
   const [mostrarEnClasificacion, setMostrarEnClasificacion] = useState(true);
   const [mostrarEnMesas, setMostrarEnMesas] = useState(true);
+  const [deportes, setDeportes] = useState<string[]>(['futbol', 'golf', 'tenis']);
   const [fechaInicio, setFechaInicio] = useState('');
   const [fechaFin, setFechaFin] = useState('');
   const [enlaceDestino, setEnlaceDestino] = useState('');
@@ -247,6 +250,7 @@ export default function AdminPublicidadPage() {
       mostrar_en_recarga: mostrarEnRecarga,
       mostrar_en_clasificacion: mostrarEnClasificacion,
       mostrar_en_mesas: mostrarEnMesas,
+      deportes,
       fecha_inicio: fechaInicio ? new Date(fechaInicio).toISOString() : undefined,
       fecha_fin: fechaFin ? new Date(fechaFin).toISOString() : null,
       enlace_destino: normalizarEnlace(enlaceDestino),
@@ -272,7 +276,7 @@ export default function AdminPublicidadPage() {
     await cargarVideosYEstadisticas();
   }
 
-  async function actualizarVideo(id: string, cambios: Partial<Pick<VideoRow, 'activo' | 'mostrar_en_recarga' | 'mostrar_en_clasificacion' | 'mostrar_en_mesas' | 'prioridad' | 'enlace_destino'>>) {
+  async function actualizarVideo(id: string, cambios: Partial<Pick<VideoRow, 'activo' | 'mostrar_en_recarga' | 'mostrar_en_clasificacion' | 'mostrar_en_mesas' | 'prioridad' | 'enlace_destino' | 'deportes'>>) {
     // Optimista: se actualiza en pantalla al momento y, si el guardado
     // falla, se recarga la lista de verdad para no dejar la pantalla
     // mostrando algo que no se llegó a guardar.
@@ -389,10 +393,15 @@ export default function AdminPublicidadPage() {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={S.label}>Deportes en los que sale (recarga de créditos y clasificaciones)</span>
+              <SelectorDeportes valor={deportes} onChange={setDeportes} />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <span style={S.label}>Dónde se muestra</span>
               <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, color: S.TEXT, cursor: 'pointer', padding: '4px 0' }}>
                 <input type="checkbox" checked={mostrarEnRecarga} onChange={(e) => setMostrarEnRecarga(e.target.checked)} style={{ width: 18, height: 18, flexShrink: 0, accentColor: S.ACCENT, cursor: 'pointer' }} />
-                Recarga de saldo (ver vídeo a cambio de 20 €)
+                Recarga de créditos (ver el vídeo para recargar)
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, color: S.TEXT, cursor: 'pointer', padding: '4px 0' }}>
                 <input type="checkbox" checked={mostrarEnClasificacion} onChange={(e) => setMostrarEnClasificacion(e.target.checked)} style={{ width: 18, height: 18, flexShrink: 0, accentColor: S.ACCENT, cursor: 'pointer' }} />
@@ -491,7 +500,7 @@ export default function AdminPublicidadPage() {
                         onChange={(e) => actualizarVideo(v.id, { mostrar_en_recarga: e.target.checked })}
                         style={{ width: 16, height: 16, flexShrink: 0, accentColor: S.ACCENT, cursor: 'pointer' }}
                       />
-                      Recarga de saldo
+                      Recarga de créditos
                     </label>
                     <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, color: S.TEXT, cursor: 'pointer', padding: '3px 0' }}>
                       <input
@@ -511,6 +520,8 @@ export default function AdminPublicidadPage() {
                       />
                       Mesas Drafters
                     </label>
+                    <span style={{ fontSize: 11.5, color: S.MUTED_2, marginTop: 4 }}>Deportes</span>
+                    <SelectorDeportes valor={v.deportes ?? ['futbol', 'golf', 'tenis']} onChange={(d) => actualizarVideo(v.id, { deportes: d })} />
                   </div>
 
                   <div style={{ display: 'flex', gap: 10 }}>
@@ -548,5 +559,36 @@ export default function AdminPublicidadPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+// 02/11 (Iñi): un vídeo de golf no se le pone a quien solo juega al fútbol.
+// Se elige en qué deportes sale (puede ser más de uno). Al menos uno.
+const DEPORTES_VIDEO: { id: string; nombre: string }[] = [
+  { id: 'futbol', nombre: '⚽ Fútbol' },
+  { id: 'golf', nombre: '⛳ Golf' },
+  { id: 'tenis', nombre: '🎾 Tenis' },
+];
+function SelectorDeportes({ valor, onChange }: { valor: string[]; onChange: (d: string[]) => void }) {
+  return (
+    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+      {DEPORTES_VIDEO.map((d) => {
+        const on = valor.includes(d.id);
+        return (
+          <button
+            key={d.id}
+            type="button"
+            onClick={() => {
+              const nuevo = on ? valor.filter((x) => x !== d.id) : [...valor, d.id];
+              if (nuevo.length > 0) onChange(nuevo);
+            }}
+            style={{ width: 'auto', padding: '7px 12px', borderRadius: 999, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', border: `1px solid ${on ? S.ACCENT : S.CARD_BORDER}`, background: on ? 'rgba(61,220,132,0.14)' : 'transparent', color: on ? S.ACCENT : S.MUTED_2 }}
+          >
+            {on ? '✓ ' : ''}
+            {d.nombre}
+          </button>
+        );
+      })}
+    </div>
   );
 }

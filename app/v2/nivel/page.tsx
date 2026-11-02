@@ -34,7 +34,11 @@ export default function MiNivel() {
   const [abierta, setAbierta] = useState<number | null>(null);
   useEffect(() => {
     if (estado !== 'ok') return;
-    void supabase.rpc('mi_nivel').then(({ data }) => setN(data as Nivel));
+    const cargar = () => void supabase.rpc('mi_nivel').then(({ data }) => setN(data as Nivel));
+    cargar();
+    // 02/11: si la animación de nivel salta estando aquí, se recarga al acabar.
+    window.addEventListener('drafters:nivel-cambiado', cargar);
+    return () => window.removeEventListener('drafters:nivel-cambiado', cargar);
   }, [estado]);
 
   return (
@@ -83,9 +87,8 @@ export default function MiNivel() {
             {[
               ['📈', 'Empiezas con 100 puntos (nivel 1). Cada 100 puntos, un nivel: con 3.821 eres nivel 38 y subes al 39 al llegar a 3.900. Si pierdes puntos, puedes bajar (nunca por debajo del nivel 1).'],
               ['💰', 'En cada partida terminada (sala, duelo de la liga o jornada de una liga privada) cada jugador pone 35 puntos en un bote, y el bote se reparte por puestos: el primero se lleva la mayor parte y el último, nada.'],
-              ['⬆️', 'Ajuste por nivel: si tus rivales tienen más nivel que tú, sumas algo más; si tienen menos, algo menos.'],
-              ['⚖️', 'Cuanto más alto es tu nivel, más se reduce lo que ganas (no lo que pierdes), así que arriba cuesta más subir.'],
-              ['🎁', 'Y por jugar, un pequeño valor añadido: más en los primeros niveles y casi nada en los altos.'],
+              ['⚖️', 'También cuenta el nivel de tus rivales: según lo difícil que sea la partida, lo que ganas o pierdes cambia un poco.'],
+              ['🎁', 'Y por jugar, siempre sumas un pequeño extra.'],
               ['🙅', 'Si no haces equipo, esa partida no cuenta para tu nivel.'],
               ['🎖️', 'Cada nivel tiene su insignia: galones, barras, estrellas y laurel. Cada 10 niveles cambia el marco: Bronce, Plata, Oro, Platino, Esmeralda, Zafiro, Amatista, Rubí, Ónix y Diamante.'],
             ].map(([i, t]) => (
@@ -151,16 +154,12 @@ function PartidaAbierta({ u }: { u: Ultima }) {
           {(
             [
               ['Puntuación previa', f2(d.previa), true],
-              ['Contribución fija de cada jugador', f2(d.contribucion), true],
-              ['Diferencia de nivel con los rivales', f2(d.diferencia), false],
-              ['Coeficiente de diferencia de nivel', f2(d.coef_diferencia), false],
-              ['Ajuste por diferencia de nivel', f2(d.ajuste), true],
               ['Puntos según el puesto', (d.premios ?? []).slice(0, -1).map((p, k) => `${k + 1}: ${f2(p)}`).join(' | '), false],
-              ['Suma por tu puesto', f2(d.premio), true],
-              ['Suma íntegra', f2(d.integra), true],
-              ['Coeficiente de reducción', Number(d.coef_reduccion).toFixed(3).replace('.', ','), false],
-              ['Suma ajustada', f2(d.ajustada), true],
-              ['Valor añadido según tu nivel', f2(d.anadido), false],
+              ['Lo que te llevas por tu puesto', f2(d.premio), false],
+              ['Lo que pone cada uno', f2(d.contribucion), false],
+              ['Resultado de la partida', conSigno(Number(d.premio) + Number(d.contribucion)), true],
+              ['Ajuste por la dificultad de la partida', conSigno(Number(d.ajustada) - (Number(d.premio) + Number(d.contribucion))), false],
+              ['Extra por jugar', conSigno(Number(d.anadido)), false],
               ['Nueva puntuación', f2(d.nueva), true],
             ] as [string, string, boolean][]
           ).map(([t, v, fuerte]) => (
