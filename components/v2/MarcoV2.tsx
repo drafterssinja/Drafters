@@ -11,7 +11,10 @@ import type { Perfil } from '@/lib/supabaseClient';
 import * as S from '@/lib/mockupStyles';
 import Cargando from '@/components/Cargando';
 
-export const V2_COLOR = '#A78BFA';
+// 02/11 (Iñi, opción N): salas y ligas privadas en oro (botones en oro metálico)
+// y tarjetas en azul noche; el verde queda para la Liga Drafters.
+export const V2_COLOR = '#F5C94A';
+export const V2_ORO = 'linear-gradient(180deg,#FFE08A 0%,#E9B532 55%,#C9921E 100%)';
 
 // Envoltorio común de las pantallas de Drafters V2 (cabecera + aviso de beta).
 export default function MarcoV2({ perfil, estado, volverA, deporte = 'futbol', children }: { perfil: Perfil | null; estado: 'cargando' | 'ok' | 'sin_acceso'; volverA?: string; deporte?: DeporteV2; children: ReactNode }) {

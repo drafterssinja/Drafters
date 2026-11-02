@@ -154,11 +154,11 @@ export default function EditorPremio({ premio, onChange, participantes }: { prem
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: 12.5, fontWeight: 700, color: S.TEXT }}>{manual ? 'Reparto a mano' : 'Reparto a partes iguales'}</span>
                 {manual ? (
-                  <button type="button" onClick={() => { setRepartoManual(false); equitativo(ganan, pagan, gp.aportacion); }} style={{ background: 'none', border: 'none', color: '#A78BFA', fontWeight: 700, fontSize: 12, cursor: 'pointer', padding: 0 }}>
+                  <button type="button" onClick={() => { setRepartoManual(false); equitativo(ganan, pagan, gp.aportacion); }} style={{ background: 'none', border: 'none', color: '#F5C94A', fontWeight: 700, fontSize: 12, cursor: 'pointer', padding: 0 }}>
                     Volver a partes iguales
                   </button>
                 ) : (
-                  <button type="button" onClick={() => setRepartoManual(true)} style={{ background: 'none', border: 'none', color: '#A78BFA', fontWeight: 700, fontSize: 12, cursor: 'pointer', padding: 0 }}>
+                  <button type="button" onClick={() => setRepartoManual(true)} style={{ background: 'none', border: 'none', color: '#F5C94A', fontWeight: 700, fontSize: 12, cursor: 'pointer', padding: 0 }}>
                     ✏️ Cambiar el reparto
                   </button>
                 )}

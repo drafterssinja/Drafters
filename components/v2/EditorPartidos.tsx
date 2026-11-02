@@ -4,7 +4,7 @@ import Cargando from '@/components/Cargando';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import * as S from '@/lib/mockupStyles';
-import { V2_COLOR } from '@/components/v2/MarcoV2';
+import { V2_COLOR, V2_ORO } from '@/components/v2/MarcoV2';
 import { fechaCorta, mensajeError } from '@/lib/v2';
 
 // ============================================================================
@@ -109,7 +109,7 @@ export default function EditorPartidos({ amistosoId, competicion, actuales, onGu
       )}
       {error && <p style={S.errorText}>{error}</p>}
       <div style={{ display: 'flex', gap: 8 }}>
-        <button type="button" onClick={guardar} disabled={guardando || !partidos?.length} style={{ ...S.primaryButton, background: V2_COLOR, marginTop: 0, opacity: guardando ? 0.6 : 1 }}>
+        <button type="button" onClick={guardar} disabled={guardando || !partidos?.length} style={{ ...S.primaryButton, background: V2_ORO, marginTop: 0, opacity: guardando ? 0.6 : 1 }}>
           {guardando ? 'Guardando...' : 'Guardar partidos'}
         </button>
         <button type="button" onClick={() => setAbierto(false)} style={S.secondaryLinkButton}>

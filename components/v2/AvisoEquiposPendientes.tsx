@@ -134,7 +134,7 @@ export default function AvisoEquiposPendientes({ usuarioId }: { usuarioId?: stri
           const h = (new Date(p.cierre).getTime() - Date.now()) / 3600e3;
           const detalle = p.rival ? `vs ${p.rival}` : competicionCorta(p.competicion, p.deporte);
           const lineaJornada = p.tipo === 'sala' ? `Sala · ${detalle}` : `Jornada ${p.numero} · ${detalle}`;
-          const colorCaja = p.tipo === 'privada' ? '167,139,250' : p.tipo === 'sala' ? '240,185,77' : '61,220,132';
+          const colorCaja = p.tipo === 'drafters' ? '61,220,132' : '245,201,74';
           return (
             <Link
               key={`${p.tipo}-${p.id}-${p.competicion}`}

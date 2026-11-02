@@ -7,12 +7,12 @@ import { IconoCandado } from '@/components/v2/IconosV2';
 // Caja para escribir la contraseña de una sala privada (16/10, Iñi: "tiene que
 // estar para tontos"): bien grande, explicada, con quién te la puede dar y un
 // botón para ver lo que escribes.
-const V2 = '#A78BFA';
+const V2 = '#F5C94A';
 
 export default function CajaContrasena({ valor, onChange, onEnter, creador, que = 'sala' }: { valor: string; onChange: (v: string) => void; onEnter: () => void; creador: string | null; que?: 'sala' | 'liga' }) {
   const [ver, setVer] = useState(false);
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, background: 'rgba(167,139,250,0.10)', border: `2px solid ${V2}`, borderRadius: 14, padding: 14 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, background: 'rgba(40,70,140,0.3)', border: `2px solid ${V2}`, borderRadius: 14, padding: 14 }}>
       <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 800, fontSize: 16, color: S.TEXT }}>
         <IconoCandado size={18} /> {que === 'liga' ? 'Esta liga es privada' : 'Esta sala es privada'}
       </span>

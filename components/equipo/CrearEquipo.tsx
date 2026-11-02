@@ -1071,7 +1071,7 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
                   <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
                     <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_2 }}>{libre ? 'Amistoso libre' : 'Presupuesto disponible'}</span>
                     {libre ? (
-                      <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 20, lineHeight: 1.1, color: '#A78BFA' }}>Sin presupuesto</span>
+                      <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 20, lineHeight: 1.1, color: '#F5C94A' }}>Sin presupuesto</span>
                     ) : (
                       <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 27, lineHeight: 1, color }}>{formatEuros(restante)}</span>
                     )}

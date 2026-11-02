@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import * as S from '@/lib/mockupStyles';
-import { V2_COLOR } from '@/components/v2/MarcoV2';
+import { V2_COLOR, V2_ORO } from '@/components/v2/MarcoV2';
 
 // ============================================================================
 // SORTEO DEL ORDEN DEL DRAFT — animación tipo tragaperras (15/10)
@@ -82,8 +82,8 @@ export default function SorteoDraft({ orden: ordenProp, nombres: nombresProp, mi
                 padding: '12px 16px',
                 borderRadius: 14,
                 border: `1.5px solid ${visible ? (yo ? S.ACCENT : V2_COLOR) : actual ? '#F0B94D' : S.CARD_BORDER}`,
-                background: visible ? (yo ? 'rgba(61,220,132,0.12)' : 'rgba(167,139,250,0.1)') : 'rgba(255,255,255,0.03)',
-                boxShadow: actual ? '0 0 22px rgba(240,185,77,0.35)' : visible ? `0 0 14px ${yo ? 'rgba(61,220,132,0.25)' : 'rgba(167,139,250,0.2)'}` : 'none',
+                background: visible ? (yo ? 'rgba(61,220,132,0.12)' : 'rgba(40,70,140,0.3)') : 'rgba(255,255,255,0.03)',
+                boxShadow: actual ? '0 0 22px rgba(240,185,77,0.35)' : visible ? `0 0 14px ${yo ? 'rgba(61,220,132,0.25)' : 'rgba(245,201,74,0.2)'}` : 'none',
                 overflow: 'hidden',
               }}
             >
@@ -115,7 +115,7 @@ export default function SorteoDraft({ orden: ordenProp, nombres: nombresProp, mi
           {terminado && (
             <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center' }}>
               <span style={{ fontSize: 13, color: S.MUTED, textAlign: 'center', lineHeight: 1.5 }}>En cada ronda el orden rota: el primero pasa al último y los demás suben un puesto.</span>
-              <button type="button" onClick={onTerminar} style={{ ...S.primaryButton, background: V2_COLOR }}>
+              <button type="button" onClick={onTerminar} style={{ ...S.primaryButton, background: V2_ORO }}>
                 ¡Que empiece el draft!
               </button>
             </motion.div>

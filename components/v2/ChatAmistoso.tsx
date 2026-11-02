@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import * as S from '@/lib/mockupStyles';
 import EditorPremio, { PREMIO_VACIO } from '@/components/v2/EditorPremio';
-import { V2_COLOR } from '@/components/v2/MarcoV2';
+import { V2_COLOR, V2_ORO } from '@/components/v2/MarcoV2';
 import TiraPuestos from '@/components/v2/TiraPuestos';
 import { mensajeError, premioValido, repartoEquitativoGP, resumenPremio, type Mensaje, type Premio } from '@/lib/v2';
 
@@ -95,7 +95,7 @@ export default function ChatAmistoso({
             const si = vs.filter((v) => v.acepta).map((v) => nombres[v.usuario_id] ?? '?');
             const miVoto = vs.find((v) => v.usuario_id === miId);
             return (
-              <div key={m.id} style={{ border: `1px solid ${V2_COLOR}`, borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 6, background: 'rgba(167,139,250,0.06)' }}>
+              <div key={m.id} style={{ border: `1px solid ${V2_COLOR}`, borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 6, background: 'rgba(40,70,140,0.18)' }}>
                 <span style={{ fontSize: 12, fontWeight: 800, color: V2_COLOR }}>🤝 @{autor} propone jugarse algo</span>
                 {m.datos && m.datos.tipo !== 'nada' ? <TiraPuestos premio={m.datos} participantes={participantes} /> : <span style={{ fontSize: 13.5, color: S.TEXT, fontWeight: 600 }}>{resumenPremio(m.datos)}</span>}
                 <span style={{ fontSize: 11.5, color: S.MUTED_2 }}>
@@ -109,7 +109,7 @@ export default function ChatAmistoso({
                 </span>
                 {m.estado === 'pendiente' && !(miVoto && miVoto.acepta) && (
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <button type="button" onClick={() => votar(m.id, true)} style={{ ...S.primaryButton, background: V2_COLOR, marginTop: 0, minHeight: 36, padding: 8, fontSize: 14 }}>
+                    <button type="button" onClick={() => votar(m.id, true)} style={{ ...S.primaryButton, background: V2_ORO, marginTop: 0, minHeight: 36, padding: 8, fontSize: 14 }}>
                       Acepto
                     </button>
                     <button type="button" onClick={() => votar(m.id, false)} style={{ ...S.secondaryLinkButton, minHeight: 36, padding: 8 }}>
@@ -141,7 +141,7 @@ export default function ChatAmistoso({
           <span style={{ fontSize: 12, color: S.MUTED_2, marginTop: -4 }}>Elige si es dinero, una cena u otra cosa, y quiénes ganan y quiénes pierden. Todos los de la sala tienen que aceptarlo.</span>
           <EditorPremio premio={propuesta} onChange={setPropuesta} participantes={participantes} />
           <div style={{ display: 'flex', gap: 8 }}>
-            <button type="button" onClick={proponer} style={{ ...S.primaryButton, background: V2_COLOR, marginTop: 0 }}>
+            <button type="button" onClick={proponer} style={{ ...S.primaryButton, background: V2_ORO, marginTop: 0 }}>
               Proponer
             </button>
             <button type="button" onClick={() => setProponiendo(false)} style={S.secondaryLinkButton}>

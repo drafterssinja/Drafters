@@ -126,7 +126,7 @@ export default function SelectorDraft({
           {j.equipo_real && <span style={{ fontSize: 10, color: S.MUTED_3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.equipo_real}</span>}
         </span>
         {de ? (
-          <span style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 700, color: '#A78BFA' }}>@{nombres[de] ?? '?'}</span>
+          <span style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 700, color: '#F5C94A' }}>@{nombres[de] ?? '?'}</span>
         ) : bloqueo ? (
           <span style={{ flexShrink: 0, maxWidth: 82, fontSize: 9.5, fontWeight: 700, color: '#F0B94D', textAlign: 'right', lineHeight: 1.2 }}>{bloqueo}</span>
         ) : esMiTurno ? (

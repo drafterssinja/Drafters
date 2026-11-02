@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import * as S from '@/lib/mockupStyles';
-import { V2_COLOR } from '@/components/v2/MarcoV2';
+import { V2_COLOR, V2_ORO } from '@/components/v2/MarcoV2';
 import EditorPremio, { PREMIO_VACIO } from '@/components/v2/EditorPremio';
 import SelectorJugadores from '@/components/v2/SelectorJugadores';
 import { MODALIDAD_DESC, MODALIDAD_LABEL, efectoCambioModalidad, mensajeError, premioValido, type Amistoso, type Modalidad, type Premio } from '@/lib/v2';
@@ -75,7 +75,7 @@ export default function EditorSala({ amistoso, dentro, empezada, conEquipo = 0, 
   const efecto = efectoCambioModalidad(amistoso.modalidad, modalidad, amistoso.deporte);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, border: `1px solid ${V2_COLOR}`, borderRadius: 14, padding: 14, background: 'rgba(167,139,250,0.05)' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, border: `1px solid ${V2_COLOR}`, borderRadius: 14, padding: 14, background: 'rgba(40,70,140,0.15)' }}>
       <span style={{ fontWeight: 800, fontSize: 15, color: V2_COLOR }}>✏️ Editar la sala</span>
 
       {titulo('Nombre')}
@@ -136,7 +136,7 @@ export default function EditorSala({ amistoso, dentro, empezada, conEquipo = 0, 
 
       {error && <p style={S.errorText}>{error}</p>}
       <div style={{ display: 'flex', gap: 8 }}>
-        <button type="button" onClick={guardar} disabled={guardando} style={{ ...S.primaryButton, background: V2_COLOR, marginTop: 0, opacity: guardando ? 0.6 : 1 }}>
+        <button type="button" onClick={guardar} disabled={guardando} style={{ ...S.primaryButton, background: V2_ORO, marginTop: 0, opacity: guardando ? 0.6 : 1 }}>
           {guardando ? 'Guardando...' : 'Guardar cambios'}
         </button>
         <button type="button" onClick={onCancelar} style={S.secondaryLinkButton}>

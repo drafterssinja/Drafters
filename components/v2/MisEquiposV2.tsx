@@ -184,9 +184,9 @@ export default function MisEquiposV2({ deporte, miId, solo }: { deporte: Deporte
         if (it.tipo === 'lp') {
           const f = it.lp;
           return (
-            <div key={it.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, background: S.PANEL, border: '1px solid rgba(167,139,250,0.45)', borderRadius: 12, padding: '12px 14px' }}>
+            <div key={it.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, background: S.PANEL, border: '1px solid rgba(245,201,74,0.45)', borderRadius: 12, padding: '12px 14px' }}>
               <Link href={`/v2/liga-privada/${f.liga_id}`} style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1, textDecoration: 'none' }}>
-                <span style={{ fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#A78BFA' }}>🔒 Liga privada</span>
+                <span style={{ fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#F5C94A' }}>🔒 Liga privada</span>
                 <span style={{ fontSize: 13.5, fontWeight: 800, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.liga_nombre}</span>
                 <span style={{ fontSize: 12, color: S.MUTED_2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   Jornada {f.numero} · {etiquetaComp(deporte, f.competicion)}
@@ -221,7 +221,7 @@ export default function MisEquiposV2({ deporte, miId, solo }: { deporte: Deporte
               <Link href={`/v2/sala/${a.id}`} style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, textDecoration: 'none' }}>
                 <span style={{ fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#F0B94D', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Amistoso · {comps}</span>
                 <span style={{ fontSize: 13, fontWeight: 600, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {a.nombre} · <span style={{ color: '#A78BFA' }}>{MODALIDAD_LABEL[a.modalidad]}</span>
+                  {a.nombre} · <span style={{ color: '#F5C94A' }}>{MODALIDAD_LABEL[a.modalidad]}</span>
                 </span>
                 {a.tramos?.[0] && <EtiquetaTramo tramo={a.tramos[0]} deporte={a.deporte} compacta />}
               </Link>

@@ -16,7 +16,8 @@ import { MODALIDAD_LABEL, cadaXSegundos, mensajeError, type AvisoModalidad } fro
 
 type Nombres = Record<string, string>;
 // (el mismo morado de V2; aquí sin importar de MarcoV2, que es quien pinta este aviso)
-const V2_COLOR = '#A78BFA';
+const V2_COLOR = '#F5C94A';
+const V2_ORO = 'linear-gradient(180deg,#FFE08A 0%,#E9B532 55%,#C9921E 100%)';
 
 export default function AvisosV2() {
   const router = useRouter();
@@ -99,7 +100,7 @@ export default function AvisosV2() {
         fontWeight: 800,
         cursor: 'pointer',
         border: principal ? 'none' : `1px solid ${S.BORDER}`,
-        background: principal ? V2_COLOR : 'transparent',
+        background: principal ? V2_ORO : 'transparent',
         color: principal ? '#120B24' : S.TEXT,
         opacity: enviando ? 0.6 : 1,
       }}
