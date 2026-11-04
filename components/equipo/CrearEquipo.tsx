@@ -712,15 +712,52 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
   const lineaRefs = useRef<Record<LineaFutbol, HTMLDivElement | null>>({ POR: null, DEF: null, MED: null, DEL: null });
   const lineasCompletadasRef = useRef<Record<LineaFutbol, boolean>>({ POR: false, DEF: false, MED: false, DEL: false });
 
+  // 03/11 (Iñi, opción A): barra fija POR · DEF · MED · DEL encima de la lista
+  // de jugadores. Al tocar una línea se salta a ella (dentro de la columna de
+  // jugadores) y se recoge el "Mostrar más" de las demás, para no tener que
+  // volver a pasar por 300 centrocampistas.
+  const listaJugadoresRef = useRef<HTMLDivElement | null>(null);
+  const barraLineasRef = useRef<HTMLDivElement | null>(null);
+  const [lineaVisible, setLineaVisible] = useState<LineaFutbol>('POR');
+  function irALinea(linea: LineaFutbol) {
+    setLineasAbiertas((prev) => ({ ...prev, [linea]: true }));
+    setLineasExpandidas((prev) => {
+      const n = { ...prev };
+      (Object.keys(n) as LineaFutbol[]).forEach((l) => {
+        if (l !== linea) n[l] = false;
+      });
+      return n;
+    });
+    setLineaVisible(linea);
+    // Tras recoger las demás líneas, se coloca la elegida justo debajo de la barra.
+    window.setTimeout(() => {
+      const caja = listaJugadoresRef.current;
+      const el = lineaRefs.current[linea];
+      if (!caja || !el) return;
+      const alto = barraLineasRef.current?.offsetHeight ?? 0;
+      caja.scrollTo({ top: Math.max(0, el.offsetTop - alto - 6), behavior: 'smooth' });
+    }, 40);
+  }
+  function alMoverLista() {
+    const caja = listaJugadoresRef.current;
+    if (!caja) return;
+    const alto = (barraLineasRef.current?.offsetHeight ?? 0) + 12;
+    let actual: LineaFutbol = 'POR';
+    for (const l of LINEAS_ORDEN_VISUAL) {
+      const el = lineaRefs.current[l];
+      if (el && el.offsetTop - alto <= caja.scrollTop) actual = l;
+    }
+    if (actual !== lineaVisible) setLineaVisible(actual);
+  }
+
   useEffect(() => {
     if (!isFutbol) return;
     LINEAS_ORDEN_VISUAL.forEach((linea, i) => {
       const completaAhora = huecos[linea] > 0 && seleccionadosPorLinea[linea] >= huecos[linea];
       const completaAntes = lineasCompletadasRef.current[linea];
       if (completaAhora && !completaAntes) {
-        const siguiente = LINEAS_ORDEN_VISUAL.slice(i + 1).find((l) => huecos[l] > 0);
-        const el = siguiente ? lineaRefs.current[siguiente] : null;
-        el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        const siguiente = LINEAS_ORDEN_VISUAL.slice(i + 1).find((l) => huecos[l] > 0 && seleccionadosPorLinea[l] < huecos[l]);
+        if (siguiente) irALinea(siguiente);
       }
       lineasCompletadasRef.current[linea] = completaAhora;
     });
@@ -1154,21 +1191,44 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
                 </div>
               )}
 
-              <div style={{ position: 'relative' }}>
+              {/* 03/11 (Iñi): la X de borrar se veía descolocada (abajo a la derecha).
+                  Ahora la caja es un flex: lupa · texto · X redonda, todo centrado. */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  background: S.PANEL,
+                  border: `1px solid ${busqueda ? '#3DDC84' : S.BORDER}`,
+                  borderRadius: 10,
+                  padding: '0 6px 0 12px',
+                  minHeight: 44,
+                }}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={S.MUTED_3} strokeWidth="2.4" strokeLinecap="round" style={{ flexShrink: 0 }} aria-hidden="true">
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="M20 20l-3.5-3.5" />
+                </svg>
                 <input
                   type="text"
                   value={busqueda}
                   onChange={(e) => setBusqueda(e.target.value)}
                   placeholder="Buscar jugador por nombre..."
+                  autoComplete="off"
+                  autoCorrect="off"
+                  spellCheck={false}
                   style={{
-                    width: '100%',
+                    flex: 1,
+                    minWidth: 0,
                     fontFamily: "'Manrope', sans-serif",
-                    fontSize: 13,
+                    fontSize: 16,
+                    lineHeight: '20px',
                     color: S.TEXT,
-                    background: S.PANEL,
-                    border: `1px solid ${busqueda ? '#3DDC84' : S.BORDER}`,
-                    borderRadius: 10,
-                    padding: '10px 34px 10px 12px',
+                    background: 'transparent',
+                    border: 'none',
+                    outline: 'none',
+                    padding: '11px 0',
+                    margin: 0,
                   }}
                 />
                 {busqueda && (
@@ -1176,9 +1236,11 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
                     type="button"
                     onClick={() => setBusqueda('')}
                     aria-label="Borrar búsqueda"
-                    style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', width: 24, height: 24, border: 'none', background: 'transparent', color: S.MUTED_3, fontSize: 16, cursor: 'pointer' }}
+                    style={{ flexShrink: 0, width: 28, height: 28, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, cursor: 'pointer' }}
                   >
-                    ×
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={S.TEXT} strokeWidth="3" strokeLinecap="round" aria-hidden="true">
+                      <path d="M6 6l12 12M18 6L6 18" />
+                    </svg>
                   </button>
                 )}
               </div>
@@ -1244,6 +1306,8 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
 
                   <div
                     className="partidos-scroll"
+                    ref={listaJugadoresRef}
+                    onScroll={alMoverLista}
                     style={{
                       flex: 1,
                       minWidth: 0,
@@ -1258,6 +1322,36 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
                       scrollbarColor: '#2A3733 transparent',
                     } as React.CSSProperties}
                   >
+                    <div ref={barraLineasRef} style={{ position: 'sticky', top: 0, zIndex: 3, display: 'flex', gap: 4, padding: '0 0 6px', background: S.BG }}>
+                      {LINEAS_ORDEN_VISUAL.map((l) => {
+                        const completa = huecos[l] > 0 && seleccionadosPorLinea[l] >= huecos[l];
+                        const activa = lineaVisible === l;
+                        const color = activa ? '#04140B' : completa ? '#3DDC84' : '#F0B94D';
+                        return (
+                          <button
+                            key={l}
+                            type="button"
+                            onClick={() => irALinea(l)}
+                            style={{
+                              flex: 1,
+                              minWidth: 0,
+                              padding: '7px 0',
+                              borderRadius: 9,
+                              cursor: 'pointer',
+                              fontFamily: "'Manrope', sans-serif",
+                              fontSize: 11,
+                              fontWeight: 800,
+                              whiteSpace: 'nowrap',
+                              color,
+                              background: activa ? '#3DDC84' : completa ? 'rgba(61,220,132,0.08)' : 'rgba(240,185,77,0.08)',
+                              border: `1px solid ${activa ? '#3DDC84' : completa ? 'rgba(61,220,132,0.5)' : 'rgba(240,185,77,0.6)'}`,
+                            }}
+                          >
+                            {l} {seleccionadosPorLinea[l]}/{huecos[l]}{completa ? ' ✓' : ''}
+                          </button>
+                        );
+                      })}
+                    </div>
                     {LINEAS_ORDEN.slice()
                       .reverse()
                       .map((linea) => {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 import * as S from '@/lib/mockupStyles';
@@ -89,8 +89,14 @@ export default function LigaDuelos({ deporte = 'futbol' }: { deporte?: 'futbol' 
   const [abierta, setAbierta] = useState<string | null>(null);
   const [divs, setDivs] = useState<DivMiembros[] | null>(null);
   // 01/11 (Iñi): registro de actividad al ver la clasificación de la Liga Drafters.
+  // 03/11 (Iñi): solo una vez al entrar. Antes, como la clasificación se
+  // recarga sola cada minuto, con la pantalla abierta se apuntaba una "vista"
+  // cada ~11 minutos (los 10 de margen + el minuto de recarga).
+  const vistaApuntada = useRef<string | null>(null);
   useEffect(() => {
-    if (tabla) registrarVistaClasificacion(`liga_drafters:${deporte}`, { modo: 'liga_drafters', nombre: 'Liga Drafters', deporte });
+    if (!tabla || vistaApuntada.current === deporte) return;
+    vistaApuntada.current = deporte;
+    registrarVistaClasificacion(`liga_drafters:${deporte}`, { modo: 'liga_drafters', nombre: 'Liga Drafters', deporte });
   }, [tabla, deporte]);
   // 31/10 (Iñi): el nivel delante de cada nombre; al pulsarlo, su ficha y el cara a cara.
   const niveles = useNiveles((tabla ?? []).map((f) => f.usuario_id));
