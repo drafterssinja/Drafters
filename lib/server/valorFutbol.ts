@@ -201,6 +201,30 @@ function equipoNuestro(filas: Fila[], apifEquipoId: number, apifNombre: string |
   return max >= 5 ? mejor : null;
 }
 
+// 04/11: dentro de un MISMO equipo, comparación de nombres más flexible que
+// mismoNombre (que exige que todas las palabras de API-Football estén en el
+// nuestro): API-Football pone a veces el segundo apellido ("Pau Cubarsí
+// Paredes") o solo el apellido. Vale si:
+//  · mismoNombre en cualquiera de los dos sentidos, o
+//  · coincide el apellido principal (la última palabra de nuestro nombre, o la
+//    primera si el nuestro es de una sola palabra) y, si los dos tienen nombre
+//    de pila, la inicial.
+// Solo se usa dentro del equipo y exigiendo que el candidato sea único.
+function palabras(s: string): string[] {
+  return normalizarNombre(s).replace(/[.-]/g, ' ').split(' ').filter((t) => t.length > 1);
+}
+export function nombreParecido(apif: string, nuestro: string): boolean {
+  if (mismoNombre(apif, nuestro) || mismoNombre(nuestro, apif)) return true;
+  const a = palabras(apif);
+  const n = palabras(nuestro);
+  if (a.length === 0 || n.length === 0) return false;
+  const apellido = n[n.length - 1];
+  if (!a.includes(apellido)) return false;
+  if (n.length === 1) return true;
+  const inicialApif = normalizarNombre(apif).trim()[0];
+  return inicialApif === n[0][0] || a.includes(n[0]);
+}
+
 function nombreBonito(p: { name?: string | null; firstname?: string | null; lastname?: string | null }): string {
   const name = (p.name ?? '').trim();
   if (name && !/^\p{L}\.\s/u.test(name)) return name;
@@ -233,6 +257,7 @@ async function procesarPlantilla(admin: Admin, t: Tarea) {
     let f: Fila | null =
       unico(libres(filas.filter((x) => x.apif_id === p.id))) ??
       unico(libres(filas.filter((x) => !x.apif_id && x.equipo_real === equipo && mismoNombre(p.name, x.nombre)))) ??
+      unico(libres(filas.filter((x) => !x.apif_id && x.equipo_real === equipo && nombreParecido(p.name, x.nombre)))) ??
       // Fichas que se cargaron sin equipo: se les pone el suyo (no es un traspaso).
       unico(libres(filas.filter((x) => !x.apif_id && !x.equipo_real && mismoNombre(p.name, x.nombre))));
     // 04/11 (Iñi: "pone a Josep Martínez traspasado al Real Madrid y es del
@@ -369,7 +394,8 @@ async function procesarStats(admin: Admin, t: Tarea) {
     if (equipo && !filas.some((f) => f.apif_id === r.player.id)) {
       const completo = `${r.player.firstname ?? ''} ${r.player.lastname ?? ''}`.trim();
       const cand = filas.filter((f) => !usados.has(f.id) && f.equipo_real === equipo && (mismoNombre(r.player.name, f.nombre) || (completo && mismoNombre(f.nombre, completo))));
-      const f = unico(cand);
+      const cand2 = cand.length > 0 ? cand : filas.filter((f) => !usados.has(f.id) && f.equipo_real === equipo && (nombreParecido(r.player.name, f.nombre) || (completo && nombreParecido(completo, f.nombre))));
+      const f = unico(cand2);
       if (f) {
         usados.add(f.id);
         enlaces.push({ id: f.id, liga: f.liga, clave: f.clave, nombre: f.nombre, apif_id: r.player.id, apif_equipo_id: t.apif_equipo_id });
