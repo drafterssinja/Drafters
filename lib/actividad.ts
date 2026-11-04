@@ -15,6 +15,8 @@ const MINUTOS = 10;
 export type ModoClasificacion = 'sala' | 'liga_privada' | 'liga_drafters' | 'duelo' | 'partida' | 'mesa' | 'porra';
 
 export function registrarVistaClasificacion(clave: string, detalle: { modo: ModoClasificacion; nombre: string; deporte?: string; competicion?: string }): void {
+  // 03/11: con la app en segundo plano no se apunta nada (no la está mirando).
+  if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
   try {
     const k = `drafters_vista_clasif:${clave}`;
     const antes = Number(sessionStorage.getItem(k) ?? 0);

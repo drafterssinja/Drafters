@@ -39,6 +39,8 @@
 // fecha límite = inicio del primer partido; (d) anota la jornada en
 // `futbol_jornadas_auto`.
 
+import { LIGAS_VALOR_FUTBOL, claveJugadorFutbol } from '@/lib/valorFutbolClave';
+import { sembrarFutbolValor } from './valorFutbol';
 import { randomUUID } from 'crypto';
 import type { crearClienteAdmin } from './supabaseAdmin';
 import { BASE_ESPN, jsonEspn, yyyymmdd, mapaEquiposNuestros, claveNuestraDe } from './sincronizarFutbolEspn';
@@ -257,8 +259,64 @@ export type FichaJugador = {
   updated_at: string | null;
 };
 
-/** Plantilla de la liga: la ficha MÁS RECIENTE de cada jugador (nombre + equipo). */
+/** Plantilla de la liga. 03/11 (Iñi): en LaLiga y Champions sale de
+ * futbol_valor (valor Drafters que se ajusta cada semana y plantillas que se
+ * repasan cada noche con API-Football, ver lib/server/valorFutbol.ts). La
+ * primera vez, futbol_valor se rellena con lo que hay en `jugadores`. Si la
+ * tabla no existe todavía (SQL 92 sin ejecutar), se usa `jugadores` como antes. */
 export async function plantillaDeLaLiga(admin: Admin, prefijo: string): Promise<FichaJugador[]> {
+  const base = await plantillaDesdeJugadores(admin, prefijo);
+  if (!LIGAS_VALOR_FUTBOL.some((l) => l.prefijo === prefijo)) return base;
+  try {
+    await sembrarFutbolValor(admin, prefijo, base);
+    const filas: FilaValorFutbol[] = [];
+    for (let desde = 0; ; desde += 1000) {
+      const { data, error } = await admin
+        .from('futbol_valor')
+        .select('id,clave,nombre,equipo_real,posicion,valor,actualizado_en')
+        .eq('liga', prefijo)
+        .eq('activo', true)
+        .order('id')
+        .range(desde, desde + 999);
+      if (error) throw new Error(error.message);
+      const lote = (data as FilaValorFutbol[]) ?? [];
+      filas.push(...lote);
+      if (lote.length < 1000) break;
+    }
+    if (filas.length === 0) return base;
+    // Ficha de `jugadores` de cada uno (por su id de futbol_valor o por nombre|equipo)
+    // para conservar probabilidad de titular, lesión y metadatos.
+    const porValorId = new Map<string, FichaJugador>();
+    const porClave = new Map<string, FichaJugador>();
+    for (const f of base) {
+      const vid = (f.metadata as Record<string, unknown> | null)?.futbol_valor_id;
+      if (typeof vid === 'string') porValorId.set(vid, f);
+      porClave.set(claveJugadorFutbol(f.nombre, f.equipo_real), f);
+    }
+    return filas.map((v) => {
+      const f = porValorId.get(v.id) ?? porClave.get(v.clave) ?? null;
+      return {
+        id: f?.id ?? v.id,
+        nombre: v.nombre,
+        equipo_real: v.equipo_real,
+        posicion: v.posicion ?? f?.posicion ?? null,
+        valor_mercado: v.valor !== null ? Number(v.valor) : null,
+        probabilidad_titular: f?.probabilidad_titular ?? null,
+        lesionado: f?.lesionado ?? false,
+        metadata: { ...((f?.metadata as Record<string, unknown>) ?? {}), futbol_valor_id: v.id },
+        competicion: f?.competicion ?? prefijo,
+        updated_at: v.actualizado_en,
+      } as FichaJugador;
+    });
+  } catch {
+    return base;
+  }
+}
+
+type FilaValorFutbol = { id: string; clave: string; nombre: string; equipo_real: string | null; posicion: string | null; valor: number | null; actualizado_en: string };
+
+/** La ficha MÁS RECIENTE de cada jugador (nombre + equipo) en `jugadores`. */
+async function plantillaDesdeJugadores(admin: Admin, prefijo: string): Promise<FichaJugador[]> {
   const filas: FichaJugador[] = [];
   for (let desde = 0; ; desde += 1000) {
     const { data, error } = await admin

@@ -50,6 +50,9 @@ async function pedir(ruta: string): Promise<any> {
   return json;
 }
 
+/** Consulta genérica a API-Football (lanza error si falla o devuelve errores). */
+export const pedirApif = pedir;
+
 /** Temporada de API-Football (año en que empieza): 2026-27 → 2026. */
 export function temporadaApif(d: Date): number {
   return d.getUTCMonth() >= 6 ? d.getUTCFullYear() : d.getUTCFullYear() - 1;

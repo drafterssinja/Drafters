@@ -70,6 +70,8 @@ async function repararUna(admin: Admin, competicion: string, prefijo: string, fo
         const { data: tocados, error } = await admin.from('jugadores').update({ equipo_real: base }).eq('deporte', 'futbol').ilike('competicion', `${prefijo}%`).eq('equipo_real', nf).select('id');
         if (error) throw new Error(`jugadores: ${error.message}`);
         reasignados += tocados?.length ?? 0;
+        // 03/11: también en la plantilla automática (futbol_valor), si existe.
+        await admin.from('futbol_valor').update({ equipo_real: base }).eq('liga', prefijo).eq('equipo_real', nf);
         avisos.push(`"${nf}" no tenía equivalente del primer equipo: ${tocados?.length ?? 0} jugadores pasan a llamarse "${base}"`);
       }
     }
