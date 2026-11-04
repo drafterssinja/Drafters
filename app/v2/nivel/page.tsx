@@ -18,7 +18,7 @@ import { registrarVistaClasificacion } from '@/lib/actividad';
 // botón "Ver la partida" (a la clasificación con detalle) y, debajo y plegado,
 // el cálculo de los puntos de nivel.
 
-type Detalle = { previa: number; contribucion: number; diferencia: number; coef_diferencia: number; ajuste: number; premio: number; premios?: number[]; integra: number; coef_reduccion: number; ajustada: number; anadido: number; nueva: number };
+type Detalle = { previa: number; contribucion: number; diferencia: number; coef_diferencia: number; ajuste: number; premio: number; premios?: number[]; integra: number; coef_reduccion: number; ajustada: number; anadido: number; nueva: number; extra_ganador?: number };
 type Ultima = { ref_tipo: string; ref_id: string; ref_sub: string; titulo: string; deporte: string; posicion: number | null; participantes: number; puntos: number | null; xp: number; terminado_en: string; link: string | null; detalle: Detalle | null };
 type FilaPartida = { usuario_id: string; nombre: string; posicion: number | null; puntos: number | null; xp: number; jugo: boolean; soy_yo: boolean };
 type Nivel = { nivel: number; xp: number; xp_en_nivel: number; xp_siguiente: number; para_subir: number; jugadas: number; ganadas: number; nombre: string; ultimas: Ultima[] };
@@ -157,8 +157,10 @@ function PartidaAbierta({ u }: { u: Ultima }) {
               ['Puntos según el puesto', (d.premios ?? []).slice(0, -1).map((p, k) => `${k + 1}: ${f2(p)}`).join(' | '), false],
               ['Lo que te llevas por tu puesto', f2(d.premio), false],
               ['Lo que pone cada uno', f2(d.contribucion), false],
-              ['Resultado de la partida', conSigno(Number(d.premio) + Number(d.contribucion)), true],
-              ['Ajuste por la dificultad de la partida', conSigno(Number(d.ajustada) - (Number(d.premio) + Number(d.contribucion))), false],
+              // 03/11 (Iñi): en salas de más de 5, premio extra para el 1º (SQL 93).
+              ...(Number(d.extra_ganador ?? 0) > 0 ? ([['Premio extra por ganar una sala grande', conSigno(Number(d.extra_ganador)), false]] as [string, string, boolean][]) : []),
+              ['Resultado de la partida', conSigno(Number(d.premio) + Number(d.contribucion) + Number(d.extra_ganador ?? 0)), true],
+              ['Ajuste por la dificultad de la partida', conSigno(Number(d.ajustada) - (Number(d.premio) + Number(d.contribucion) + Number(d.extra_ganador ?? 0))), false],
               ['Extra por jugar', conSigno(Number(d.anadido)), false],
               ['Nueva puntuación', f2(d.nueva), true],
             ] as [string, string, boolean][]

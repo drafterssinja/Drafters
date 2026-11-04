@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { crearClienteAdmin } from '@/lib/server/supabaseAdmin';
 import { enviarNotificacionesPush } from '@/lib/server/notificacionesPush';
 import { crearTorneosTenisAutomaticos, sincronizarTenis } from '@/lib/server/tenisEspn';
+import { tareasValorFutbol } from '@/lib/server/valorFutbol';
 
 // Notificaciones push (18/10). La llama pg_cron de Supabase cada minuto con la
 // cabecera "x-cron-secret" (= CRON_SECRET), igual que las sincronizaciones.
@@ -35,8 +36,15 @@ async function ejecutar(req: NextRequest) {
     } catch (e) {
       tenis = { error: (e as Error).message };
     }
+    // 03/11 (Iñi): plantillas de fútbol cada noche y valor Drafters cada lunes (API-Football).
+    let valorFutbol: unknown = null;
+    try {
+      valorFutbol = await tareasValorFutbol(admin);
+    } catch (e) {
+      valorFutbol = { error: (e as Error).message };
+    }
     const r = await enviarNotificacionesPush(admin);
-    return NextResponse.json({ ...r, tenis });
+    return NextResponse.json({ ...r, tenis, valorFutbol });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }

@@ -96,6 +96,8 @@ const TARJETAS_GESTION: { href: string; titulo: string; subtitulo: string }[] = 
   { href: '/admin/tenis', titulo: 'Tenis', subtitulo: 'Crear los torneos de la semana (ESPN), actualizarlos y probar fuentes' },
   // 01/11: probar API-Football (estadísticas por jugador: entradas, intercepciones, duelos...).
   { href: '/admin/api-football', titulo: 'Probar API-Football', subtitulo: 'Ver qué estadísticas por jugador trae un partido real antes de pagar' },
+  // 03/11: valor Drafters de los jugadores de fútbol y plantillas automáticas (API-Football).
+  { href: '/admin/valores-futbol', titulo: 'Valor de los jugadores (fútbol)', subtitulo: 'Plantillas que se repasan cada noche y valor que se ajusta cada lunes' },
   // Ruta renombrada de /admin/publicidad a /admin/videos (28/09, aviso de
   // Iñi) — la palabra "publicidad" en la URL hacía que algunos
   // bloqueadores de anuncios del navegador (net::ERR_BLOCKED_BY_CLIENT)

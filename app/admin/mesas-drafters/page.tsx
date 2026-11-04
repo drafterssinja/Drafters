@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase, Perfil } from '@/lib/supabaseClient';
 import DraftersHeader from '@/components/DraftersHeader';
+import { LIGAS_VALOR_FUTBOL, claveJugadorFutbol } from '@/lib/valorFutbolClave';
 import * as S from '@/lib/mockupStyles';
 import { parseListaJugadores, JugadorParseado } from '@/lib/parsePlayerList';
 import { precioPorRanking, precioFutbolPorPosicion } from '@/lib/pricing';
@@ -595,6 +596,21 @@ export default function AdminMesasDraftersPage() {
       }
     }
 
+    // 03/11 (Iñi): estos pasan a ser los valores de partida del valor Drafters
+    // (LaLiga y Champions): a partir de hoy se ajustan solos cada lunes.
+    let avisoValorDrafters = '';
+    const prefijoValor = LIGA_FUTBOL_PREFIJO[ligaValorMercado];
+    if (LIGAS_VALOR_FUTBOL.some((l) => l.prefijo === prefijoValor)) {
+      const filasValor = [
+        ...actualizados.map((f) => ({ clave: claveJugadorFutbol(f.nombreDb, f.equipoDb), nombre: f.nombreDb, equipo_real: f.equipoDb, posicion: f.posicion, valor: f.valor })),
+        ...nuevos.map((f) => ({ clave: claveJugadorFutbol(f.jugador, f.equipo), nombre: f.jugador, equipo_real: f.equipo, posicion: f.posicion, valor: f.valor })),
+      ];
+      const { data: rv, error: errValor } = await supabase.rpc('futbol_valor_cargar', { p_liga: prefijoValor, p_filas: filasValor });
+      avisoValorDrafters = errValor
+        ? ' (Ojo: no se ha podido guardar como valor de partida del valor Drafters; ¿falta el SQL 92?)'
+        : ` Valor Drafters desde hoy: ${(rv as { actualizados: number; nuevos: number; bajas: number }).actualizados + (rv as { nuevos: number }).nuevos} jugadores${(rv as { bajas: number }).bajas ? `, ${(rv as { bajas: number }).bajas} fuera de la plantilla` : ''}.`;
+    }
+
     const totalGuardados = actualizados.length + nuevos.length;
     await supabase
       .from('cargas_valor_mercado_futbol')
@@ -602,7 +618,7 @@ export default function AdminMesasDraftersPage() {
 
     setGuardandoValorMercado(false);
     setResultadoValorMercado(
-      `Valores de ${LIGA_FUTBOL_LABEL[ligaValorMercado]} guardados: ${actualizados.length} actualizados, ${nuevos.length} jugadores nuevos.`
+      `Valores de ${LIGA_FUTBOL_LABEL[ligaValorMercado]} guardados: ${actualizados.length} actualizados, ${nuevos.length} jugadores nuevos.${avisoValorDrafters}`
     );
     setTextoValorMercado('');
     setPreviewValorMercado(null);
