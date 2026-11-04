@@ -144,9 +144,7 @@ export default function ListaAmistosos({ deporte }: { deporte: DeporteV2 }) {
         <button type="button" style={S.pill(vista === 'publicas')} onClick={() => setPestana('publicas')}>
           Abiertos ({publicas.length})
         </button>
-        <button type="button" style={S.pill(vista === 'mias')} onClick={() => setPestana('mias')}>
-          Mis amistosos ({mias.length})
-        </button>
+        {/* 04/11 (Iñi): fuera "Mis amistosos" (los ves en tu nivel y en Mis equipos). */}
         <button type="button" style={{ ...S.pill(vista === 'en_juego'), width: 'auto' }} onClick={() => setPestana('en_juego')}>
           ● En juego ({enJuego.length})
         </button>

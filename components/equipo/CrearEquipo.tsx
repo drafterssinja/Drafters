@@ -10,6 +10,7 @@ import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
 import { EQUIPO_PRESUPUESTO, TAMANO_EQUIPO_GOLF_TENIS, FORMACIONES_FUTBOL, colorPresupuesto } from '@/lib/draftConfig';
 import { formatEuros, inicialesJugador, huecosPorLinea, lineaDePosicion, type LineaFutbol } from '@/lib/salaShared';
+import EstadisticasJugador, { BotonEstadisticas } from '@/components/equipo/EstadisticasJugador';
 import { tablaPuntuacionPorDeporte } from '@/lib/puntuaciones';
 import { escudoLaLiga, claveEquipoFutbol } from '@/lib/futbolLaLiga';
 import { esEquipoFilial, nombrePrimerEquipo } from '@/lib/aliasEquipos';
@@ -678,6 +679,10 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
   const porClub = new Map<string, number>();
   seleccionados.forEach((j) => j.equipo_real && porClub.set(j.equipo_real, (porClub.get(j.equipo_real) ?? 0) + 1));
   const clubLleno = (j: JugadorRow) => limite2 && !selected.includes(j.id) && !!j.equipo_real && (porClub.get(j.equipo_real) ?? 0) >= 2;
+  // 04/11 (Iñi): estadísticas del jugador (botón a la derecha del nombre).
+  const [statsDe, setStatsDe] = useState<JugadorRow | null>(null);
+  const puedeElegirJugador = (j: JugadorRow) =>
+    isFutbol ? !(seleccionadosPorLinea[lineaDePosicion(j.posicion)] >= huecos[lineaDePosicion(j.posicion)] || clubLleno(j)) : selected.length < TAMANO_EQUIPO_GOLF_TENIS;
   const clubPasado = limite2 ? Array.from(porClub.entries()).find(([, n]) => n > 2)?.[0] ?? null : null;
   const color = colorPresupuesto(restante);
   const spentPct = Math.max(0, Math.min(100, (gasto / EQUIPO_PRESUPUESTO) * 100));
@@ -1060,6 +1065,17 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
 
   return (
     <main style={S.mainReset}>
+      {statsDe && (
+        <EstadisticasJugador
+          jugador={statsDe}
+          deporte={sala.deporte}
+          seleccionado={selected.includes(statsDe.id)}
+          puedeElegir={puedeElegirJugador(statsDe)}
+          sinPrecio={libre}
+          onElegir={() => toggleJugador(statsDe)}
+          onCerrar={() => setStatsDe(null)}
+        />
+      )}
       <div style={S.pageFrame}>
         {v2 ? <CabeceraV2 perfil={perfil} deporte={sala.deporte as DeporteV2} /> : <DraftersHeader sinVolver saldoLabel={saldoLabel} accountInitials={initials} />}
 
@@ -1383,7 +1399,7 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
                             {abierta && (
                               <>
                                 {filas.map((j) => (
-                                  <PlayerRow key={j.id} jugador={j} selected={selected.includes(j.id)} disabled={!selected.includes(j.id) && (seleccionadosPorLinea[linea] >= huecos[linea] || clubLleno(j))} onToggle={() => toggleJugador(j)} sinPrecio={libre} nota={clubLleno(j) && seleccionadosPorLinea[linea] < huecos[linea] ? 'ya tienes 2' : undefined} />
+                                  <PlayerRow key={j.id} jugador={j} selected={selected.includes(j.id)} disabled={!selected.includes(j.id) && (seleccionadosPorLinea[linea] >= huecos[linea] || clubLleno(j))} onToggle={() => toggleJugador(j)} sinPrecio={libre} nota={clubLleno(j) && seleccionadosPorLinea[linea] < huecos[linea] ? 'ya tienes 2' : undefined} onStats={() => setStatsDe(j)} />
                                 ))}
                                 {restantes > 0 && (
                                   <button
@@ -1408,7 +1424,7 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
                 <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                   <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 7 }}>
                     {(busquedaActiva || mostrarTodosFlat ? jugadoresGolfTenisFiltrados : jugadoresGolfTenisFiltrados.slice(0, MOSTRAR_TOP_N_FLAT)).map((j) => (
-                      <PlayerRow key={j.id} jugador={j} selected={selected.includes(j.id)} disabled={!selected.includes(j.id) && selected.length >= TAMANO_EQUIPO_GOLF_TENIS} onToggle={() => toggleJugador(j)} sinPrecio={libre} />
+                      <PlayerRow key={j.id} jugador={j} selected={selected.includes(j.id)} disabled={!selected.includes(j.id) && selected.length >= TAMANO_EQUIPO_GOLF_TENIS} onToggle={() => toggleJugador(j)} sinPrecio={libre} onStats={() => setStatsDe(j)} />
                     ))}
                     {!busquedaActiva && !mostrarTodosFlat && jugadoresGolfTenisFiltrados.length > MOSTRAR_TOP_N_FLAT && (
                       <button type="button" onClick={() => setMostrarTodosFlat(true)} style={mostrarMasButtonStyle}>
@@ -1686,7 +1702,7 @@ function PuntuacionInfoScreen({ deporte, competicion, onEntendido, onVolver }: {
   );
 }
 
-function PlayerRow({ jugador, selected, disabled, onToggle, sinPrecio = false, nota }: { jugador: JugadorRow; selected: boolean; disabled: boolean; onToggle: () => void; sinPrecio?: boolean; nota?: string }) {
+function PlayerRow({ jugador, selected, disabled, onToggle, sinPrecio = false, nota, onStats }: { jugador: JugadorRow; selected: boolean; disabled: boolean; onToggle: () => void; sinPrecio?: boolean; nota?: string; onStats?: () => void }) {
   return (
     <a
       href="#"
@@ -1719,6 +1735,8 @@ function PlayerRow({ jugador, selected, disabled, onToggle, sinPrecio = false, n
           </span>
         )}
       </div>
+      {/* 04/11 (Iñi): estadísticas, a la derecha del nombre (se puede pulsar aunque el jugador no se pueda elegir). */}
+      {onStats && <BotonEstadisticas onClick={onStats} />}
       {!sinPrecio && <span style={{ flexShrink: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 11.5, color: '#F0B94D' }}>{formatEuros(jugador.precio)}</span>}
       <span
         style={{
