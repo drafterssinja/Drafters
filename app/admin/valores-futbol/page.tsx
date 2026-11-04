@@ -178,6 +178,18 @@ export default function AdminValoresFutbol() {
             Último repaso de plantillas: {fechaHora((est('plantilla_lote')?.valor?.fin as string) ?? null)} · Última actualización de valores: {fechaHora((est('stats_lote')?.valor?.fin as string) ?? null)}
             {pendientes > 0 ? ` · ${pendientes} consultas en cola` : ''}
           </span>
+          {/* 04/11: para ver que el cálculo automático de niveles funciona. */}
+          {(() => {
+            const xp = est('cron:xp_procesar');
+            if (!xp) return null;
+            const v = (xp.valor ?? {}) as { error?: string | null; resultado?: number | null };
+            return (
+              <span style={{ fontSize: 12, color: v.error ? '#FF6B6B' : S.MUTED_2 }}>
+                Último cálculo automático de niveles: {fechaHora(xp.actualizado_en)}
+                {v.error ? ` · ERROR: ${v.error}` : ` · ${v.resultado ?? 0} partidas calculadas`}
+              </span>
+            );
+          })()}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button type="button" disabled={ocupado} onClick={() => void hacerAhora('plantillas')} style={boton}>
               Repasar plantillas ahora
