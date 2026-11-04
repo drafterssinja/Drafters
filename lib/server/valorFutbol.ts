@@ -115,7 +115,11 @@ export async function sembrarFutbolValor(
   if ((count ?? 0) > 0 || plantilla.length === 0) return 0;
   const vistas = new Set<string>();
   const filas = [];
+  // 04/11: fichas repetidas sin equipo (p. ej. "Kylian Mbappé" con y sin equipo):
+  // si el mismo nombre ya tiene una ficha con equipo, la que no tiene se descarta.
+  const conEquipo = new Set(plantilla.filter((j) => j.equipo_real).map((j) => normalizarNombre(j.nombre)));
   for (const j of plantilla) {
+    if (!j.equipo_real && conEquipo.has(normalizarNombre(j.nombre))) continue;
     const clave = claveJugadorFutbol(j.nombre, j.equipo_real);
     if (vistas.has(clave)) continue;
     vistas.add(clave);
@@ -176,15 +180,19 @@ function equipoNuestro(filas: Fila[], apifEquipoId: number, apifNombre: string |
   for (const f of filas) if (f.apif_equipo_id === apifEquipoId && f.equipo_real) porId.set(f.equipo_real, (porId.get(f.equipo_real) ?? 0) + 1);
   if (porId.size > 0) return Array.from(porId.entries()).sort((a, b) => b[1] - a[1])[0][0];
   const candidatos = Array.from(new Set(filas.map((f) => f.equipo_real).filter((e): e is string => !!e)));
-  // 2) Por el nombre del equipo.
+  const comunes = (c: string) => {
+    const nuestros = filas.filter((f) => f.equipo_real === c);
+    return nombresJugadores.filter((nj) => nuestros.some((f) => mismoNombre(nj, f.nombre))).length;
+  };
+  // 2) Por el nombre del equipo, pero solo si además comparten jugadores (al
+  //    menos 3), para no casar dos equipos distintos por un nombre parecido.
   const porNombre = apifNombre ? emparejarEquipo(apifNombre, candidatos) : null;
-  if (porNombre) return porNombre;
+  if (porNombre && comunes(porNombre) >= 3) return porNombre;
   // 3) Por los jugadores: el equipo nuestro con más nombres en común (al menos 5).
   let mejor: string | null = null;
   let max = 0;
   for (const c of candidatos) {
-    const nuestros = filas.filter((f) => f.equipo_real === c);
-    const n = nombresJugadores.filter((nj) => nuestros.some((f) => mismoNombre(nj, f.nombre))).length;
+    const n = comunes(c);
     if (n > max) {
       max = n;
       mejor = c;
@@ -225,9 +233,13 @@ async function procesarPlantilla(admin: Admin, t: Tarea) {
     let f: Fila | null =
       unico(libres(filas.filter((x) => x.apif_id === p.id))) ??
       unico(libres(filas.filter((x) => !x.apif_id && x.equipo_real === equipo && mismoNombre(p.name, x.nombre)))) ??
-      // Cambio de equipo dentro de la misma liga (solo a partir de la segunda noche
-      // y si el nombre es inequívoco en toda la liga).
-      (primeraVez ? null : unico(libres(filas.filter((x) => !x.apif_id && x.equipo_real !== equipo && mismoNombre(p.name, x.nombre)))));
+      // Fichas que se cargaron sin equipo: se les pone el suyo (no es un traspaso).
+      unico(libres(filas.filter((x) => !x.apif_id && !x.equipo_real && mismoNombre(p.name, x.nombre))));
+    // 04/11 (Iñi: "pone a Josep Martínez traspasado al Real Madrid y es del
+    // Inter"): ya NO se casan por nombre jugadores de otro equipo (con nombres
+    // como "J. Martínez" se confundía). Un cambio de equipo solo se da cuando el
+    // MISMO jugador de API-Football (mismo id, ya casado antes con su equipo)
+    // aparece en la plantilla de otro equipo.
     if (!f) {
       if (primeraVez) ignorados.add(p.id);
       else if (!ignorados.has(p.id)) altas.push(p);
@@ -237,7 +249,8 @@ async function procesarPlantilla(admin: Admin, t: Tarea) {
     const upd: Record<string, unknown> = { id: f.id, liga: f.liga, clave: f.clave, nombre: f.nombre, apif_id: p.id, apif_equipo_id: t.apif_equipo_id, visto_en: ahora, ausente_desde: null, actualizado_en: ahora };
     if (f.equipo_real !== equipo) {
       upd.equipo_real = equipo;
-      await evento(admin, t.liga, 'traspaso', f.nombre, `${f.equipo_real ?? '—'} → ${equipo}`);
+      if (f.equipo_real) await evento(admin, t.liga, 'traspaso', f.nombre, `${f.equipo_real} → ${equipo}`);
+      else await evento(admin, t.liga, 'aviso', f.nombre, `No tenía equipo cargado: se le pone ${equipo}.`);
     }
     if (!f.activo) {
       upd.activo = true;
