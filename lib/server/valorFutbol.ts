@@ -137,10 +137,26 @@ export async function encolarValorFutbol(admin: Admin, tipo: 'plantilla' | 'stat
   const temporada = temporadaApif(new Date());
   const lote = `${tipo}:${new Date().toISOString()}`;
   const filas: Omit<Tarea, 'id'>[] = [];
+  // 04/11 (bug de Iñi: "No sé qué equipo nuestro es Real Madrid…"): la tabla
+  // futbol_valor estaba vacía porque solo se rellenaba al crear una jornada.
+  // Ahora se rellena aquí también, antes de repasar nada.
+  const { plantillaDeLaLiga } = await import('./crearFutbolAutomatico');
   for (const liga of LIGAS_VALOR_FUTBOL) {
-    const json = await pedirApif(`/teams?league=${liga.apif}&season=${temporada}`);
-    for (const r of (json?.response ?? []) as { team: { id: number; name: string } }[]) {
-      filas.push({ lote, tipo, liga: liga.prefijo, apif_liga: liga.apif, apif_equipo_id: r.team.id, apif_equipo: r.team.name, pagina: 1 });
+    await plantillaDeLaLiga(admin, liga.prefijo);
+    const vistos = new Set<number>();
+    const meter = (id: number, nombre: string) => {
+      if (!id || vistos.has(id)) return;
+      vistos.add(id);
+      filas.push({ lote, tipo, liga: liga.prefijo, apif_liga: liga.apif, apif_equipo_id: id, apif_equipo: nombre, pagina: 1 });
+    };
+    // 04/11: en la Champions, /teams devuelve también los equipos de las previas
+    // (Atert Bissen, Drita…). Solo cuentan los de la clasificación (fase de liga).
+    const tabla = await pedirApif(`/standings?league=${liga.apif}&season=${temporada}`).catch(() => null);
+    const grupos = (tabla?.response?.[0]?.league?.standings ?? []) as { team: { id: number; name: string } }[][];
+    for (const g of grupos) for (const r of g) meter(r.team.id, r.team.name);
+    if (vistos.size === 0) {
+      const json = await pedirApif(`/teams?league=${liga.apif}&season=${temporada}`);
+      for (const r of (json?.response ?? []) as { team: { id: number; name: string } }[]) meter(r.team.id, r.team.name);
     }
   }
   if (filas.length > 0) {
@@ -194,10 +210,7 @@ async function procesarPlantilla(admin: Admin, t: Tarea) {
   if (plantilla.length === 0) throw new Error('Plantilla vacía');
   const filas = await filasLiga(admin, t.liga);
   const equipo = equipoNuestro(filas, t.apif_equipo_id, t.apif_equipo, plantilla.map((p) => p.name));
-  if (!equipo) {
-    await evento(admin, t.liga, 'aviso', null, `No sé qué equipo nuestro es "${t.apif_equipo}" de API-Football: no se ha repasado su plantilla.`);
-    throw new Error(`Equipo sin casar: ${t.apif_equipo}`);
-  }
+  if (!equipo) throw new Error(`Equipo sin casar: ${t.apif_equipo}`);
   const ahora = new Date().toISOString();
   const claveIgnorados = `ignorados:${t.liga}:${t.apif_equipo_id}`;
   const ignoradosPrevios = await leerEstado(admin, claveIgnorados);
@@ -267,8 +280,23 @@ async function procesarPlantilla(admin: Admin, t: Tarea) {
 
 /** Al terminar el repaso de plantillas: fuera los que llevan 2 noches sin aparecer en su equipo. */
 async function cerrarPlantillas(admin: Admin, lote: string, inicio: string) {
-  const { data } = await admin.from('futbol_valor_cola').select('liga,apif_equipo_id,error').eq('lote', lote);
-  const hechos = ((data as { liga: string; apif_equipo_id: number; error: string | null }[]) ?? []).filter((x) => !x.error);
+  const { data } = await admin.from('futbol_valor_cola').select('liga,apif_equipo_id,apif_equipo,error').eq('lote', lote);
+  const todas = (data as { liga: string; apif_equipo_id: number; apif_equipo: string | null; error: string | null }[]) ?? [];
+  const hechos = todas.filter((x) => !x.error);
+  // Un solo aviso por liga con lo que no se ha podido repasar.
+  for (const liga of Array.from(new Set(todas.map((x) => x.liga)))) {
+    const malos = todas.filter((x) => x.liga === liga && x.error);
+    const bien = todas.filter((x) => x.liga === liga && !x.error).length;
+    await evento(
+      admin,
+      liga,
+      'aviso',
+      null,
+      malos.length === 0
+        ? `Plantillas repasadas: ${bien} equipos.`
+        : `Plantillas repasadas: ${bien} equipos. Sin repasar (${malos.length}): ${malos.map((m) => `${m.apif_equipo ?? m.apif_equipo_id}${m.error && !m.error.startsWith('Equipo sin casar') ? ` (${m.error})` : ''}`).join(', ')}.`
+    );
+  }
   const porLiga = new Map<string, Set<number>>();
   for (const h of hechos) {
     const s = porLiga.get(h.liga) ?? new Set<number>();
