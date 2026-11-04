@@ -39,6 +39,7 @@ export default function AdminValoresFutbol() {
   const [pendientes, setPendientes] = useState(0);
   const [buscar, setBuscar] = useState('');
   const [soloNuevos, setSoloNuevos] = useState(false);
+  const [soloSinCasar, setSoloSinCasar] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const [editando, setEditando] = useState<Record<string, string>>({});
@@ -112,6 +113,14 @@ export default function AdminValoresFutbol() {
     }
   }
 
+  // 04/11: quitar de la plantilla a un jugador que ya no está en su equipo.
+  async function quitar(f: Fila) {
+    if (!window.confirm(`¿Quitar a ${f.nombre} (${f.equipo_real ?? 'sin equipo'}) de la plantilla? Dejará de salir en las próximas jornadas.`)) return;
+    const { error } = await supabase.from('futbol_valor').update({ activo: false, actualizado_en: new Date().toISOString() }).eq('id', f.id);
+    if (error) return setAviso(error.message);
+    void cargar();
+  }
+
   async function fijar(f: Fila) {
     const v = Number((editando[f.id] ?? '').replace(/\./g, '').replace(',', '.'));
     if (!Number.isFinite(v) || v <= 0) return setAviso('Valor no válido.');
@@ -123,8 +132,8 @@ export default function AdminValoresFutbol() {
 
   const visibles = useMemo(() => {
     const q = buscar.trim().toLowerCase();
-    return (filas ?? []).filter((f) => f.activo && (!soloNuevos || f.nuevo) && (!q || `${f.nombre} ${f.equipo_real ?? ''}`.toLowerCase().includes(q)));
-  }, [filas, buscar, soloNuevos]);
+    return (filas ?? []).filter((f) => f.activo && (!soloNuevos || f.nuevo) && (!soloSinCasar || !f.apif_id) && (!q || `${f.nombre} ${f.equipo_real ?? ''}`.toLowerCase().includes(q)));
+  }, [filas, buscar, soloNuevos, soloSinCasar]);
 
   if (!autorizado) return null;
   const activos = (filas ?? []).filter((f) => f.activo);
@@ -200,6 +209,9 @@ export default function AdminValoresFutbol() {
             <label style={{ fontSize: 12.5, color: S.MUTED, display: 'flex', alignItems: 'center', gap: 6 }}>
               <input type="checkbox" checked={soloNuevos} onChange={(e) => setSoloNuevos(e.target.checked)} /> Solo nuevos
             </label>
+            <label style={{ fontSize: 12.5, color: S.MUTED, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input type="checkbox" checked={soloSinCasar} onChange={(e) => setSoloSinCasar(e.target.checked)} /> Solo sin casar
+            </label>
           </div>
           {filas === null ? (
             <span style={{ fontSize: 12.5, color: S.MUTED_3 }}>Cargando…</span>
@@ -219,7 +231,14 @@ export default function AdminValoresFutbol() {
                     <span style={{ minWidth: 0 }}>
                       <span style={{ color: S.TEXT, fontWeight: 700 }}>{f.nombre}</span>
                       {f.nuevo && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 800, color: '#3DDC84' }}>NUEVO</span>}
-                      {!f.apif_id && <span style={{ marginLeft: 6, fontSize: 10, color: S.MUTED_3 }}>sin casar</span>}
+                      {!f.apif_id && (
+                        <>
+                          <span style={{ marginLeft: 6, fontSize: 10, color: S.MUTED_3 }}>sin casar</span>
+                          <button type="button" onClick={() => void quitar(f)} style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 700, color: '#FF6B6B', background: 'none', border: '1px solid rgba(255,107,107,0.45)', borderRadius: 6, padding: '1px 6px', cursor: 'pointer' }}>
+                            Quitar
+                          </button>
+                        </>
+                      )}
                       <br />
                       <span style={{ color: S.MUTED_2, fontSize: 11.5 }}>{f.equipo_real}</span>
                       {f.nuevo && (
