@@ -204,8 +204,16 @@ export default function AdminValoresFutbol() {
                 setOcupado(true);
                 setAviso('Buscando lesionados, sancionados y dudas…');
                 try {
-                  const r = (await llamar('bajas')) as Record<string, { lesiones?: number; marcados?: number; error?: string }>;
-                  const partes = Object.entries(r).map(([c, v]) => (v?.error ? `${c}: error (${v.error})` : `${c}: ${v?.marcados ?? 0} jugadores marcados`));
+                  const r = (await llamar('bajas')) as Record<string, { lesiones?: number; marcados?: number; equipos?: number; equiposConLista?: number; deUltimoPartido?: number; sinCasar?: string[]; error?: string }>;
+                  const partes = Object.entries(r).map(([c, v]) => {
+                    if (typeof v !== 'object' || !v) return `${c}: ${String(v)}`;
+                    if (v.error) return `${c}: error (${v.error})`;
+                    let t = `${c}: ${v.marcados ?? 0} jugadores marcados (${v.lesiones ?? 0} bajas de API-Football en ${v.equiposConLista ?? 0} de ${v.equipos ?? 0} equipos`;
+                    if (v.deUltimoPartido) t += `; ${v.deUltimoPartido} sacadas del último partido del equipo`;
+                    t += ')';
+                    if (v.sinCasar?.length) t += `. Sin casar: ${v.sinCasar.join(', ')}`;
+                    return t;
+                  });
                   setAviso(partes.length ? partes.join(' · ') : 'No hay jornadas abiertas ahora mismo.');
                 } catch (e) {
                   setAviso((e as Error).message);
