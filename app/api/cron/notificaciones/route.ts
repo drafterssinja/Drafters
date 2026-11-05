@@ -3,6 +3,7 @@ import { crearClienteAdmin } from '@/lib/server/supabaseAdmin';
 import { enviarNotificacionesPush } from '@/lib/server/notificacionesPush';
 import { crearTorneosTenisAutomaticos, sincronizarTenis } from '@/lib/server/tenisEspn';
 import { tareasValorFutbol } from '@/lib/server/valorFutbol';
+import { actualizarBajasFutbol } from '@/lib/server/bajasFutbol';
 
 // Notificaciones push (18/10). La llama pg_cron de Supabase cada minuto con la
 // cabecera "x-cron-secret" (= CRON_SECRET), igual que las sincronizaciones.
@@ -60,8 +61,18 @@ async function ejecutar(req: NextRequest) {
     } catch (e) {
       valorFutbol = { error: (e as Error).message };
     }
+    // 05/11 (Iñi): lesionados, sancionados y dudas de las jornadas abiertas (API-Football), cada hora.
+    let bajas: unknown = null;
+    try {
+      if (await toca(admin, 'bajas_futbol', 60)) {
+        bajas = await actualizarBajasFutbol(admin);
+        await admin.from('futbol_valor_estado').upsert({ clave: 'cron:bajas_futbol', valor: { en: new Date().toISOString(), resultado: bajas }, actualizado_en: new Date().toISOString() }, { onConflict: 'clave' });
+      }
+    } catch (e) {
+      bajas = { error: (e as Error).message };
+    }
     const r = await enviarNotificacionesPush(admin);
-    return NextResponse.json({ ...r, tareas, tenis, valorFutbol });
+    return NextResponse.json({ ...r, tareas, tenis, valorFutbol, bajas });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }

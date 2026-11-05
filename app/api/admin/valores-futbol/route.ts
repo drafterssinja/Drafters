@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { crearClienteAdmin } from '@/lib/server/supabaseAdmin';
 import { encolarValorFutbol, procesarColaValorFutbol } from '@/lib/server/valorFutbol';
 import { claveApif } from '@/lib/server/apiFootball';
+import { actualizarBajasFutbol } from '@/lib/server/bajasFutbol';
 
 // ============================================================================
 // ADMIN — VALOR DE LOS JUGADORES DE FÚTBOL (03/11, Iñi)
@@ -32,6 +33,8 @@ export async function POST(req: NextRequest) {
     if (accion === 'plantillas') return NextResponse.json(await encolarValorFutbol(admin, 'plantilla'));
     if (accion === 'valores') return NextResponse.json(await encolarValorFutbol(admin, 'stats'));
     if (accion === 'procesar') return NextResponse.json(await procesarColaValorFutbol(admin, 10));
+    // 05/11: lesionados, sancionados y dudas de las jornadas abiertas.
+    if (accion === 'bajas') return NextResponse.json(await actualizarBajasFutbol(admin));
     return NextResponse.json({ error: 'Acción desconocida.' }, { status: 400 });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });

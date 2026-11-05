@@ -197,6 +197,26 @@ export default function AdminValoresFutbol() {
             <button type="button" disabled={ocupado} onClick={() => void hacerAhora('valores')} style={boton}>
               Actualizar valores ahora
             </button>
+            <button
+              type="button"
+              disabled={ocupado}
+              onClick={async () => {
+                setOcupado(true);
+                setAviso('Buscando lesionados, sancionados y dudas…');
+                try {
+                  const r = (await llamar('bajas')) as Record<string, { lesiones?: number; marcados?: number; error?: string }>;
+                  const partes = Object.entries(r).map(([c, v]) => (v?.error ? `${c}: error (${v.error})` : `${c}: ${v?.marcados ?? 0} jugadores marcados`));
+                  setAviso(partes.length ? partes.join(' · ') : 'No hay jornadas abiertas ahora mismo.');
+                } catch (e) {
+                  setAviso((e as Error).message);
+                } finally {
+                  setOcupado(false);
+                }
+              }}
+              style={boton}
+            >
+              Actualizar bajas ahora
+            </button>
           </div>
           {aviso && <span style={{ fontSize: 12.5, color: '#F0B94D' }}>{aviso}</span>}
 
