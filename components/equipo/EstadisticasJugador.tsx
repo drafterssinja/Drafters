@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import * as S from '@/lib/mockupStyles';
 import { claveEquipoFutbol } from '@/lib/futbolLaLiga';
+import IconoAusencia, { TEXTO_AUSENCIA, type Ausencia } from '@/components/equipo/IconoAusencia';
 
 // ============================================================================
 // ESTADÍSTICAS DEL JUGADOR AL HACER EL EQUIPO (04/11, Iñi)
@@ -19,7 +20,7 @@ import { claveEquipoFutbol } from '@/lib/futbolLaLiga';
 //    equipo (no se sale de ella), así no se pierde nada de lo elegido.
 //  · El "atrás" del móvil cierra primero la pantalla y luego la hoja.
 
-export type JugadorStats = { id: string; nombre: string; equipo_real: string | null; posicion?: string | null; precio: number };
+export type JugadorStats = { id: string; nombre: string; equipo_real: string | null; posicion?: string | null; precio: number; ausencia?: Ausencia; ausencia_motivo?: string | null; lesionado?: boolean };
 type Fila = { competicion: string; fecha: string | null; precio: number | null; valor_mercado: number | null; equipo_real: string | null; puntos: number | null; jugo: boolean; minutos: number; estado: string; es_esta: boolean };
 type Partido = { competicion: string; equipo_local: string; equipo_visitante: string; clave_local: string | null; clave_visitante: string | null };
 
@@ -270,6 +271,20 @@ export default function EstadisticasJugador({
               </span>
             )}
           </div>
+          {/* 05/11 (Iñi): si está de baja o es duda, se dice aquí con su motivo. */}
+          {(() => {
+            const t = jugador.ausencia ?? (jugador.lesionado ? 'lesion' : null);
+            if (!t) return null;
+            return (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 10, background: t === 'duda' ? 'rgba(240,185,77,0.1)' : 'rgba(229,56,59,0.1)', border: `1px solid ${t === 'duda' ? 'rgba(240,185,77,0.45)' : 'rgba(229,56,59,0.45)'}` }}>
+                <IconoAusencia tipo={t} size={18} />
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: S.TEXT }}>
+                  {TEXTO_AUSENCIA[t]}
+                  {jugador.ausencia_motivo ? <span style={{ fontWeight: 500, color: S.MUTED }}> · {jugador.ausencia_motivo}</span> : null}
+                </span>
+              </div>
+            );
+          })()}
           <span style={{ fontSize: 10.5, fontWeight: 700, color: S.MUTED_3, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
             {deporte === 'futbol' ? `Últimos ${Math.min(4, Math.max(1, ultimas.length))} partidos${nombreComp ? ` de ${nombreComp}` : ''}` : `Últimos ${Math.min(4, Math.max(1, ultimas.length))} torneos`}
           </span>

@@ -11,6 +11,7 @@ import * as S from '@/lib/mockupStyles';
 import { EQUIPO_PRESUPUESTO, TAMANO_EQUIPO_GOLF_TENIS, FORMACIONES_FUTBOL, colorPresupuesto } from '@/lib/draftConfig';
 import { formatEuros, inicialesJugador, huecosPorLinea, lineaDePosicion, type LineaFutbol } from '@/lib/salaShared';
 import EstadisticasJugador, { BotonEstadisticas } from '@/components/equipo/EstadisticasJugador';
+import IconoAusencia, { type Ausencia } from '@/components/equipo/IconoAusencia';
 import { tablaPuntuacionPorDeporte } from '@/lib/puntuaciones';
 import { escudoLaLiga, claveEquipoFutbol } from '@/lib/futbolLaLiga';
 import { esEquipoFilial, nombrePrimerEquipo } from '@/lib/aliasEquipos';
@@ -57,7 +58,7 @@ type SalaRow = {
 
 type EquipoHecho = { id: string; etiqueta: string; jugadores: string[]; alineacion: string | null; grupo?: string };
 
-type JugadorRow = { id: string; nombre: string; posicion: string | null; precio: number; lesionado: boolean; equipo_real: string | null; baja?: boolean };
+type JugadorRow = { id: string; nombre: string; posicion: string | null; precio: number; lesionado: boolean; equipo_real: string | null; baja?: boolean; ausencia?: Ausencia; ausencia_motivo?: string | null };
 type PartidoRow = { equipo_local: string; equipo_visitante: string; cuota_1: number; cuota_x: number; cuota_2: number };
 
 const AVATAR_POR_LINEA: Record<LineaFutbol, string> = { POR: '#FF7A45', DEF: '#8FB6FF', MED: '#F0B94D', DEL: '#3DDC84' };
@@ -254,7 +255,7 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
       const [{ data: misEquiposData }, { data: jugData }, { data: partidosData }, { data: equipoEditandoData }, { data: hechosData }] = await Promise.all([
         supabase.from('equipos').select('id, inscripciones(estado)').eq('sala_id', salaId).eq('usuario_id', session.user.id),
         // 13/10: paginado (más de 1.000 jugadores en Champions: faltaban los más baratos).
-        todasLasFilas((d, h) => supabase.from('jugadores').select('id,nombre,posicion,precio,lesionado,equipo_real,baja').eq('deporte', salaRow.deporte).eq('competicion', salaRow.competicion).order('precio', { ascending: false }).order('id').range(d, h)),
+        todasLasFilas((d, h) => supabase.from('jugadores').select('*').eq('deporte', salaRow.deporte).eq('competicion', salaRow.competicion).order('precio', { ascending: false }).order('id').range(d, h)),
         salaRow.deporte === 'futbol'
           ? supabase.from('cuotas_partido_futbol').select('equipo_local,equipo_visitante,cuota_1,cuota_x,cuota_2').eq('competicion', salaRow.competicion)
           : Promise.resolve({ data: [] as PartidoRow[] }),
@@ -390,7 +391,7 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
       const nombreJornada = info.competicion.replace('La Liga', 'LaLiga').replace('Champions League', 'Champions').replace(/\s*-\s*Jornada\s*/i, ' · Jornada ');
       const salaRow: SalaRow = { id: du.ronda, nombre: `${du.privada ? 'Liga privada' : 'Liga Drafters'} · ${nombreJornada}`, competicion: info.competicion, deporte: dep, tipo: 'amistoso', aforo: 2, buy_in: 0, estado: 'abierta', fecha_limite_inscripcion: info.cierre, tramo: null };
       const [{ data: jugData }, { data: partidosData }, { data: otrosData }, { data: v1Data }] = await Promise.all([
-        todasLasFilas((d, h) => supabase.from('jugadores').select('id,nombre,posicion,precio,lesionado,equipo_real,baja').eq('deporte', dep).eq('competicion', info.competicion).order('precio', { ascending: false }).order('id').range(d, h)),
+        todasLasFilas((d, h) => supabase.from('jugadores').select('*').eq('deporte', dep).eq('competicion', info.competicion).order('precio', { ascending: false }).order('id').range(d, h)),
         dep === 'futbol' ? supabase.from('cuotas_partido_futbol').select('equipo_local,equipo_visitante,cuota_1,cuota_x,cuota_2').eq('competicion', info.competicion) : Promise.resolve({ data: [] }),
         supabase.from('amistoso_equipos').select('id,competicion,jugadores,alineacion,amistosos(nombre)').eq('usuario_id', uid).eq('competicion', info.competicion).order('updated_at', { ascending: false }).limit(20),
         supabase
@@ -466,7 +467,7 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
       const soloEstaJornada = a.modalidad === 'presupuesto';
 
       const [{ data: jugData }, { data: partidosData }, { data: guardadosData }, { data: otrosData }, { data: v1Data }] = await Promise.all([
-        todasLasFilas((d, h) => supabase.from('jugadores').select('id,nombre,posicion,precio,lesionado,equipo_real,baja').eq('deporte', a.deporte).eq('competicion', jo.competicion).order('precio', { ascending: false }).order('id').range(d, h)),
+        todasLasFilas((d, h) => supabase.from('jugadores').select('*').eq('deporte', a.deporte).eq('competicion', jo.competicion).order('precio', { ascending: false }).order('id').range(d, h)),
         a.deporte === 'futbol'
           ? supabase.from('cuotas_partido_futbol').select('equipo_local,equipo_visitante,cuota_1,cuota_x,cuota_2').eq('competicion', jo.competicion)
           : Promise.resolve({ data: [] as PartidoRow[] }),
@@ -1563,7 +1564,7 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
                   </span>
                   <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
                     <span style={{ minWidth: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 13.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.nombre}</span>
-                    {j.lesionado && <span style={{ flexShrink: 0, width: 13, height: 13, borderRadius: '50%', background: '#FF5C5C' }} />}
+                    <IconoAusencia tipo={j.ausencia ?? (j.lesionado ? 'lesion' : null)} motivo={j.ausencia_motivo} size={15} />
                   </div>
                   {!libre && <span style={{ flexShrink: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13, color: '#F0B94D' }}>{formatEuros(j.precio)}</span>}
                 </div>
@@ -1726,7 +1727,7 @@ function PlayerRow({ jugador, selected, disabled, onToggle, sinPrecio = false, n
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
           <span style={{ minWidth: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 13, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{jugador.nombre}</span>
-          {jugador.lesionado && <span style={{ flexShrink: 0, width: 13, height: 13, borderRadius: '50%', background: '#FF5C5C' }} />}
+          <IconoAusencia tipo={jugador.ausencia ?? (jugador.lesionado ? 'lesion' : null)} motivo={jugador.ausencia_motivo} size={14} />
         </div>
         {jugador.equipo_real && (
           <span style={{ fontSize: 10, color: S.MUTED_3 }}>
