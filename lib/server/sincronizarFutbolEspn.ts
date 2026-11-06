@@ -670,7 +670,10 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
       const desde = prev?.actualizado_en ? ahora.getTime() - new Date(prev.actualizado_en).getTime() : Infinity;
       const guardado = guardadoPorPartido.get(k);
       const minTrasFinal = guardado?.finalizado_visto_en ? (ahora.getTime() - new Date(guardado.finalizado_visto_en).getTime()) / 60000 : 0;
-      const toca = !prev?.datos || (p.estado === 'en_juego' ? desde >= 50 * 1000 : minTrasFinal <= 180 && desde >= 10 * 60 * 1000);
+      // 06/11: datos guardados antes de traer goles, tiros, tarjetas... de
+      // API-Football (sin id de jugador): al forzar se vuelven a pedir una vez.
+      const datosAntiguos = !!prev?.datos && !prev.datos.some((e) => e.jugadores.some((x) => x.id !== undefined));
+      const toca = !prev?.datos || (opciones.forzar && datosAntiguos) || (p.estado === 'en_juego' ? desde >= 50 * 1000 : minTrasFinal <= 180 && desde >= 10 * 60 * 1000);
       if (!toca) return;
       try {
         let id = prev?.apif_id ?? null;
