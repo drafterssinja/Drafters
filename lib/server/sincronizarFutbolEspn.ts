@@ -30,6 +30,8 @@ import { emparejarEquipo } from '../aliasEquipos';
 import { claveEquipoFutbol, emparejarJugadoresConTabla, resultadoDeEquipo, type FilaFantasy, type ResultadoEquipo } from '../futbolLaLiga';
 import type { TipoAvisoFutbol } from '../futbolAvisos';
 import { estadisticasVacias, puntuarJugador, type EstadisticasJugador, type LineaDesglose } from '../futbolPuntuacion';
+import { nombreParecido } from './valorFutbol';
+import { claveJugadorFutbol } from '../valorFutbolClave';
 import { LIGA_APIF, buscarFixture, claveApif, emparejarApif, estadisticasApif, partidosApifDelDia, type FixtureApif, type StatsApifEquipo, type StatsApifJugador } from './apiFootball';
 
 type Admin = ReturnType<typeof crearClienteAdmin>;
@@ -93,6 +95,8 @@ export type ResultadoCompeticionFutbol = {
   }[];
   aviso?: string;
   error?: string;
+  /** 06/11: jugadores que ESPN no trae y se han puntuado con API-Football. */
+  rescatadosApif?: string[];
 };
 
 export type OpcionesSincronizacion = {
@@ -447,10 +451,41 @@ function estadisticasDe(f: FilaRoster, r: ResumenPartido, finalizado: boolean, p
   return st;
 }
 
+/** 06/11 (Iñi): jugador que ESPN no trae en la alineación pero API-Football sí
+ * ("Youssi" / Youssef Enríquez): se puntúa solo con API-Football. */
+function estadisticasDeApif(a: StatsApifJugador, finalizado: boolean, mvp: boolean): EstadisticasJugador {
+  const st = estadisticasVacias();
+  if (!(a.minutos > 0)) return st;
+  st.jugo = true;
+  st.minutos = a.minutos;
+  st.partidoCompleto = finalizado && !a.suplente && a.minutos >= 90 && !(a.rojas ?? 0);
+  st.goles = a.goles ?? 0;
+  st.asistencias = a.asistencias ?? 0;
+  st.tirosAPuerta = a.tirosAPuerta ?? 0;
+  st.tirosTotales = a.tiros ?? 0;
+  st.faltasCometidas = a.faltasCometidas ?? 0;
+  st.faltasRecibidas = a.faltasRecibidas ?? 0;
+  st.amarillas = a.amarillas ?? 0;
+  st.rojas = a.rojas ?? 0;
+  st.paradas = a.paradas ?? 0;
+  st.golesEncajados = a.encajados ?? 0;
+  st.penaltisFallados = a.penaltisFallados ?? 0;
+  st.penaltisParados = a.penaltisParados ?? 0;
+  st.pasesClave = a.pasesClave;
+  st.entradas = a.entradas;
+  st.intercepciones = a.intercepciones;
+  st.tirosBloqueados = a.tirosBloqueados;
+  st.duelosGanados = a.duelosGanados;
+  st.duelosPerdidos = Math.max(0, a.duelos - a.duelosGanados);
+  st.regatesBuenos = a.regatesBuenos;
+  st.mvp = finalizado && mvp;
+  return st;
+}
+
 // ----------------------------------------------------------------------------
 // Emparejar jugadores de ESPN con los de nuestra ficha
 // ----------------------------------------------------------------------------
-type JugadorNuestro = { id: string; nombre: string; equipo_real: string | null; posicion: string | null };
+type JugadorNuestro = { id: string; nombre: string; equipo_real: string | null; posicion: string | null; metadata?: Record<string, unknown> | null };
 
 function filaDeEspn(nombre: string, nombreCompleto: string, equipoNuestro: string): FilaFantasy {
   return { slug: nombreCompleto, nombre, equipo: equipoNuestro, posicion: '', partidos: 0, puntos: 0 };
@@ -537,7 +572,7 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
   const ahora = new Date();
 
   // 13/10: paginado (una jornada de Champions pasa de 1.000 jugadores y los que quedaban fuera no puntuaban).
-  const { data: fichas, error: errFichas } = await todasLasFilas<JugadorNuestro>((d, h) => admin.from('jugadores').select('id,nombre,equipo_real,posicion').eq('deporte', 'futbol').eq('competicion', competicion).order('id').range(d, h));
+  const { data: fichas, error: errFichas } = await todasLasFilas<JugadorNuestro>((d, h) => admin.from('jugadores').select('id,nombre,equipo_real,posicion,metadata').eq('deporte', 'futbol').eq('competicion', competicion).order('id').range(d, h));
   if (errFichas) throw new Error(errFichas.message);
   const jugadores = (fichas as JugadorNuestro[]) ?? [];
   if (jugadores.length === 0) return vacio(competicion, 'error', { ok: false, error: 'No hay jugadores cargados para esta competición.' });
@@ -656,6 +691,26 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
     };
     for (let i = 0; i < partidos.length; i += 4) await Promise.all(partidos.slice(i, i + 4).map(unPartido));
   }
+
+  // 06/11 (Iñi): id de API-Football de cada jugador nuestro (valor Drafters),
+  // para puntuar con API-Football a quien ESPN no trae en la alineación.
+  const apifDeJugador = new Map<string, number>();
+  if (apifPorPartido.size > 0) {
+    const prefijo = competicion.split(' - ')[0];
+    const { data: fvApif } = await todasLasFilas<{ id: string; clave: string; apif_id: number }>((d, h) => admin.from('futbol_valor').select('id,clave,apif_id').eq('liga', prefijo).eq('activo', true).not('apif_id', 'is', null).order('id').range(d, h));
+    const porId = new Map<string, number>();
+    const porClave = new Map<string, number>();
+    for (const f of (fvApif as { id: string; clave: string; apif_id: number }[] | null) ?? []) {
+      porId.set(f.id, f.apif_id);
+      porClave.set(f.clave, f.apif_id);
+    }
+    for (const j of jugadores) {
+      const vid = typeof j.metadata?.futbol_valor_id === 'string' ? (j.metadata.futbol_valor_id as string) : null;
+      const a = (vid ? porId.get(vid) : undefined) ?? porClave.get(claveJugadorFutbol(j.nombre, j.equipo_real));
+      if (a) apifDeJugador.set(j.id, a);
+    }
+  }
+  const rescatadosApif: string[] = [];
 
   for (const p of partidos) {
     const k = `${p.local.clave}|${p.visitante.clave}`;
@@ -786,10 +841,35 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
           if (enCampo) paradosPor.set(enCampo.atletaId, (paradosPor.get(enCampo.atletaId) ?? 0) + 1);
         }
       }
+      // 06/11 (Iñi): el equipo de API-Football de este lado y sus jugadores que
+      // ESPN no trae (para puntuar con API-Football a los nuestros sin pareja).
+      const usadosApif = new Set(Array.from(apifPorAtleta.values()));
+      const idsRoster = new Set(filasRoster.map((f) => f.atletaId));
+      const eqApif = (datosApif ?? [])
+        .map((e) => ({ e, n: Array.from(apifPorAtleta.entries()).filter(([at, x]) => idsRoster.has(at) && e.jugadores.includes(x)).length }))
+        .sort((a, b) => b.n - a.n)[0];
+      const libresApif = eqApif && eqApif.n > 0 ? eqApif.e.jugadores.filter((x) => !usadosApif.has(x) && x.minutos > 0) : [];
+      const apifSinEspn = (j: JugadorNuestro): StatsApifJugador | undefined => {
+        if (libresApif.length === 0) return undefined;
+        const idA = apifDeJugador.get(j.id);
+        if (idA) {
+          const porId = libresApif.find((x) => x.id === idA);
+          if (porId) return porId;
+        }
+        const c = libresApif.filter((x) => nombreParecido(x.nombre, j.nombre));
+        return c.length === 1 ? c[0] : undefined;
+      };
+
       for (const j of nuestrosDelEquipo) {
         const fr = filaPorNuestro.get(j.id);
         const ap = fr ? apifPorAtleta.get(fr.atletaId) : undefined;
-        const st = fr && resumen ? estadisticasDe(fr, resumen, finalizado, paradosPor.get(fr.atletaId) ?? 0, ap, !!ap && mejorNota !== null && ap.nota === mejorNota) : estadisticasVacias();
+        const soloApif = !fr && resumen ? apifSinEspn(j) : undefined;
+        if (soloApif) rescatadosApif.push(`${j.nombre} (${j.equipo_real ?? ''})`);
+        const st = fr && resumen
+          ? estadisticasDe(fr, resumen, finalizado, paradosPor.get(fr.atletaId) ?? 0, ap, !!ap && mejorNota !== null && ap.nota === mejorNota)
+          : soloApif
+            ? estadisticasDeApif(soloApif, finalizado, mejorNota !== null && soloApif.nota === mejorNota)
+            : estadisticasVacias();
         const { total, desglose } = puntuarJugador(j.posicion, st, { finalizado, golesContraEquipo: rival.goles, equipoGana: resultado === 'G' });
         // Eventos del jugador para los avisos de la clasificación (07/10).
         if (fr && resumen) {
@@ -956,6 +1036,7 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
     jugadoresEmparejados: emparejadosTotal,
     jugadoresEspnSinEmparejar: sinEmparejarEspn,
     nombresFichaSinEmparejar: Array.from(fichasSinPareja.values()),
+    rescatadosApif,
     partidosEncontrados: partidos.length,
     partidosFinalizados: partidos.filter((p) => p.estado === 'finalizado').length,
     equiposSinPartido,

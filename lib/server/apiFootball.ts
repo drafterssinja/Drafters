@@ -29,6 +29,22 @@ export type StatsApifJugador = {
   duelos: number;
   duelosGanados: number;
   regatesBuenos: number;
+  // 06/11 (Iñi): para puntuar con API-Football a quien ESPN no trae
+  // (opcionales: los partidos guardados antes no los tienen).
+  id?: number;
+  suplente?: boolean;
+  goles?: number;
+  asistencias?: number;
+  encajados?: number;
+  paradas?: number;
+  tiros?: number;
+  tirosAPuerta?: number;
+  faltasCometidas?: number;
+  faltasRecibidas?: number;
+  amarillas?: number;
+  rojas?: number;
+  penaltisFallados?: number;
+  penaltisParados?: number;
 };
 export type StatsApifEquipo = { equipoId: number; equipo: string; jugadores: StatsApifJugador[] };
 export type FixtureApif = { id: number; fecha: string; localId: number; local: string; visitanteId: number; visitante: string };
@@ -97,6 +113,20 @@ export async function estadisticasApif(fixtureId: number): Promise<StatsApifEqui
         duelos: n(s.duels?.total),
         duelosGanados: n(s.duels?.won),
         regatesBuenos: n(s.dribbles?.success),
+        id: Number(p.player?.id) || undefined,
+        suplente: !!s.games?.substitute,
+        goles: n(s.goals?.total),
+        asistencias: n(s.goals?.assists),
+        encajados: n(s.goals?.conceded),
+        paradas: n(s.goals?.saves),
+        tiros: n(s.shots?.total),
+        tirosAPuerta: n(s.shots?.on),
+        faltasCometidas: n(s.fouls?.committed),
+        faltasRecibidas: n(s.fouls?.drawn),
+        amarillas: n(s.cards?.yellow),
+        rojas: n(s.cards?.red),
+        penaltisFallados: n(s.penalty?.missed),
+        penaltisParados: n(s.penalty?.saved),
       };
     }),
   }));
