@@ -120,6 +120,19 @@ function LigaPrivada() {
     else await cargar();
   }
 
+  // 05/11 (Iñi): eliminar una liga ya terminada (quien la creó). SQL 104.
+  const [confirmarEliminar, setConfirmarEliminar] = useState(false);
+  const [eliminando, setEliminando] = useState(false);
+  async function eliminar() {
+    setEliminando(true);
+    setError(null);
+    const { error: e } = await supabase.rpc('lp_eliminar', { p_liga: id });
+    setEliminando(false);
+    setConfirmarEliminar(false);
+    if (e) return setError(mensajeError(e));
+    router.replace(`/v2/${info?.deporte ?? 'futbol'}?modo=privadas`);
+  }
+
   async function compartir() {
     const url = `${window.location.origin}/v2/liga-privada/${id}`;
     const texto = `Únete a mi liga privada «${info?.nombre}» en Drafters`;
@@ -484,6 +497,29 @@ function LigaPrivada() {
                     {info.soy_creador ? 'Terminar la liga' : 'Salir de la liga'}
                   </button>
                 ))}
+
+              {/* 05/11 (Iñi): eliminar la liga cuando ya está terminada. */}
+              {info.estado === 'terminada' && (info.soy_creador || info.puedo_ver) &&
+                (confirmarEliminar ? (
+                  <Panel style={{ gap: 10, border: '1px solid rgba(255,138,138,0.4)' }}>
+                    <span style={{ fontSize: 13.5, color: S.TEXT, lineHeight: 1.5 }}>
+                      ¿Seguro que quieres eliminar la liga? Desaparece para todos sus miembros, con su clasificación y sus jornadas. Lo que cada uno ha ganado de nivel no se pierde.
+                    </span>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button type="button" onClick={() => setConfirmarEliminar(false)} style={{ ...S.secondaryLinkButton, flex: 1, marginTop: 0 }}>
+                        No
+                      </button>
+                      <button type="button" disabled={eliminando} onClick={() => void eliminar()} style={{ ...S.secondaryLinkButton, flex: 1, marginTop: 0, borderColor: '#FF8A8A', color: '#FF8A8A', opacity: eliminando ? 0.6 : 1 }}>
+                        {eliminando ? 'Eliminando…' : 'Sí, eliminarla'}
+                      </button>
+                    </div>
+                  </Panel>
+                ) : (
+                  <button type="button" onClick={() => setConfirmarEliminar(true)} style={{ background: 'none', border: 'none', color: '#FF8A8A', fontSize: 13, cursor: 'pointer', padding: 8 }}>
+                    🗑 Eliminar la liga
+                  </button>
+                ))}
+              {info.estado === 'terminada' && (info.soy_creador || info.puedo_ver) && error && <p style={S.errorText}>{error}</p>}
             </>
           )}
         </>

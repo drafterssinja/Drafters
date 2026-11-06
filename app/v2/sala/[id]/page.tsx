@@ -134,41 +134,34 @@ export default function V2Sala() {
     };
   }, [amistoso, jornadas]);
 
-  async function unirse() {
+  async function unirse(): Promise<boolean> {
     setError(null);
     const { error: e } = await supabase.rpc('amistoso_unirse', { p_amistoso: id, p_contrasena: contrasena.trim() || null });
     if (e) {
       const m = mensajeError(e);
       avisarCambioCreditos();
-      return setError(/contraseña incorrecta/i.test(m) ? `❌ Esa contraseña no es la buena. Revísala (mayúsculas, espacios...) o pídesela otra vez a @${resumen?.nombres[amistoso?.creador_id ?? ''] ?? 'quien creó la sala'}.` : m);
+      setError(/contraseña incorrecta/i.test(m) ? `❌ Esa contraseña no es la buena. Revísala (mayúsculas, espacios...) o pídesela otra vez a @${resumen?.nombres[amistoso?.creador_id ?? ''] ?? 'quien creó la sala'}.` : m);
+      return false;
     }
     avisarCambioCreditos();
     await cargarSala();
+    return true;
   }
 
-  // 16/10 (Iñi): en las salas con presupuesto o libres, "Unirme a la sala"
-  // te lleva a cómo puntúan y a hacer tu equipo; entras en la sala (y se usa
-  // el crédito) al guardar el equipo (SQL 47). En draft se entra directamente.
+  // 05/11 (Iñi): al unirte (con la contraseña bien puesta) ya estás dentro de
+  // la sala y se usa el crédito; el equipo lo haces ahora o más adelante,
+  // antes de que empiece. Antes (16/10) solo entrabas al guardar el equipo.
   const jornadaParaEquipo = (() => {
     if (!amistoso || amistoso.modalidad === 'draft') return null;
     const ahora = Date.now();
     const candidatas = amistoso.equipo_fijo ? jornadas.slice(0, 1) : jornadas;
     return candidatas.find((x) => x.cierre && new Date(x.cierre).getTime() > ahora) ?? null;
   })();
+  const [recienDentro, setRecienDentro] = useState(false);
 
   async function unirseOHacerEquipo() {
     setError(null);
-    // Sin cuadro todavía: se entra en la sala y el equipo se hace cuando salga.
-    if (!jornadaParaEquipo || sinCuadro.has(jornadaParaEquipo.competicion)) return unirse();
-    if (amistoso?.privada) {
-      const { data: ok, error: e } = await supabase.rpc('amistoso_comprobar_clave', { p_amistoso: id, p_contrasena: contrasena.trim() });
-      if (e) return setError(mensajeError(e));
-      if (!ok) return setError(`❌ Esa contraseña no es la buena. Revísala (mayúsculas, espacios...) o pídesela otra vez a @${resumen?.nombres[amistoso?.creador_id ?? ''] ?? 'quien creó la sala'}.`);
-      try {
-        sessionStorage.setItem(`v2_clave_${id}`, contrasena.trim());
-      } catch {}
-    }
-    router.push(`/v2/sala/${id}/equipo?c=${encodeURIComponent(jornadaParaEquipo.competicion)}&unirse=1`);
+    if (await unirse()) setRecienDentro(true);
   }
 
   async function salir() {
@@ -372,7 +365,7 @@ export default function V2Sala() {
                   <CosteCredito deporte={amistoso.deporte} />
                   {jornadaParaEquipo && (
                     <span style={{ fontSize: 12.5, color: S.MUTED_2, lineHeight: 1.5 }}>
-                      Al pulsar verás cómo puntúan los jugadores y harás tu equipo. <b style={{ color: S.TEXT }}>Entras en la sala (y se usa el crédito) cuando guardas tu equipo.</b>
+                      Al pulsar <b style={{ color: S.TEXT }}>ya estás dentro de la sala</b> (se usa el crédito). Tu equipo lo puedes hacer ahora o más adelante, antes de que empiece.
                     </span>
                   )}
                   <button
@@ -401,6 +394,20 @@ export default function V2Sala() {
           )}
           {soyParticipante && (
             <>
+              {/* 05/11 (Iñi): nada más unirte, ya estás dentro; el equipo, cuando quieras. */}
+              {recienDentro && (
+                <Panel style={{ gap: 8, border: '1px solid rgba(61,220,132,0.45)' }}>
+                  <span style={{ fontWeight: 800, fontSize: 15, color: '#3DDC84' }}>✓ Ya estás dentro de la sala</span>
+                  <span style={{ fontSize: 12.5, color: S.MUTED_2, lineHeight: 1.5 }}>
+                    {jornadaParaEquipo?.cierre ? `Puedes hacer tu equipo ahora o más adelante, hasta ${fechaCorta(jornadaParaEquipo.cierre)}.` : 'Puedes hacer tu equipo ahora o más adelante.'}
+                  </span>
+                  {jornadaParaEquipo && !sinCuadro.has(jornadaParaEquipo.competicion) && (
+                    <Link href={`/v2/sala/${id}/equipo?c=${encodeURIComponent(jornadaParaEquipo.competicion)}`} style={{ ...S.primaryButton, marginTop: 0, textAlign: 'center', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      Hacer mi equipo ahora
+                    </Link>
+                  )}
+                </Panel>
+              )}
               <div style={{ display: 'flex', gap: 6 }}>
                 <button type="button" style={S.pill(pestana === 'sala')} onClick={() => setPestana('sala')}>
                   Sala

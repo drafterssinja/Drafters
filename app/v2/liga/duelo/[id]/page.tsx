@@ -12,6 +12,9 @@ import { mensajeError } from '@/lib/v2';
 import { esLineaDuelos } from '@/lib/futbolPuntuacion';
 import { ContadorDuelos } from '@/components/ClasificacionMesaFutbol';
 import { registrarVistaClasificacion } from '@/lib/actividad';
+import IconoAusencia, { TEXTO_AUSENCIA, type Ausencia } from '@/components/equipo/IconoAusencia';
+
+type Baja = { tipo: Ausencia; motivo: string | null };
 
 // ============================================================================
 // LIGA DRAFTERS — UN ENFRENTAMIENTO (27/10, Iñi)
@@ -41,6 +44,8 @@ export default function DueloPagina() {
   const [d, setD] = useState<Detalle | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lado, setLado] = useState<'local' | 'visitante'>('local');
+  // 05/11 (Iñi): bajas (lesión, sanción, duda) de los jugadores de los dos equipos.
+  const [bajas, setBajas] = useState<Map<string, Baja>>(new Map());
 
   useEffect(() => {
     if (estado !== 'ok') return;
@@ -49,6 +54,17 @@ export default function DueloPagina() {
         if (e) return setError(mensajeError(e));
         const det = data as Detalle;
         setD(det);
+        const ids = [...(det.local?.jugadores ?? []), ...(det.visitante?.jugadores ?? [])].map((j) => j.id);
+        if (ids.length && det.deporte !== 'golf' && det.deporte !== 'tenis')
+          supabase
+            .from('jugadores')
+            .select('id,ausencia,ausencia_motivo')
+            .in('id', ids)
+            .not('ausencia', 'is', null)
+            .then(({ data: b, error: eb }) => {
+              if (eb) return;
+              setBajas(new Map(((b as { id: string; ausencia: Ausencia; ausencia_motivo: string | null }[]) ?? []).map((x) => [x.id, { tipo: x.ausencia, motivo: x.ausencia_motivo }])));
+            });
         setLado((l) => (det.visitante?.soy_yo ? (l === 'local' && !det.local?.soy_yo ? 'visitante' : l) : l));
       });
     void cargar();
@@ -139,7 +155,7 @@ export default function DueloPagina() {
                     {visto.alineacion ? `Alineación ${visto.alineacion} · ` : ''}toca un jugador para ver de dónde salen sus puntos
                   </span>
                   {visto.jugadores.map((j) => (
-                    <FilaJugador key={j.id} j={j} pendiente={d.estado === 'pendiente'} />
+                    <FilaJugador key={j.id} j={j} pendiente={d.estado === 'pendiente'} baja={j.jugo ? null : bajas.get(j.id) ?? null} />
                   ))}
                   {d.estado !== 'pendiente' && (
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 4px 0', borderTop: '1px solid #1A221E', fontWeight: 800, color: S.TEXT }}>
@@ -157,7 +173,7 @@ export default function DueloPagina() {
   );
 }
 
-function FilaJugador({ j, pendiente }: { j: Jugador; pendiente: boolean }) {
+function FilaJugador({ j, pendiente, baja }: { j: Jugador; pendiente: boolean; baja: Baja | null }) {
   const [abierto, setAbierto] = useState(false);
   const p = POS[j.posicion] ?? { c: S.MUTED, t: '' };
   const estado = j.partido_estado === 'en_juego' ? '● en juego' : j.partido_estado === 'finalizado' ? (j.jugo ? `${j.minutos}'` : 'no jugó') : j.partido_estado === 'aplazado' ? 'aplazado' : 'por jugar';
@@ -168,9 +184,15 @@ function FilaJugador({ j, pendiente }: { j: Jugador; pendiente: boolean }) {
         <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
           <span style={{ fontWeight: 800, fontSize: 13.5, color: S.TEXT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {j.nombre}
+            {baja?.tipo && (
+              <span style={{ display: 'inline-flex', marginLeft: 5, verticalAlign: '-1px' }}>
+                <IconoAusencia tipo={baja.tipo} motivo={baja.motivo} size={12} />
+              </span>
+            )}
             {j.desglose.some((l) => l.clave === 'mvp') && <span title="MVP del partido" style={{ marginLeft: 4, fontSize: 10, color: '#F0B94D' }}>★</span>}
           </span>
           <span style={{ fontSize: 11, color: S.MUTED_3 }}>
+            {baja?.tipo && <span style={{ color: baja.tipo === 'duda' ? '#F0B94D' : '#FF8A8A' }}>{TEXTO_AUSENCIA[baja.tipo]}{baja.motivo ? ` · ${baja.motivo}` : ''} · </span>}
             {j.equipo_real ?? ''} · <span style={{ color: j.partido_estado === 'en_juego' ? VERDE : S.MUTED_3 }}>{estado}</span>
           </span>
         </span>
