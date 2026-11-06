@@ -16,6 +16,7 @@ import { esLineaDuelos, textoFaltaDuelos, type LineaDesglose } from '@/lib/futbo
 import { reproducirSonidoAviso, leerPreferenciaSonido, guardarPreferenciaSonido } from '@/lib/sonidoAviso';
 import { TIPOS_AVISO_FUTBOL, TIPOS_AVISO_POR_DEFECTO, INFO_TIPO_AVISO, textoAvisoFutbol, type EventoFutbol, type TipoAvisoFutbol } from '@/lib/futbolAvisos';
 import Cargando from '@/components/Cargando';
+import IconoAusencia, { TEXTO_AUSENCIA, type Ausencia } from '@/components/equipo/IconoAusencia';
 import { BotonNotificaciones } from '@/components/AjustesNotificaciones';
 import { PremiosDraftis } from '@/components/v2/DraftisMesa';
 import { IconoGema } from '@/components/v2/IconosV2';
@@ -340,6 +341,8 @@ export default function ClasificacionMesaFutbol({
 }) {
   const [cargando, setCargando] = useState(true);
   const [jugadores, setJugadores] = useState<JugadorF[]>([]);
+  // 05/11 (Iñi): bajas (lesión, sanción, duda) también al ver los equipos de la sala.
+  const [bajas, setBajas] = useState<Map<string, { tipo: Ausencia; motivo: string | null }>>(new Map());
   const [equipos, setEquipos] = useState<EquipoF[]>([]);
   const [puntos, setPuntos] = useState<Map<string, PuntosF>>(new Map());
   const [partidos, setPartidos] = useState<PartidoF[]>([]);
@@ -419,6 +422,17 @@ export default function ClasificacionMesaFutbol({
       }
       setEscudos(new Map(((esc as { clave: string; logo: string }[]) ?? []).map((e) => [e.clave, e.logo])));
       setJugadores((jug as JugadorF[]) ?? []);
+      // Aparte, para que la sala siga funcionando aunque falte el SQL 102.
+      supabase
+        .from('jugadores')
+        .select('id,ausencia,ausencia_motivo')
+        .eq('deporte', 'futbol')
+        .eq('competicion', sala.competicion)
+        .not('ausencia', 'is', null)
+        .then(({ data, error }) => {
+          if (error || !activo) return;
+          setBajas(new Map(((data as { id: string; ausencia: Ausencia; ausencia_motivo: string | null }[]) ?? []).map((b) => [b.id, { tipo: b.ausencia, motivo: b.ausencia_motivo }])));
+        });
       const lista = ((eqs as { equipo_id: string; nombre: string; jugadores: string[]; created_at: string }[]) ?? [])
         .map((f) => ({ equipoId: f.equipo_id, nombre: f.nombre, jugadores: f.jugadores ?? [], createdAt: f.created_at }))
         .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
@@ -740,6 +754,8 @@ export default function ClasificacionMesaFutbol({
                   // actualizados; rojo = todavía sin actualizar.
                   const enJuego = partido?.estado === 'en_juego';
                   const colorNombre = enJuego ? COLOR_EN_JUEGO : definitivo ? S.ACCENT : S.ERROR;
+                  // Baja: se enseña mientras no haya jugado.
+                  const baja = !p?.jugo ? bajas.get(j.id) ?? null : null;
                   const detalle = textoResumen(p, partido);
                   return (
                     <motion.div layout transition={{ type: 'spring', stiffness: 420, damping: 38 }} key={j.id} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -778,11 +794,15 @@ export default function ClasificacionMesaFutbol({
                             >
                               {j.nombre}
                             </span>
+                            {baja?.tipo && <span style={{ flexShrink: 0, alignSelf: 'center', display: 'flex' }}><IconoAusencia tipo={baja.tipo} motivo={baja.motivo} size={12} /></span>}
                             {/* 01/11 (Iñi): estrellita pequeña para el MVP del partido. */}
                             {p?.desglose?.some((l) => l.clave === 'mvp') && <span title="MVP del partido" style={{ flexShrink: 0, fontSize: 10, lineHeight: 1, color: '#F0B94D' }}>★</span>}
                             {j.posicion && <span style={{ flexShrink: 0, fontSize: 8.5, fontWeight: 700, color: S.MUTED_3 }}>{POSICION_CORTA[j.posicion] ?? ''}</span>}
                           </span>
-                          <span style={{ fontSize: 9, color: S.MUTED_3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{detalle}</span>
+                          <span style={{ fontSize: 9, color: S.MUTED_3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {baja?.tipo && <span style={{ color: baja.tipo === 'duda' ? '#F0B94D' : '#FF8A8A', fontWeight: 700 }}>{TEXTO_AUSENCIA[baja.tipo]}{baja.motivo ? ` · ${baja.motivo}` : ''} · </span>}
+                            {detalle}
+                          </span>
                         </div>
                         <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 14, color: S.TEXT }}>{formatPuntos(p?.puntos_total ?? 0)}</span>
                       </a>
