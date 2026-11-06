@@ -84,10 +84,10 @@ export default function AdminValoresFutbol() {
     if (autorizado) void cargar();
   }, [autorizado, cargar]);
 
-  async function llamar(accion: string) {
+  async function llamar(accion: string, extra: Record<string, unknown> = {}) {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) throw new Error('Sin sesión');
-    const r = await fetch('/api/admin/valores-futbol', { method: 'POST', headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ accion }) });
+    const r = await fetch('/api/admin/valores-futbol', { method: 'POST', headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ accion, ...extra }) });
     const json = await r.json();
     if (!r.ok) throw new Error(json.error ?? 'Error');
     return json;
@@ -119,6 +119,30 @@ export default function AdminValoresFutbol() {
     const { error } = await supabase.from('futbol_valor').update({ activo: false, actualizado_en: new Date().toISOString() }).eq('id', f.id);
     if (error) return setAviso(error.message);
     void cargar();
+  }
+
+  // 06/11 (Iñi): casar a mano con API-Football (sale con otro nombre allí).
+  const [casando, setCasando] = useState<{ id: string; cargando: boolean; error: string | null; jugadores: { id: number; nombre: string; dorsal: number | null; posicion: string | null; casadoCon: string | null }[] } | null>(null);
+  async function abrirCasar(f: Fila) {
+    if (casando?.id === f.id) return setCasando(null);
+    setCasando({ id: f.id, cargando: true, error: null, jugadores: [] });
+    try {
+      const r = await llamar('squad', { id: f.id });
+      setCasando({ id: f.id, cargando: false, error: null, jugadores: r.jugadores ?? [] });
+    } catch (e) {
+      setCasando({ id: f.id, cargando: false, error: (e as Error).message, jugadores: [] });
+    }
+  }
+  async function casar(f: Fila, apifId: number, nombreApif: string) {
+    if (!window.confirm(`¿Casar a ${f.nombre} con "${nombreApif}" de API-Football?`)) return;
+    try {
+      await llamar('casar', { id: f.id, apif_id: apifId });
+      setCasando(null);
+      setAviso(`${f.nombre} casado con "${nombreApif}".`);
+      void cargar();
+    } catch (e) {
+      setCasando((c) => (c ? { ...c, error: (e as Error).message } : c));
+    }
   }
 
   async function fijar(f: Fila) {
@@ -274,10 +298,37 @@ export default function AdminValoresFutbol() {
                       {!f.apif_id && (
                         <>
                           <span style={{ marginLeft: 6, fontSize: 10, color: S.MUTED_3 }}>sin casar</span>
-                          <button type="button" onClick={() => void quitar(f)} style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 700, color: '#FF6B6B', background: 'none', border: '1px solid rgba(255,107,107,0.45)', borderRadius: 6, padding: '1px 6px', cursor: 'pointer' }}>
-                            Quitar
-                          </button>
+                          <span style={{ display: 'inline-flex', gap: 6, marginLeft: 6, verticalAlign: 'middle' }}>
+                            <button type="button" onClick={() => void abrirCasar(f)} style={{ width: 'auto', fontSize: 10.5, fontWeight: 700, color: '#3DDC84', background: 'none', border: '1px solid rgba(61,220,132,0.45)', borderRadius: 6, padding: '1px 6px', cursor: 'pointer' }}>
+                              Casar
+                            </button>
+                            <button type="button" onClick={() => void quitar(f)} style={{ width: 'auto', fontSize: 10.5, fontWeight: 700, color: '#FF6B6B', background: 'none', border: '1px solid rgba(255,107,107,0.45)', borderRadius: 6, padding: '1px 6px', cursor: 'pointer' }}>
+                              Quitar
+                            </button>
+                          </span>
                         </>
+                      )}
+                      {casando?.id === f.id && (
+                        <span style={{ display: 'flex', flexDirection: 'column', gap: 4, margin: '6px 0', padding: 8, borderRadius: 8, border: `1px solid ${S.CARD_BORDER}`, background: 'rgba(255,255,255,0.02)' }}>
+                          <span style={{ fontSize: 11.5, color: S.MUTED_2 }}>¿Quién es en la plantilla de API-Football? Toca su nombre.</span>
+                          {casando.cargando && <span style={{ fontSize: 12, color: S.MUTED_3 }}>Cargando plantilla…</span>}
+                          {casando.error && <span style={{ fontSize: 12, color: '#FF6B6B' }}>{casando.error}</span>}
+                          {casando.jugadores.map((p) => (
+                            <button
+                              key={p.id}
+                              type="button"
+                              disabled={!!p.casadoCon}
+                              onClick={() => void casar(f, p.id, p.nombre)}
+                              style={{ width: '100%', display: 'flex', justifyContent: 'space-between', gap: 8, textAlign: 'left', fontSize: 12.5, padding: '5px 6px', borderRadius: 6, border: 'none', cursor: p.casadoCon ? 'default' : 'pointer', background: p.casadoCon ? 'transparent' : 'rgba(61,220,132,0.06)', color: p.casadoCon ? S.MUTED_3 : S.TEXT }}
+                            >
+                              <span>
+                                {p.dorsal ? `${p.dorsal} · ` : ''}
+                                <b>{p.nombre}</b> {p.posicion ? <span style={{ color: S.MUTED_3 }}>({p.posicion})</span> : null}
+                              </span>
+                              <span style={{ fontSize: 11, color: S.MUTED_3 }}>{p.casadoCon ? `ya es ${p.casadoCon}` : 'Este'}</span>
+                            </button>
+                          ))}
+                        </span>
                       )}
                       <br />
                       <span style={{ color: S.MUTED_2, fontSize: 11.5 }}>{f.equipo_real}</span>

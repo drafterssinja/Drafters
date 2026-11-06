@@ -292,6 +292,10 @@ export default function AdminResultadosFutbolPage() {
                     Equipos nuestros sin pareja en ESPN (hay que añadir su nombre a lib/aliasEquipos.ts): {r.equiposSinEmparejar.join(', ')}
                   </span>
                 )}
+                {/* 06/11: los que ESPN no trae y puntúan con API-Football. */}
+                {(r.rescatadosApif?.length ?? 0) > 0 && (
+                  <span style={{ fontSize: 11.5, color: '#F0B94D' }}>Puntuados solo con API-Football (ESPN no los trae): {r.rescatadosApif!.join(', ')}</span>
+                )}
                 {r.equiposSinPartido.length > 0 && (
                   <span style={{ fontSize: 11.5, color: S.MUTED_3 }}>Equipos sin partido en el marcador: {r.equiposSinPartido.join(', ')}</span>
                 )}
