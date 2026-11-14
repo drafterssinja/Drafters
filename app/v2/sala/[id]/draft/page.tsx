@@ -14,6 +14,7 @@ import CampoAlineacion from '@/components/v2/CampoAlineacion';
 import SelectorDraft, { MAX_POR_EQUIPO_DRAFT, type PartidoDraft } from '@/components/v2/SelectorDraft';
 import { lineaDePosicion, type LineaFutbol } from '@/lib/salaShared';
 import { reproducirSonidoAviso } from '@/lib/sonidoAviso';
+import { tamanoEquipoGolfTenis } from '@/lib/precioTenis';
 import { TAMANO_EQUIPO_V2, alineacionPosible, cadaXSegundos, fechaCorta, mensajeError, ordenDeRonda, turnoDraft, type Amistoso, type AmistosoJornada, type Resumen } from '@/lib/v2';
 import Cargando from '@/components/Cargando';
 
@@ -120,7 +121,8 @@ export default function V2Draft() {
   }
 
   const n = draft?.orden?.length ?? 0;
-  const tamano = TAMANO_EQUIPO_V2[amistoso?.deporte ?? 'golf'];
+  // 14/11 (Iñi): ATP Finals → equipos de 3.
+  const tamano = amistoso?.deporte === 'tenis' ? tamanoEquipoGolfTenis(competicion) : TAMANO_EQUIPO_V2[amistoso?.deporte ?? 'golf'];
   const totalPicks = n * tamano;
   const numero = picks.length;
   const turno = draft?.orden && numero < totalPicks ? turnoDraft(draft.orden, numero) : null;
