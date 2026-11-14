@@ -1,5 +1,5 @@
 import type { crearClienteAdmin } from './supabaseAdmin';
-import { calcularPreciosTenis } from '@/lib/precioTenis';
+import { calcularPreciosTenis, esTorneoFinals } from '@/lib/precioTenis';
 import { normalizarNombre } from '@/lib/nombreMatch';
 import { detectarBreaks, puntuarPartidoTenis, type EstadoPartido } from '@/lib/tenisPuntuacion';
 import type { LineaDesglose } from '@/lib/futbolPuntuacion';
@@ -347,7 +347,7 @@ async function anadirJugadores(admin: Admin, competicion: string, liga: LigaTeni
   // 01/11 (Iñi): precio "como DraftKings" (lib/precioTenis.ts): por los puntos
   // que se esperan de cada uno en el torneo, más caros los de arriba y sin
   // que quepan 5 de los 8 primeros.
-  const calc = calcularPreciosTenis(todos.map((n) => ({ nombre: n, cuota: cuotas.get(n) ?? 500 })));
+  const calc = calcularPreciosTenis(todos.map((n) => ({ nombre: n, cuota: cuotas.get(n) ?? 500 })), competicion);
   const precios = new Map(todos.map((n, i) => [n, calc[i].precio]));
   const filas = aMeter.map((j) => ({
     nombre: j.nombre,
@@ -360,6 +360,25 @@ async function anadirJugadores(admin: Admin, competicion: string, liga: LigaTeni
   const { error } = await admin.from('jugadores').insert(filas);
   if (error) throw new Error(`No se han podido guardar los jugadores: ${error.message}`);
   return filas.length;
+}
+
+// 14/11 (Iñi): ATP Finals (8 jugadores, equipos de 3). Mientras la inscripción
+// está abierta, los precios de TODOS se recalculan con la fórmula de las Finals
+// (con la cuota de cada uno guardada al crearlos), para que no quepan los 3
+// mejores y los precios estén mucho más apretados.
+async function repreciarFinals(admin: Admin, competicion: string): Promise<number> {
+  if (!esTorneoFinals(competicion)) return 0;
+  const { data } = await admin.from('jugadores').select('id,nombre,precio,metadata').eq('deporte', 'tenis').eq('competicion', competicion);
+  const filas = (data as { id: string; nombre: string; precio: number; metadata: { cuota_ganador?: number | null } | null }[] | null) ?? [];
+  if (filas.length < 2) return 0;
+  const calc = calcularPreciosTenis(filas.map((f) => ({ nombre: f.nombre, cuota: f.metadata?.cuota_ganador ?? 500 })), competicion);
+  let n = 0;
+  for (let i = 0; i < filas.length; i++) {
+    if (Number(filas[i].precio) === calc[i].precio) continue;
+    await admin.from('jugadores').update({ precio: calc[i].precio }).eq('id', filas[i].id);
+    n++;
+  }
+  return n;
 }
 
 export async function crearTorneoTenis(admin: Admin, liga: LigaTenis, eventId: string): Promise<{ competicion: string; jugadores: number; cierre: string }> {
@@ -447,6 +466,7 @@ export async function sincronizarTenis(admin: Admin, soloCompeticion?: string): 
       try {
         const n = await anadirJugadores(admin, t.competicion, t.liga, jugadoresVivos(ev), ev);
         res.jugadores += n;
+        await repreciarFinals(admin, t.competicion);
         // 28/10: el cuadro acaba de salir → aviso a los de las salas (notificacionesPush).
         if (n > 0 && !t.cuadro_en) await admin.from('tenis_torneos').update({ cuadro_en: new Date().toISOString() }).eq('competicion', t.competicion);
       } catch {

@@ -63,16 +63,37 @@ export function puntosEsperadosTenis(p: number, rondas: number): number {
   return (PUNTOS_PARTIDO_PERDIDO + (PUNTOS_PARTIDO_GANADO - PUNTOS_PARTIDO_PERDIDO) * q) * partidos;
 }
 
+/** ATP Finals: liguilla de 3 partidos para todos, semifinal y final. Con q la
+ * probabilidad de ganar cada partido (p = q³ para ganar el torneo, aprox.),
+ * partidos esperados ≈ 3 + q + q². */
+export function puntosEsperadosFinals(p: number): number {
+  const q = Math.min(0.999, Math.max(0.01, Math.pow(Math.max(p, 1e-9), 1 / 3)));
+  return (PUNTOS_PARTIDO_PERDIDO + (PUNTOS_PARTIDO_GANADO - PUNTOS_PARTIDO_PERDIDO) * q) * (3 + q + q * q);
+}
+
+/** ¿Es un torneo de 8 con liguilla (ATP Finals)? */
+export function esTorneoFinals(competicion: string | null | undefined): boolean {
+  return /\bfinals\b/i.test(competicion ?? '') && !/next ?gen/i.test(competicion ?? '');
+}
+
+/** Jugadores por equipo en golf y tenis (ATP Finals: 3). */
+export function tamanoEquipoGolfTenis(competicion: string | null | undefined): number {
+  return esTorneoFinals(competicion) ? 3 : TAMANO_EQUIPO_GOLF_TENIS;
+}
+
 export function calcularPreciosTenisDetallado(
   jugadores: JugadorTenisCuota[],
-  opciones: { presupuesto?: number; tamanoEquipo?: number } = {}
+  opciones: { presupuesto?: number; tamanoEquipo?: number; finals?: boolean } = {}
 ): { precios: PrecioTenis[]; favorito: number; minimo: number; gamma: number; puestoMedia: number; cumple: boolean } {
   const c = PRECIO_TENIS;
   const presupuesto = opciones.presupuesto ?? EQUIPO_PRESUPUESTO;
   const tam = opciones.tamanoEquipo ?? TAMANO_EQUIPO_GOLF_TENIS;
   const media = presupuesto / tam;
   const redondear = (x: number) => Math.round(x / c.redondeo) * c.redondeo;
-  const minimo = redondear(media * c.minimoSobreMedia);
+  // 14/11 (Iñi): ATP Finals (8 jugadores, equipos de 3). Todos juegan al menos
+  // 3 partidos (liguilla), así que el peor puntúa bastante más que en un cuadro
+  // normal: precios mucho más apretados (mínimo al 60 % de la media).
+  const minimo = redondear(media * (opciones.finals ? 0.6 : c.minimoSobreMedia));
   const validas = jugadores.filter((j) => typeof j.cuota === 'number' && Number.isFinite(j.cuota) && j.cuota > 1);
   const n = jugadores.length;
   if (validas.length === 0) {
@@ -81,13 +102,16 @@ export function calcularPreciosTenisDetallado(
   const suma = validas.reduce((s, j) => s + 1 / (j.cuota as number), 0);
   const rondas = Math.max(1, Math.ceil(Math.log2(Math.max(2, n))));
   const prob = (cuota: number) => 1 / cuota / suma;
-  const pts = (cuota: number) => puntosEsperadosTenis(prob(cuota), rondas);
+  const pts = (cuota: number) => (opciones.finals ? puntosEsperadosFinals(prob(cuota)) : puntosEsperadosTenis(prob(cuota), rondas));
   const cuotasOrd = validas.map((j) => j.cuota as number).sort((a, b) => a - b);
   const ptsOrd = cuotasOrd.map(pts);
   const ptsMax = ptsOrd[0];
   const ptsMin = ptsOrd[ptsOrd.length - 1];
   const zDe = (x: number) => (ptsMax - ptsMin > 1e-9 ? Math.max(0, Math.min(1, (x - ptsMin) / (ptsMax - ptsMin))) : 1);
-  const k = Math.min(c.kMaximo, Math.max(c.kMinimo, c.kBase + c.kPorProbFavorito * prob(cuotasOrd[0])));
+  // ATP Finals: el más caro entre 1,25 y 1,35 veces la media (≈ 42.000-45.000 €).
+  const k = opciones.finals
+    ? Math.min(1.35, Math.max(1.25, 1.15 + 0.4 * prob(cuotasOrd[0])))
+    : Math.min(c.kMaximo, Math.max(c.kMinimo, c.kBase + c.kPorProbFavorito * prob(cuotasOrd[0])));
   let favorito = media * k;
 
   const preciosCon = (gamma: number, fav: number) => ptsOrd.map((x) => redondear(minimo + (fav - minimo) * Math.pow(zDe(x), gamma)));
@@ -96,7 +120,7 @@ export function calcularPreciosTenisDetallado(
     const dosMasTres = pr[0] + pr[1] + pr.slice(-(tam - 2)).reduce((a, b) => a + b, 0);
     if (dosMasTres > presupuesto) return false;
     if (pr.length >= 12) return pr.slice(3, 3 + tam).reduce((a, b) => a + b, 0) >= presupuesto * c.margenTop8; // puestos 4º-8º
-    return pr.slice(0, tam).reduce((a, b) => a + b, 0) >= presupuesto * 1.1;
+    return pr.slice(0, tam).reduce((a, b) => a + b, 0) >= presupuesto * (opciones.finals ? 1.08 : 1.1);
   };
   const gammaPara = (r: number, fav: number) => {
     const z = zDe(ptsOrd[r - 1]);
@@ -117,7 +141,7 @@ export function calcularPreciosTenisDetallado(
         break buscar;
       }
     }
-    favorito = Math.max(media * 1.2, favorito - media * 0.05); // si los 2 más caros no caben con los 3 más baratos
+    favorito = Math.max(media * (opciones.finals ? 1.1 : 1.2), favorito - media * (opciones.finals ? 0.03 : 0.05)); // si los 2 más caros no caben con los 3 más baratos
   }
   if (!elegido.cumple) elegido = { ...elegido, gamma: gammaPara(rBase, favorito) };
 
@@ -136,6 +160,7 @@ export function calcularPreciosTenisDetallado(
   };
 }
 
-export function calcularPreciosTenis(jugadores: JugadorTenisCuota[]): PrecioTenis[] {
-  return calcularPreciosTenisDetallado(jugadores).precios;
+export function calcularPreciosTenis(jugadores: JugadorTenisCuota[], competicion?: string | null): PrecioTenis[] {
+  const finals = esTorneoFinals(competicion);
+  return calcularPreciosTenisDetallado(jugadores, finals ? { finals: true, tamanoEquipo: 3 } : {}).precios;
 }
