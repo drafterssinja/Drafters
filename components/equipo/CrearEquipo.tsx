@@ -8,7 +8,8 @@ import { supabase, Perfil } from '@/lib/supabaseClient';
 import { marcarFavoritosPorDefecto } from '@/lib/favoritosJugador';
 import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
-import { EQUIPO_PRESUPUESTO, TAMANO_EQUIPO_GOLF_TENIS, FORMACIONES_FUTBOL, colorPresupuesto } from '@/lib/draftConfig';
+import { EQUIPO_PRESUPUESTO, FORMACIONES_FUTBOL, colorPresupuesto } from '@/lib/draftConfig';
+import { tamanoEquipoGolfTenis } from '@/lib/precioTenis';
 import { formatEuros, inicialesJugador, huecosPorLinea, lineaDePosicion, type LineaFutbol } from '@/lib/salaShared';
 import EstadisticasJugador, { BotonEstadisticas } from '@/components/equipo/EstadisticasJugador';
 import IconoAusencia, { type Ausencia } from '@/components/equipo/IconoAusencia';
@@ -134,6 +135,8 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
 
   const [perfil, setPerfil] = useState<Perfil | null>(null);
   const [sala, setSala] = useState<SalaRow | null>(null);
+  // 14/11 (Iñi): en las ATP Finals (8 jugadores) el equipo es de 3, no de 5.
+  const tamGT = tamanoEquipoGolfTenis(sala?.competicion);
   const [jugadores, setJugadores] = useState<JugadorRow[]>([]);
   const [partidos, setPartidos] = useState<PartidoRow[]>([]);
   const [partidosSeleccionados, setPartidosSeleccionados] = useState<Set<string>>(new Set());
@@ -683,12 +686,12 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
   // 04/11 (Iñi): estadísticas del jugador (botón a la derecha del nombre).
   const [statsDe, setStatsDe] = useState<JugadorRow | null>(null);
   const puedeElegirJugador = (j: JugadorRow) =>
-    isFutbol ? !(seleccionadosPorLinea[lineaDePosicion(j.posicion)] >= huecos[lineaDePosicion(j.posicion)] || clubLleno(j)) : selected.length < TAMANO_EQUIPO_GOLF_TENIS;
+    isFutbol ? !(seleccionadosPorLinea[lineaDePosicion(j.posicion)] >= huecos[lineaDePosicion(j.posicion)] || clubLleno(j)) : selected.length < tamGT;
   const clubPasado = limite2 ? Array.from(porClub.entries()).find(([, n]) => n > 2)?.[0] ?? null : null;
   const color = colorPresupuesto(restante);
   const spentPct = Math.max(0, Math.min(100, (gasto / EQUIPO_PRESUPUESTO) * 100));
 
-  const equipoCompleto = isFutbol ? selected.length === totalHuecos : selected.length === TAMANO_EQUIPO_GOLF_TENIS;
+  const equipoCompleto = isFutbol ? selected.length === totalHuecos : selected.length === tamGT;
   const puedeConfirmar = equipoCompleto && !overBudget && !clubPasado;
   // Textos que cambian entre crear e inscribirse por primera vez (con
   // cobro) y editar un equipo ya inscrito (sin cobro) — 27/09, décima
@@ -903,7 +906,7 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
       });
       setAlineacion(ali);
     } else {
-      final = validos.slice(0, TAMANO_EQUIPO_GOLF_TENIS);
+      final = validos.slice(0, tamGT);
     }
     setSelected(final);
     const fuera = e.jugadores.length - final.length;
@@ -948,7 +951,7 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
       if (clubLleno(jugador)) return; // ya tiene 2 de ese equipo (modo libre)
       setSelected((prev) => [...prev, jugador.id]);
     } else {
-      if (selected.length >= TAMANO_EQUIPO_GOLF_TENIS) return; // equipo lleno
+      if (selected.length >= tamGT) return; // equipo lleno
       setSelected((prev) => [...prev, jugador.id]);
     }
   }
@@ -1130,7 +1133,7 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
                       <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 27, lineHeight: 1, color }}>{formatEuros(restante)}</span>
                     )}
                     <span style={{ fontSize: 10.5, color: S.MUTED_3, whiteSpace: 'nowrap' }}>
-                      {selected.length}/{isFutbol ? totalHuecos : TAMANO_EQUIPO_GOLF_TENIS} elegidos
+                      {selected.length}/{isFutbol ? totalHuecos : tamGT} elegidos
                     </span>
                   </div>
                   {!libre && (
@@ -1142,7 +1145,7 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
                       "si te quedan 7 jugadores y 70.000 €, que te diga que tienes
                       una media de 10.000 € para gastar" — se recalcula con cada fichaje. */}
                   {(() => {
-                    const faltan = (isFutbol ? totalHuecos : TAMANO_EQUIPO_GOLF_TENIS) - selected.length;
+                    const faltan = (isFutbol ? totalHuecos : tamGT) - selected.length;
                     if (faltan <= 0) {
                       return <span style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12.5, fontWeight: 700, color: overBudget || clubPasado ? '#FF5C5C' : '#3DDC84' }}>{overBudget ? 'Equipo completo, pero te has pasado del presupuesto' : clubPasado ? `Tienes más de 2 jugadores del ${clubPasado}: quita alguno` : 'Equipo completo'}</span>;
                     }
@@ -1425,7 +1428,7 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
                 <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                   <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 7 }}>
                     {(busquedaActiva || mostrarTodosFlat ? jugadoresGolfTenisFiltrados : jugadoresGolfTenisFiltrados.slice(0, MOSTRAR_TOP_N_FLAT)).map((j) => (
-                      <PlayerRow key={j.id} jugador={j} selected={selected.includes(j.id)} disabled={!selected.includes(j.id) && selected.length >= TAMANO_EQUIPO_GOLF_TENIS} onToggle={() => toggleJugador(j)} sinPrecio={libre} onStats={() => setStatsDe(j)} />
+                      <PlayerRow key={j.id} jugador={j} selected={selected.includes(j.id)} disabled={!selected.includes(j.id) && selected.length >= tamGT} onToggle={() => toggleJugador(j)} sinPrecio={libre} onStats={() => setStatsDe(j)} />
                     ))}
                     {!busquedaActiva && !mostrarTodosFlat && jugadoresGolfTenisFiltrados.length > MOSTRAR_TOP_N_FLAT && (
                       <button type="button" onClick={() => setMostrarTodosFlat(true)} style={mostrarMasButtonStyle}>
@@ -1439,7 +1442,7 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
 
                   <div style={{ flexShrink: 0, width: 96, display: 'flex', flexDirection: 'column', gap: 6, position: 'sticky', top: altoTarjetaTop + 8 }}>
                     <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: S.MUTED_3, textAlign: 'center' }}>Tu equipo</span>
-                    {Array.from({ length: TAMANO_EQUIPO_GOLF_TENIS }).map((_, i) => {
+                    {Array.from({ length: tamGT }).map((_, i) => {
                       const j = seleccionados[i];
                       return j ? (
                         <a
@@ -1532,7 +1535,7 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
               <div style={{ height: 76 }} aria-hidden="true" />
               <div style={{ position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 'var(--page-max-width)', boxSizing: 'border-box', zIndex: 30, padding: '8px 20px calc(12px + env(safe-area-inset-bottom))', background: 'linear-gradient(180deg, rgba(11,15,14,0) 0%, #0B0F0E 40%)' }}>
                 <button type="button" disabled={!puedeConfirmar} onClick={() => avanzarPaso('confirm')} style={submitButtonStyle(puedeConfirmar)}>
-                  {equipoCompleto ? (overBudget ? 'Supera el presupuesto' : textoRevisar) : `Faltan ${TAMANO_EQUIPO_GOLF_TENIS - selected.length} jugadores`}
+                  {equipoCompleto ? (overBudget ? 'Supera el presupuesto' : textoRevisar) : `Faltan ${tamGT - selected.length} jugadores`}
                 </button>
               </div>
               </>
