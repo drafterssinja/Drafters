@@ -1,5 +1,6 @@
 'use client';
 
+import { errorAmigable } from '@/lib/errorAmigable';
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
@@ -83,7 +84,7 @@ export default function AmigosPage() {
       p_historial: nueva.ver_historial,
       p_invitaciones: nueva.permitir_invitaciones,
     });
-    if (e) setError(e.message);
+    if (e) setError(errorAmigable(e, 'amigos'));
   }
 
   const amigos = (lista ?? []).filter((f) => f.estado === 'aceptada');

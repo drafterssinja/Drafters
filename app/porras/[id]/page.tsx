@@ -1,5 +1,6 @@
 'use client';
 
+import { errorAmigable } from '@/lib/errorAmigable';
 import { etiquetasPosicion } from '@/lib/posicionesEmpate';
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
@@ -685,7 +686,7 @@ function BorrarEquipoPorra({ equipoId, precio }: { equipoId: string; precio: num
     setError(null);
     const { data, error: err } = await supabase.rpc('desapuntarse_de_porra', { p_equipo_id: equipoId });
     if (err) {
-      setError(err.message);
+      setError(errorAmigable(err, 'porra'));
       setBorrando(false);
       return;
     }

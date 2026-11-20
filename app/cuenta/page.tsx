@@ -1,5 +1,6 @@
 'use client';
 
+import { errorAmigable } from '@/lib/errorAmigable';
 import FechaNacimientoSelect, { fechaNacimientoCompleta } from '@/components/FechaNacimientoSelect';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -192,7 +193,7 @@ export default function CuentaPage() {
       const { error: authUpdateError } = await supabase.auth.updateUser(cambiosAuth);
       if (authUpdateError) {
         setGuardando(false);
-        setError('Tus datos se han guardado, pero no se ha podido actualizar el email o la contraseña: ' + authUpdateError.message);
+        setError('Tus datos se han guardado, pero no se ha podido actualizar el email o la contraseña: ' + errorAmigable(authUpdateError, 'cuenta'));
         return;
       }
     }
