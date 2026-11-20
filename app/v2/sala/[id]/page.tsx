@@ -3,6 +3,8 @@
 import InvitarAmigos from '@/components/v2/InvitarAmigos';
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import AvisoSinCreditos, { esErrorSinCreditos } from '@/components/v2/AvisoSinCreditos';
+import type { DeporteV2 } from '@/components/v2/IconosV2';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import * as S from '@/lib/mockupStyles';
@@ -134,12 +136,18 @@ export default function V2Sala() {
     };
   }, [amistoso, jornadas]);
 
+  const [sinCreditos, setSinCreditos] = useState(false);
   async function unirse(): Promise<boolean> {
     setError(null);
     const { error: e } = await supabase.rpc('amistoso_unirse', { p_amistoso: id, p_contrasena: contrasena.trim() || null });
     if (e) {
       const m = mensajeError(e);
       avisarCambioCreditos();
+      // 20/11 (Iñi): sin créditos → aviso en mitad de la pantalla con el vídeo.
+      if (esErrorSinCreditos(m)) {
+        setSinCreditos(true);
+        return false;
+      }
       setError(/contraseña incorrecta/i.test(m) ? `❌ Esa contraseña no es la buena. Revísala (mayúsculas, espacios...) o pídesela otra vez a @${resumen?.nombres[amistoso?.creador_id ?? ''] ?? 'quien creó la sala'}.` : m);
       return false;
     }
@@ -603,6 +611,17 @@ export default function V2Sala() {
             </>
           )}
         </>
+      )}
+      {sinCreditos && amistoso && (
+        <AvisoSinCreditos
+          deporte={amistoso.deporte as DeporteV2}
+          texto="Entrar en una sala cuesta 1 crédito. Mira un vídeo para recargarlos y entras en la sala."
+          onCerrar={() => setSinCreditos(false)}
+          onRecargado={() => {
+            setSinCreditos(false);
+            void unirseOHacerEquipo();
+          }}
+        />
       )}
     </MarcoV2>
   );
