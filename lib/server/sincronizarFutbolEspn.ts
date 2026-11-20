@@ -714,6 +714,15 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
     }
   }
   const rescatadosApif: string[] = [];
+  // 20/11 (Iñi): MODO PRUEBA de API-Football. Los mismos puntos calculados SOLO
+  // con las estadísticas de API-Football, guardados aparte (futbol_puntos_apif,
+  // SQL 110) para compararlos con los de ESPN en Admin → Comparar ESPN y
+  // API-Football. No cuentan para nada.
+  const filasSombra: Record<string, unknown>[] = [];
+  const { data: cfgFuente } = await admin.from('futbol_valor_estado').select('valor').eq('clave', 'config:fuente_puntos_futbol').maybeSingle();
+  // Por liga: { ligas: { "La Liga": "apif", "Champions League": "espn" } }.
+  const cfgV = (cfgFuente as { valor: { fuente?: string; ligas?: Record<string, string> } | null } | null)?.valor;
+  const fuentePuntos = (cfgV?.ligas?.[competicion.split(' - ')[0]] ?? cfgV?.fuente ?? 'espn') === 'apif' ? 'apif' : 'espn';
 
   for (const p of partidos) {
     const k = `${p.local.clave}|${p.visitante.clave}`;
@@ -864,6 +873,8 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
       // 06/11 (Iñi): el equipo de API-Football de este lado y sus jugadores que
       // ESPN no trae (para puntuar con API-Football a los nuestros sin pareja).
       const usadosApif = new Set(Array.from(apifPorAtleta.values()));
+      // Modo prueba: solo con datos de API-Football del formato nuevo (con id de jugador).
+      const datosConId = datosApif && datosApif.some((e) => e.jugadores.some((x) => x.id !== undefined)) ? datosApif.flatMap((e) => e.jugadores) : null;
       const idsRoster = new Set(filasRoster.map((f) => f.atletaId));
       const eqApif = (datosApif ?? [])
         .map((e) => ({ e, n: Array.from(apifPorAtleta.entries()).filter(([at, x]) => idsRoster.has(at) && e.jugadores.includes(x)).length }))
@@ -890,7 +901,39 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
           : soloApif
             ? estadisticasDeApif(soloApif, finalizado, mejorNota !== null && soloApif.nota === mejorNota)
             : estadisticasVacias();
-        const { total, desglose } = puntuarJugador(j.posicion, st, { finalizado, golesContraEquipo: rival.goles, equipoGana: resultado === 'G' });
+        const pEspn = puntuarJugador(j.posicion, st, { finalizado, golesContraEquipo: rival.goles, equipoGana: resultado === 'G' });
+        let { total, desglose } = pEspn;
+        let stFinal = st;
+        // Modo prueba: lo mismo, solo con API-Football (no cuenta para nada).
+        if (datosConId && resumen) {
+          const idA = apifDeJugador.get(j.id);
+          const porId = idA ? datosConId.find((x) => x.id === idA) : undefined;
+          const apS = porId ?? ap ?? soloApif;
+          const stA = apS ? estadisticasDeApif(apS, finalizado, mejorNota !== null && apS.nota === mejorNota) : estadisticasVacias();
+          const rA = puntuarJugador(j.posicion, stA, { finalizado, golesContraEquipo: rival.goles, equipoGana: resultado === 'G' });
+          if (st.jugo || stA.jugo)
+            filasSombra.push({
+              jugador_id: j.id,
+              competicion,
+              partido_espn_id: p.espnId,
+              partido_estado: p.estado,
+              casado_por: porId ? 'id' : ap ? 'espn' : soloApif ? 'nombre' : null,
+              puntos_espn: total,
+              minutos_espn: st.jugo ? st.minutos : 0,
+              desglose_espn: desglose,
+              puntos_apif: rA.total,
+              minutos_apif: stA.jugo ? stA.minutos : 0,
+              desglose_apif: rA.desglose,
+              actualizado_en: ahora.toISOString(),
+            });
+          // Interruptor (Admin → Comparar ESPN y API-Football): puntos con
+          // API-Football. Si a alguien no se le encuentra allí, sigue con ESPN.
+          if (fuentePuntos === 'apif' && apS) {
+            total = rA.total;
+            desglose = rA.desglose;
+            stFinal = stA;
+          }
+        }
         // Eventos del jugador para los avisos de la clasificación (07/10).
         if (fr && resumen) {
           const ev = (tipo: TipoAvisoFutbol, disc: string, minuto: string | null, detalle: string | null) =>
@@ -936,8 +979,8 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
           jugador_id: j.id,
           competicion,
           puntos_total: total,
-          jugo: st.jugo,
-          minutos: st.jugo ? st.minutos : 0,
+          jugo: stFinal.jugo,
+          minutos: stFinal.jugo ? stFinal.minutos : 0,
           espn_atleta_id: fr?.atletaId ?? null,
           resultado_equipo: resultado,
           partido_estado: p.estado,
@@ -1031,6 +1074,11 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
   if (filasPartido.length > 0) {
     const { error } = await admin.from('futbol_partidos_jornada').upsert(filasPartido, { onConflict: 'competicion,clave_local,clave_visitante' });
     if (error) throw new Error(`Guardando partidos: ${error.message}`);
+  }
+  // 20/11: modo prueba de API-Football (si falla o falta el SQL 110, no pasa nada).
+  for (let i = 0; i < filasSombra.length; i += 300) {
+    const { error } = await admin.from('futbol_puntos_apif').upsert(filasSombra.slice(i, i + 300), { onConflict: 'jugador_id,competicion' });
+    if (error) break;
   }
   // 01/11: lo que ha traído API-Football en esta pasada (si falla, no rompe la sincronización).
   if (filasApif.length > 0) await admin.from('futbol_apif_partido').upsert(filasApif, { onConflict: 'competicion,clave_local,clave_visitante' });
