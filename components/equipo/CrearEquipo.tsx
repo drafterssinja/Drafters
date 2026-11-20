@@ -394,7 +394,7 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
       }
       const nombreJornada = info.competicion.replace('La Liga', 'LaLiga').replace('Champions League', 'Champions').replace(/\s*-\s*Jornada\s*/i, ' · Jornada ');
       const salaRow: SalaRow = { id: du.ronda, nombre: `${du.privada ? 'Liga privada' : 'Liga Drafters'} · ${nombreJornada}`, competicion: info.competicion, deporte: dep, tipo: 'amistoso', aforo: 2, buy_in: 0, estado: 'abierta', fecha_limite_inscripcion: info.cierre, tramo: null };
-      const [{ data: jugData }, { data: partidosData }, { data: otrosData }, { data: v1Data }] = await Promise.all([
+      const [{ data: jugData }, { data: partidosData }, { data: otrosData }, { data: v1Data }, { data: misData }] = await Promise.all([
         todasLasFilas((d, h) => supabase.from('jugadores').select('*').eq('deporte', dep).eq('competicion', info.competicion).order('precio', { ascending: false }).order('id').range(d, h)),
         dep === 'futbol' ? supabase.from('cuotas_partido_futbol').select('equipo_local,equipo_visitante,cuota_1,cuota_x,cuota_2').eq('competicion', info.competicion) : Promise.resolve({ data: [] }),
         supabase.from('amistoso_equipos').select('id,competicion,jugadores,alineacion,amistosos(nombre)').eq('usuario_id', uid).eq('competicion', info.competicion).order('updated_at', { ascending: false }).limit(20),
@@ -405,6 +405,8 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
           .eq('salas.competicion', info.competicion)
           .order('created_at', { ascending: false })
           .limit(20),
+        // 20/11 (Iñi): también los equipos de sus ligas privadas y de la Liga Drafters (SQL 111).
+        supabase.rpc('mis_equipos_jornada', { p_competicion: info.competicion }).then((r) => r, () => ({ data: null })),
       ]);
       if (!activo) return;
       type Uno<T> = T | T[] | null;
@@ -418,6 +420,9 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
         vistos.add(firma);
         hechos.push(e);
       };
+      // El equipo que ya tienes en esta misma liga no se ofrece.
+      if (info.mi_equipo?.jugadores?.length) vistos.add(`${[...info.mi_equipo.jugadores].sort().join(',')}|${info.mi_equipo.alineacion ?? ''}`);
+      meterMisEquipos(misData, meter);
       for (const e of (otrosData as { id: string; jugadores: string[]; alineacion: string | null; amistosos: Uno<{ nombre: string }> }[] | null) ?? []) {
         meter({ id: `a:${e.id}`, etiqueta: `${uno(e.amistosos)?.nombre ?? 'Amistoso'}`, jugadores: e.jugadores ?? [], alineacion: e.alineacion, grupo: 'Tus amistosos de esta jornada' });
       }
@@ -470,7 +475,7 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
       // (los precios cambian de una a otra). En libre, cualquiera.
       const soloEstaJornada = a.modalidad === 'presupuesto';
 
-      const [{ data: jugData }, { data: partidosData }, { data: guardadosData }, { data: otrosData }, { data: v1Data }] = await Promise.all([
+      const [{ data: jugData }, { data: partidosData }, { data: guardadosData }, { data: otrosData }, { data: v1Data }, { data: misData }] = await Promise.all([
         todasLasFilas((d, h) => supabase.from('jugadores').select('*').eq('deporte', a.deporte).eq('competicion', jo.competicion).order('precio', { ascending: false }).order('id').range(d, h)),
         a.deporte === 'futbol'
           ? supabase.from('cuotas_partido_futbol').select('equipo_local,equipo_visitante,cuota_1,cuota_x,cuota_2').eq('competicion', jo.competicion)
@@ -485,6 +490,8 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
           .eq('salas.deporte', a.deporte)
           .order('created_at', { ascending: false })
           .limit(40),
+        // 20/11 (Iñi): también los equipos de sus ligas privadas y de la Liga Drafters (SQL 111).
+        supabase.rpc('mis_equipos_jornada', { p_competicion: jo.competicion }).then((r) => r, () => ({ data: null })),
       ]);
       if (!activo) return;
 
@@ -499,6 +506,11 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
         vistos.add(firma);
         hechos.push(e);
       };
+      {
+        const m0 = mioData as { jugadores: string[]; alineacion: string | null } | null;
+        if (m0?.jugadores?.length) vistos.add(`${[...m0.jugadores].sort().join(',')}|${m0.alineacion ?? ''}`);
+      }
+      meterMisEquipos(misData, meter);
       for (const g of (guardadosData as { id: string; nombre: string; competicion: string; jugadores: string[]; alineacion: string | null }[] | null) ?? []) {
         if (soloEstaJornada && g.competicion !== jo.competicion) continue;
         meter({ id: `g:${g.id}`, etiqueta: g.nombre, jugadores: g.jugadores ?? [], alineacion: g.alineacion, grupo: 'Equipos guardados' });
@@ -1811,4 +1823,14 @@ function traducirError(mensaje: string): string {
   // técnico que añade PostgREST delante.
   // 20/11 (Iñi): y los técnicos (en inglés) con un mensaje entendible.
   return errorAmigable(mensaje, 'crear equipo');
+}
+
+// 20/11 (Iñi): mis equipos de la misma jornada en salas, ligas privadas y Liga
+// Drafters (SQL 111), para reutilizarlos.
+type FilaMiEquipo = { origen: 'sala' | 'liga_privada' | 'liga_drafters'; id: string; etiqueta: string; jugadores: string[] | null; alineacion: string | null };
+function meterMisEquipos(data: unknown, meter: (e: EquipoHecho) => void) {
+  const grupo = { sala: 'Tus salas de esta jornada', liga_privada: 'Tus ligas privadas', liga_drafters: 'Liga Drafters' } as const;
+  for (const e of (data as FilaMiEquipo[] | null) ?? []) {
+    meter({ id: `${e.origen}:${e.id}`, etiqueta: e.etiqueta, jugadores: Array.isArray(e.jugadores) ? e.jugadores : [], alineacion: e.alineacion, grupo: grupo[e.origen] ?? 'Otros equipos' });
+  }
 }
