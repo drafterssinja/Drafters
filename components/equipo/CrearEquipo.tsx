@@ -10,6 +10,7 @@ import DraftersHeader from '@/components/DraftersHeader';
 import * as S from '@/lib/mockupStyles';
 import { EQUIPO_PRESUPUESTO, FORMACIONES_FUTBOL, colorPresupuesto } from '@/lib/draftConfig';
 import { tamanoEquipoGolfTenis } from '@/lib/precioTenis';
+import { errorAmigable } from '@/lib/errorAmigable';
 import { formatEuros, inicialesJugador, huecosPorLinea, lineaDePosicion, type LineaFutbol } from '@/lib/salaShared';
 import EstadisticasJugador, { BotonEstadisticas } from '@/components/equipo/EstadisticasJugador';
 import IconoAusencia, { type Ausencia } from '@/components/equipo/IconoAusencia';
@@ -1808,5 +1809,6 @@ function traducirError(mensaje: string): string {
   // Los mensajes que manda inscribirse_en_sala() ya están en español (ver
   // drafters-schema.sql) — se devuelven tal cual, quitando el prefijo
   // técnico que añade PostgREST delante.
-  return mensaje.replace(/^ERROR:\s*/i, '');
+  // 20/11 (Iñi): y los técnicos (en inglés) con un mensaje entendible.
+  return errorAmigable(mensaje, 'crear equipo');
 }
