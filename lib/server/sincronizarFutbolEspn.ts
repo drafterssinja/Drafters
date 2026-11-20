@@ -812,19 +812,36 @@ async function sincronizarCompeticion(admin: Admin, competicion: string, slug: s
         const idx = filas.indexOf(fila);
         if (idx >= 0) filaPorNuestro.set(idNuestro, filasRoster[idx]);
       });
+      // 20/11 (Iñi, "Fer Niño" en ESPN / Fernando Niño en Drafters): si el
+      // nombre no casa pero el jugador está casado con API-Football (valor
+      // Drafters o botón «Casar»), se usa el id de API-Football como puente:
+      // ESPN ↔ API-Football (mismo partido) ↔ nuestro jugador. Así puntúa con
+      // TODAS sus estadísticas de ESPN, avisos de gol incluidos.
+      const atletasUsados = new Set(Array.from(filaPorNuestro.values()).map((f) => f.atletaId));
+      if (resumen && apifPorAtleta.size > 0) {
+        for (const j of nuestrosDelEquipo) {
+          if (filaPorNuestro.has(j.id)) continue;
+          const idA = apifDeJugador.get(j.id);
+          if (!idA) continue;
+          const fr = filasRoster.find((f) => !atletasUsados.has(f.atletaId) && apifPorAtleta.get(f.atletaId)?.id === idA);
+          if (!fr) continue;
+          filaPorNuestro.set(j.id, fr);
+          atletasUsados.add(fr.atletaId);
+        }
+      }
       emparejadosTotal += filaPorNuestro.size;
       if (resumen) {
         let hayProblema = false;
         for (const f of emp.sinEmparejarTabla) {
           const fr = filasRoster[filas.indexOf(f)];
-          if (fr && ((fr.stats.appearances ?? 0) > 0 || fr.titular || fr.entro)) {
+          if (fr && !atletasUsados.has(fr.atletaId) && ((fr.stats.appearances ?? 0) > 0 || fr.titular || fr.entro)) {
             sinEmparejarEspn.push({ nombre: fr.nombreCompleto, equipo: nombreEquipoNuestro });
             hayProblema = true;
           }
         }
         // Para poder enlazarlos a mano, se ofrecen los jugadores nuestros de
         // ese equipo que no han encontrado pareja.
-        if (hayProblema) for (const j of emp.sinEmparejarFicha) fichasSinPareja.set(j.id, { id: j.id, nombre: j.nombre, equipo: j.equipo_real });
+        if (hayProblema) for (const j of emp.sinEmparejarFicha) if (!filaPorNuestro.has(j.id)) fichasSinPareja.set(j.id, { id: j.id, nombre: j.nombre, equipo: j.equipo_real });
       }
 
       const resultado: ResultadoEquipo | null = finalizado ? resultadoDeEquipo(mio.goles, rival.goles) : null;
