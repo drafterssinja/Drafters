@@ -11,6 +11,7 @@ import * as S from '@/lib/mockupStyles';
 import { EQUIPO_PRESUPUESTO, FORMACIONES_FUTBOL, colorPresupuesto } from '@/lib/draftConfig';
 import { tamanoEquipoGolfTenis } from '@/lib/precioTenis';
 import { errorAmigable } from '@/lib/errorAmigable';
+import AvisoSinCreditos, { esErrorSinCreditos } from '@/components/v2/AvisoSinCreditos';
 import { formatEuros, inicialesJugador, huecosPorLinea, lineaDePosicion, type LineaFutbol } from '@/lib/salaShared';
 import EstadisticasJugador, { BotonEstadisticas } from '@/components/equipo/EstadisticasJugador';
 import IconoAusencia, { type Ausencia } from '@/components/equipo/IconoAusencia';
@@ -183,6 +184,12 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
   const [error, setError] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
   const [errorEnvio, setErrorEnvio] = useState<string | null>(null);
+  // 20/11 (Iñi): sin créditos → aviso en mitad de la pantalla con el vídeo para recargar.
+  const [sinCreditos, setSinCreditos] = useState(false);
+  const errorAlGuardar = (mensaje: string) => {
+    if (esErrorSinCreditos(mensaje)) setSinCreditos(true);
+    else setErrorEnvio(traducirError(mensaje));
+  };
 
   // Buscador de nombre de jugador (25/09, tercera vuelta) — "para todos los
   // deportes... incluir un buscador... que se vaya filtrando según lo que
@@ -975,7 +982,7 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
     if (esDuelo && duelo && sala) {
       const { error: errDu } = await supabase.rpc(esPrivada ? 'lp_guardar_equipo' : 'duelos_guardar_equipo', { p_ronda: duelo.ronda, p_jugadores: selected, p_alineacion: sala.deporte === 'futbol' ? alineacion : null });
       if (errDu) {
-        setErrorEnvio(traducirError(errDu.message));
+        errorAlGuardar(errDu.message);
         setEnviando(false);
         return;
       }
@@ -994,7 +1001,7 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
         ? await supabase.rpc('amistoso_guardar_equipo', comun)
         : await supabase.rpc('amistoso_unirse_con_equipo', { ...comun, p_contrasena: clave });
       if (errAm) {
-        setErrorEnvio(traducirError(errAm.message));
+        errorAlGuardar(errAm.message);
         setEnviando(false);
         return;
       }
@@ -1020,7 +1027,7 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
           p_nombre_equipo: null,
         });
     if (rpcError) {
-      setErrorEnvio(traducirError(rpcError.message));
+      errorAlGuardar(rpcError.message);
       setEnviando(false);
       return;
     }
@@ -1637,6 +1644,17 @@ export default function CrearEquipo({ amistoso, duelo }: { amistoso?: AmistosoEq
                 }}
               >
                 {errorEnvio && <p style={{ ...S.errorText, margin: 0 }}>{errorEnvio}</p>}
+                {sinCreditos && (
+                  <AvisoSinCreditos
+                    deporte={(['futbol', 'golf', 'tenis'].includes(sala?.deporte ?? '') ? sala?.deporte : 'futbol') as DeporteV2}
+                    texto={esDuelo ? 'Cada jornada de la liga cuesta 1 crédito. Mira un vídeo para recargarlos y se guarda tu equipo.' : 'Entrar en una sala cuesta 1 crédito. Mira un vídeo para recargarlos y se guarda tu equipo.'}
+                    onCerrar={() => setSinCreditos(false)}
+                    onRecargado={() => {
+                      setSinCreditos(false);
+                      void confirmarInscripcion();
+                    }}
+                  />
+                )}
                 <button type="button" disabled={enviando} onClick={confirmarInscripcion} style={{ ...submitButtonStyle(true), opacity: enviando ? 0.7 : 1 }}>
                   {enviando ? (modoEdicion || esAmistoso ? 'Guardando...' : 'Inscribiendo...') : esDuelo ? (infoAmistoso?.tieneEquipo ? 'Guardar mi equipo' : 'Guardar mi equipo · 1 crédito') : esAmistoso ? (infoAmistoso?.soyParticipante ? 'Guardar mi equipo' : 'Unirme a la sala · 1 crédito') : modoEdicion ? 'Guardar cambios' : 'Confirmar inscripción'}
                 </button>
