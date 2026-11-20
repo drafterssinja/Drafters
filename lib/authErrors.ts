@@ -1,3 +1,5 @@
+import { errorAmigable } from '@/lib/errorAmigable';
+
 // Supabase (GoTrue) devuelve los mensajes de error de autenticación en
 // inglés y no permite cambiar ese idioma desde la configuración del
 // proyecto. Esta función traduce los mensajes más habituales a español para
@@ -49,5 +51,6 @@ export function traducirErrorAuth(mensaje: string | null | undefined): string {
     return 'No se ha podido conectar. Revisa tu conexión e inténtalo de nuevo.';
   }
 
-  return 'Ha ocurrido un error. Inténtalo de nuevo.';
+  // 20/11 (Iñi): cualquier otro error técnico, con un mensaje claro (y aviso al admin).
+  return errorAmigable(m, 'login');
 }

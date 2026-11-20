@@ -1,3 +1,4 @@
+import { errorAmigable } from '@/lib/errorAmigable';
 // ============================================================================
 // DRAFTERS V2 — AMISTOSOS (15/10)
 // ============================================================================
@@ -332,8 +333,9 @@ export function cadaXSegundos(fn: () => void, segundos: number): () => void {
   };
 }
 
+// 20/11 (Iñi): los errores técnicos salen con un mensaje entendible (lib/errorAmigable.ts).
 export function mensajeError(e: { message?: string } | null | undefined): string {
-  return (e?.message ?? 'Algo ha fallado.').replace(/^ERROR:\s*/i, '');
+  return errorAmigable(e);
 }
 
 // ---------------------------------------------------------------------------
