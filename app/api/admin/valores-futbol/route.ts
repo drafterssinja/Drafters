@@ -28,13 +28,22 @@ export async function POST(req: NextRequest) {
   const admin = crearClienteAdmin();
   if (!(await esAdmin(req, admin))) return NextResponse.json({ error: 'Solo admin.' }, { status: 403 });
   if (!claveApif()) return NextResponse.json({ error: 'Falta API_FOOTBALL_KEY en Vercel.' }, { status: 400 });
-  const { accion, id, apif_id } = (await req.json().catch(() => ({}))) as { accion?: string; id?: string; apif_id?: number };
+  const { accion, id, apif_id, liga, fuente } = (await req.json().catch(() => ({}))) as { accion?: string; id?: string; apif_id?: number; liga?: string; fuente?: string };
   try {
     if (accion === 'plantillas') return NextResponse.json(await encolarValorFutbol(admin, 'plantilla'));
     if (accion === 'valores') return NextResponse.json(await encolarValorFutbol(admin, 'stats'));
     if (accion === 'procesar') return NextResponse.json(await procesarColaValorFutbol(admin, 10));
     // 05/11: lesionados, sancionados y dudas de las jornadas abiertas.
     if (accion === 'bajas') return NextResponse.json(await actualizarBajasFutbol(admin));
+    // 20/11: de dónde salen los puntos de cada liga (ESPN o API-Football).
+    if (accion === 'fuente' && liga && (fuente === 'espn' || fuente === 'apif')) {
+      const { data } = await admin.from('futbol_valor_estado').select('valor').eq('clave', 'config:fuente_puntos_futbol').maybeSingle();
+      const valor = ((data as { valor: { ligas?: Record<string, string> } | null } | null)?.valor) ?? {};
+      const nuevo = { ...valor, ligas: { ...(valor.ligas ?? {}), [liga]: fuente } };
+      const { error } = await admin.from('futbol_valor_estado').upsert({ clave: 'config:fuente_puntos_futbol', valor: nuevo, actualizado_en: new Date().toISOString() }, { onConflict: 'clave' });
+      if (error) throw new Error(error.message);
+      return NextResponse.json({ ok: true, ligas: nuevo.ligas });
+    }
     // 06/11: casar a mano un jugador con API-Football.
     if (accion === 'squad' && id) return NextResponse.json(await plantillaApifDe(admin, id));
     if (accion === 'casar' && id && apif_id) return NextResponse.json(await casarAMano(admin, id, Number(apif_id)));
