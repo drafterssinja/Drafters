@@ -349,9 +349,13 @@ async function cerrarPlantillas(admin: Admin, lote: string, inicio: string) {
       if (f.visto_en && f.visto_en >= inicio) continue;
       if (!f.ausente_desde) {
         await admin.from('futbol_valor').update({ ausente_desde: new Date().toISOString() }).eq('id', f.id);
-      } else if (ahora - new Date(f.ausente_desde).getTime() > 30 * 3600e3) {
-        await admin.from('futbol_valor').update({ activo: false, actualizado_en: new Date().toISOString() }).eq('id', f.id);
-        await evento(admin, liga, 'baja', f.nombre, `Ya no está en ${f.equipo_real ?? 'su equipo'}.`);
+      } else {
+        // 27/11 (Iñi, "no salen porteros ni defensas del Racing"): NUNCA se
+        // quita a nadie solo. Si API-Football deja de traer a un jugador en la
+        // plantilla de su equipo (a veces la trae incompleta), se avisa UNA vez
+        // en «Últimos cambios» para revisarlo, y el admin decide con «Quitar».
+        const h = (ahora - new Date(f.ausente_desde).getTime()) / 3600e3;
+        if (h > 30 && h <= 54) await evento(admin, liga, 'aviso', f.nombre, `No aparece en la plantilla de ${f.equipo_real ?? 'su equipo'} de API-Football desde hace más de un día. Si se ha ido, quítalo; si no, no hay que hacer nada.`);
       }
     }
   }
