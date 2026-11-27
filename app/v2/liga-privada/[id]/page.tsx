@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import * as S from '@/lib/mockupStyles';
+import MiEquipoJornada from '@/components/v2/MiEquipoJornada';
 import MarcoV2, { Panel } from '@/components/v2/MarcoV2';
 import { useSesionV2 } from '@/components/v2/useSesionV2';
 import Cargando from '@/components/Cargando';
@@ -257,6 +258,12 @@ function LigaPrivada() {
                   </span>
                   <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>Cierra el {fecha(proxima.cierre)}{proxima.tengo_equipo ? '' : ' · 1 crédito'}</span>
                 </Link>
+              )}
+              {/* 24/11 (Iñi): con el equipo hecho, se ve en el campo como en las salas. */}
+              {info.soy_miembro && info.estado === 'activa' && proxima && proxima.con_jugadores !== false && proxima.tengo_equipo && (
+                <Panel style={{ gap: 8 }}>
+                  <MiEquipoJornada ronda={proxima.id} privada deporte={dep} />
+                </Panel>
               )}
               {info.soy_miembro && info.estado === 'activa' && !proxima && (
                 <Panel style={{ gap: 4 }}>
