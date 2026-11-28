@@ -10,6 +10,8 @@ import { IconoCredito } from '@/components/v2/IconosV2';
 import { mensajeError } from '@/lib/v2';
 import { UsuarioConNivel, useNiveles } from '@/components/v2/Nivel';
 import { registrarVistaClasificacion } from '@/lib/actividad';
+import MiEquipoJornada from '@/components/v2/MiEquipoJornada';
+import IntroJornadaDuelo, { yaVistaIntro } from '@/components/v2/IntroJornadaDuelo';
 
 // ============================================================================
 // LIGA DRAFTERS DE FÚTBOL — DUELOS 1 CONTRA 1 POR DIVISIONES (26/10, Iñi)
@@ -147,6 +149,16 @@ export default function LigaDuelos({ deporte = 'futbol' }: { deporte?: 'futbol' 
     void cargar();
   }
 
+  // 24/11 (Iñi): animación de inicio de jornada, la primera vez que entras con
+  // tu enfrentamiento ya empezado (una vez por enfrentamiento).
+  const rondaEnJuego = info?.calendario.find((r) => r.estado === 'en_juego' && !!r.partido_id && !!r.rival_id) ?? null;
+  const [introCerrada, setIntroCerrada] = useState<string | null>(null);
+  const [introLista, setIntroLista] = useState<string | null>(null);
+  useEffect(() => {
+    const pid = rondaEnJuego?.partido_id;
+    if (pid && !yaVistaIntro(pid)) setIntroLista(pid);
+  }, [rondaEnJuego?.partido_id]);
+
   if (!info) return error ? <p style={S.errorText}>{error}</p> : <Cargando compacto />;
 
   const t = info.temporada;
@@ -160,6 +172,8 @@ export default function LigaDuelos({ deporte = 'futbol' }: { deporte?: 'futbol' 
   const faltan = Math.max(0, totalLiga - ligaTerminadas);
   const hayPendiente = (jornadas ?? []).some((j) => j.estado === 'pendiente');
   // 28/10 (Iñi): "Hacer mi equipo" arriba del todo, solo si todavía no lo has hecho.
+  // 24/11 (Iñi): tu equipo de la próxima jornada, en el campo, en cuanto lo tienes hecho.
+  const conEquipo = juego ? [...info.calendario].sort((a, b) => a.orden - b.orden).find((r) => r.estado === 'pendiente' && !!r.cierre && r.tengo_equipo && new Date(r.cierre).getTime() > Date.now()) : undefined;
   const sinEquipo = juego ? [...info.calendario].sort((a, b) => a.orden - b.orden).find((r) => r.estado === 'pendiente' && !!r.cierre && (!!r.rival_id || !!r.sin_sortear) && !r.tengo_equipo && new Date(r.cierre).getTime() > Date.now()) : undefined;
 
   return (
@@ -244,6 +258,26 @@ export default function LigaDuelos({ deporte = 'futbol' }: { deporte?: 'futbol' 
             Hacer · 1 <IconoCredito size={15} oscuro />
           </span>
         </Link>
+      )}
+
+      {/* 24/11: tu equipo de la próxima jornada, en el campo */}
+      {conEquipo && (
+        <Panel style={{ gap: 10 }}>
+          <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: VERDE }}>
+            ✓ Equipo hecho · Jornada {conEquipo.orden} · {etiquetaReal(conEquipo.competicion, deporte)}
+          </span>
+          <span style={{ fontSize: 12.5, color: S.MUTED_2 }}>
+            {conEquipo.sin_sortear ? 'Tu rival se sortea 24 h antes' : `Contra ${conEquipo.rival_nombre ?? 'tu rival'}`} · cierra el {fecha(conEquipo.cierre)}
+          </span>
+          <MiEquipoJornada ronda={conEquipo.ronda_id} privada={false} deporte={deporte} />
+          <Link href={`/v2/liga/${conEquipo.ronda_id}/equipo`} style={{ ...S.secondaryLinkButton, marginTop: 0, textAlign: 'center', textDecoration: 'none' }}>
+            Cambiar mi equipo
+          </Link>
+        </Panel>
+      )}
+
+      {introLista && introLista !== introCerrada && rondaEnJuego?.partido_id === introLista && (
+        <IntroJornadaDuelo partido={introLista} division={info.division?.id ?? null} deporte={deporte} numero={rondaEnJuego.orden} onCerrar={() => setIntroCerrada(introLista)} />
       )}
 
       {/* 28/10: elegir división (cambia la clasificación y las jornadas) */}
